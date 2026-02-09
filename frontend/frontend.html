@@ -144,6 +144,76 @@
             margin-bottom: 20px;
             text-align: center;
         }
+
+        .upload-section {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .upload-section h3 {
+            margin-bottom: 15px;
+            color: #333;
+            font-size: 1.1em;
+        }
+
+        .upload-area {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .upload-area input[type="file"] {
+            flex: 1;
+            min-width: 200px;
+            padding: 10px;
+            border: 2px dashed #667eea;
+            border-radius: 10px;
+            background: #f8f9ff;
+            cursor: pointer;
+        }
+
+        .upload-area input[type="file"]:focus {
+            outline: none;
+            border-color: #5568d3;
+        }
+
+        .upload-btn {
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .upload-btn:hover {
+            background: #5568d3;
+        }
+
+        .upload-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .upload-status {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .upload-status.success {
+            color: #2e7d32;
+        }
+
+        .upload-status.error {
+            color: #c62828;
+        }
     </style>
 </head>
 <body>
@@ -155,6 +225,15 @@
 
         <div class="stats" id="stats">
             Loading...
+        </div>
+
+        <div class="upload-section">
+            <h3>📄 Add Document (PDF)</h3>
+            <div class="upload-area">
+                <input type="file" id="pdfInput" accept=".pdf">
+                <button class="upload-btn" onclick="uploadPdf()" id="uploadBtn">Upload & Embed</button>
+            </div>
+            <div class="upload-status" id="uploadStatus"></div>
         </div>
 
         <div class="chat-container">
@@ -283,6 +362,56 @@
             input.disabled = false;
             sendBtn.disabled = false;
             input.focus();
+        }
+
+        // Upload PDF
+        async function uploadPdf() {
+            const fileInput = document.getElementById('pdfInput');
+            const uploadBtn = document.getElementById('uploadBtn');
+            const statusDiv = document.getElementById('uploadStatus');
+
+            if (!fileInput.files || fileInput.files.length === 0) {
+                statusDiv.textContent = 'Please select a PDF file first.';
+                statusDiv.className = 'upload-status error';
+                return;
+            }
+
+            const file = fileInput.files[0];
+            if (!file.name.toLowerCase().endsWith('.pdf')) {
+                statusDiv.textContent = 'Please select a PDF file (.pdf)';
+                statusDiv.className = 'upload-status error';
+                return;
+            }
+
+            uploadBtn.disabled = true;
+            statusDiv.textContent = `Uploading ${file.name}...`;
+            statusDiv.className = 'upload-status';
+
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const response = await fetch(`${API_URL}/upload/pdf`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Upload failed');
+                }
+
+                statusDiv.textContent = `✅ ${data.message}`;
+                statusDiv.className = 'upload-status success';
+                fileInput.value = '';
+                loadStats();
+            } catch (error) {
+                statusDiv.textContent = `Error: ${error.message}`;
+                statusDiv.className = 'upload-status error';
+            } finally {
+                uploadBtn.disabled = false;
+            }
         }
 
         // Load stats on page load

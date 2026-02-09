@@ -1,7 +1,9 @@
 # athena_api.py - FastAPI with RAG + Real LLM
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from pypdf import PdfReader
+import io
 from typing import List, Optional
 from sentence_transformers import SentenceTransformer
 import numpy as np
@@ -127,6 +129,50 @@ def add_document(doc: DocumentUpload):
         "total_documents": len(documents)
     }
 
+@app.post("/upload/pdf")
+async def upload_pdf(file: UploadFile = File(...)):
+    """Upload a PDF file, extract text from each page, and add to the knowledge base with embeddings"""
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+
+    try:
+        contents = await file.read()
+        reader = PdfReader(io.BytesIO(contents))
+        chunks_added = 0
+
+        for page_num, page in enumerate(reader.pages, start=1):
+            text = page.extract_text()
+            if not text or not text.strip():
+                continue
+
+            doc_id = len(documents)
+            metadata = {
+                "source": file.filename,
+                "page": page_num,
+                "total_pages": len(reader.pages)
+            }
+            documents.append({
+                "id": doc_id,
+                "text": text.strip(),
+                "metadata": metadata
+            })
+
+            embedding = embedding_model.encode([text.strip()])[0]
+            doc_embeddings.append(embedding)
+            chunks_added += 1
+
+        if chunks_added == 0:
+            raise HTTPException(status_code=400, detail="No text could be extracted from the PDF")
+
+        return {
+            "filename": file.filename,
+            "chunks_added": chunks_added,
+            "total_documents": len(documents),
+            "message": f"Successfully added {chunks_added} pages from PDF to knowledge base"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+
 @app.get("/documents")
 def list_documents():
     """List all documents"""
@@ -217,9 +263,10 @@ def load_sample_documents():
             'metadata': {'source': 'sample'}
         })
 
-    # Embed all at once
+    # Embed all at once (store as list so we can append new docs later)
     global doc_embeddings
-    doc_embeddings = embedding_model.encode([doc['text'] for doc in documents])
+    embeddings_array = embedding_model.encode([doc['text'] for doc in documents])
+    doc_embeddings = [embeddings_array[i] for i in range(len(embeddings_array))]
 
     print(f"✅ Loaded {len(documents)} sample documents\n")
 
