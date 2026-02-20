@@ -11,6 +11,8 @@ interface MessageListProps {
 
 export function MessageList({ conversationId }: MessageListProps) {
   const { messages, streamingContent, isStreaming } = useChatStore();
+  console.log('Streaming content length', streamingContent.length);
+
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const msgs: MessageType[] = conversationId

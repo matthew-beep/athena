@@ -73,7 +73,10 @@ export function useSSEChat() {
               const event = JSON.parse(raw) as StreamEvent;
 
               if (event.type === 'token') {
+
                 appendStreamToken(event.content);
+                
+
               } else if (event.type === 'done') {
                 setActiveConversation(event.conversation_id);
 
