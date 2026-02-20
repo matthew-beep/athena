@@ -1,0 +1,314 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;600;700;900&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 92%;
+  --card: 240 10% 6%;
+  --primary: 217 91% 60%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 142 71% 45%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 84% 60%;
+  --muted: 240 5% 15%;
+  --muted-foreground: 240 5% 55%;
+  --border: 240 5% 20%;
+  --glass-bg: 0 0% 100%;
+  --glass-border: 0 0% 100%;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Light mode variables */
+.light {
+  --background: 220 20% 96%;
+  --foreground: 220 15% 12%;
+  --card: 0 0% 100%;
+  --border: 220 10% 82%;
+  --muted: 220 12% 91%;
+  --muted-foreground: 220 8% 45%;
+  --glass-bg: 0 0% 0%;
+  --glass-border: 0 0% 0%;
+}
+
+.light .glass-subtle { background: rgba(255,255,255,0.65); border-color: rgba(0,0,0,0.07); }
+.light .glass        { background: rgba(255,255,255,0.80); border-color: rgba(0,0,0,0.10); }
+.light .glass-strong { background: rgba(255,255,255,0.92); border-color: rgba(0,0,0,0.14); }
+
+/* Mesh gradient backgrounds */
+
+/*
+:root {
+  --ceiling-light: linear-gradient(
+    90deg, 
+    transparent, 
+    rgba(255,255,255,0.05) 30%, 
+    rgba(255,255,255,0.10) 50%, 
+    rgba(255,255,255,0.05) 70%, 
+    transparent
+  );
+  
+
+  --mesh-gradient: none;
+}
+*/
+:root[data-bg="aurora"]  {
+  --mesh-gradient: radial-gradient(ellipse at 15% 40%, rgba(59,130,246,0.14) 0%, transparent 55%),
+                   radial-gradient(ellipse at 85% 15%, rgba(139,92,246,0.11) 0%, transparent 55%),
+                   radial-gradient(ellipse at 50% 90%, rgba(20,184,166,0.09) 0%, transparent 50%);
+}
+:root[data-bg="ember"] {
+  --mesh-gradient: radial-gradient(ellipse at 20% 30%, rgba(239,68,68,0.12) 0%, transparent 55%),
+                   radial-gradient(ellipse at 75% 70%, rgba(251,146,60,0.10) 0%, transparent 50%),
+                   radial-gradient(ellipse at 50% 5%, rgba(234,179,8,0.07) 0%, transparent 40%);
+}
+:root[data-bg="forest"] {
+  --mesh-gradient: radial-gradient(ellipse at 25% 65%, rgba(34,197,94,0.12) 0%, transparent 55%),
+                   radial-gradient(ellipse at 75% 20%, rgba(20,184,166,0.10) 0%, transparent 50%);
+}
+:root[data-bg="dusk"] {
+  --mesh-gradient: radial-gradient(ellipse at 25% 40%, rgba(168,85,247,0.13) 0%, transparent 55%),
+                   radial-gradient(ellipse at 75% 65%, rgba(236,72,153,0.11) 0%, transparent 55%);
+}
+
+body {
+  background-color: hsl(var(--background));
+  /* Force a redraw by ensuring the variable is looked up specifically */
+  background-image: var(--mesh-gradient); 
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: cover;
+  color: hsl(var(--foreground));
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+
+/* Glass utilities — v2.1 Precision Glass */
+.glass-subtle {
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  background: hsl(var(--glass-bg) / 0.05);
+  border: 1px solid hsl(var(--glass-border) / 0.10);
+}
+
+.glass {
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  background: hsl(var(--glass-bg) / 0.12);
+  border: 1px solid hsl(var(--glass-border) / 0.20);
+}
+
+.glass-strong {
+  backdrop-filter: blur(64px) saturate(180%);
+  -webkit-backdrop-filter: blur(64px) saturate(180%);
+  background: hsl(var(--glass-bg) / 0.25);
+  border: 1px solid hsl(var(--glass-border) / 0.40);
+}
+
+.glass-hover {
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.glass-hover:hover {
+  border-color: hsl(var(--border));
+  transform: scale(1.01);
+}
+
+/* Shadow utilities */
+.shadow-glass { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12); }
+.shadow-glass-lg { box-shadow: 0 8px 40px rgba(0, 0, 0, 0.20); }
+
+/* Nav items — v2.1: left-border active, no bg fill */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 2px solid transparent;
+  color: hsl(var(--muted-foreground));
+  transition: color 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+
+.nav-item:hover {
+  color: hsl(var(--foreground));
+}
+
+.nav-item.active {
+  color: hsl(var(--foreground));
+  border-left: 2px solid hsl(var(--primary));
+  padding-left: 10px;
+}
+
+/* Input field */
+.input-field {
+  width: 100%;
+  background: hsl(var(--glass-bg) / 0.05);
+  border: 1px solid hsl(var(--glass-border) / 0.15);
+  border-radius: 8px;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
+  color: hsl(var(--foreground));
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.input-field::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+
+.input-field:focus {
+  border-color: hsl(var(--primary) / 0.5);
+}
+
+/* Animations */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes bounce-dot {
+  0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+  40% { transform: scale(1.2); opacity: 1; }
+}
+
+@keyframes shutter {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.3s ease both;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.25s ease both;
+}
+
+.animate-shutter {
+  animation: shutter 0.3s ease both;
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
+/* Typing dots — v2.1: 4px, muted-foreground color */
+.typing-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: hsl(var(--muted-foreground));
+  animation: bounce-dot 1.2s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+/* Status indicator */
+.status-online {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: hsl(var(--accent));
+}
+
+/* Progress bars — v2.1: 1px precision bars */
+.progress-bar {
+  height: 1px;
+  border-radius: 0;
+  background: hsl(var(--muted));
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 0;
+  transition: width 0.5s ease;
+}
+
+/* Research card active state */
+.research-card-active {
+  background-image: radial-gradient(hsl(var(--glass-border) / 0.08) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+/* Message content styling */
+.message-content {
+  line-height: 1.65;
+}
+
+.message-content p { margin-bottom: 0.75rem; }
+.message-content p:last-child { margin-bottom: 0; }
+.message-content code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.1em 0.35em;
+  border-radius: 2px;
+  font-size: 0.875em;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+.message-content pre {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid hsl(var(--glass-border) / 0.15);
+  border-radius: 4px;
+  padding: 1rem;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+.message-content pre code {
+  background: none;
+  padding: 0;
+}
+.message-content ul,
+.message-content ol {
+  padding-left: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+.message-content li { margin-bottom: 0.25rem; }
+.message-content strong { color: hsl(var(--foreground)); }
+.message-content h1,
+.message-content h2,
+.message-content h3 {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 600;
+  margin: 1rem 0 0.5rem;
+}
