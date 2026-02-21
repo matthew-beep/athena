@@ -1,132 +1,163 @@
-# Athena Learning Platform
+# Athena
 
-An AI-powered learning assistant that uses RAG (Retrieval-Augmented Generation) to help you study smarter.
+Self-hosted personal AI infrastructure. Athena is a persistent intelligence layer that runs entirely on local hardware — it remembers conversations, ingests documents, compounds knowledge over time, and routes queries to local models via a multi-tier LLM architecture.
 
-## 🎯 What is Athena?
+**Current state:** Phase 1 partial — auth, streaming chat, conversation history, and the full UI shell are working. RAG, vector search, document ingestion, research pipeline, quizzes, and knowledge graph are not yet implemented.
 
-Athena is a learning platform that:
-- Processes your study materials (PDFs, documents)
-- Lets you chat with your materials using AI
-- Generates quizzes to test your knowledge
-- Tracks your progress and weak areas
+---
 
-## 🚀 Features
+## Stack
 
-- **RAG-Powered Chat**: Ask questions and get answers based on YOUR materials
-- **Vector Search**: Semantic search finds relevant content by meaning
-- **Real LLM Integration**: Uses Ollama for local AI responses
-- **Beautiful UI**: Clean web interface for chatting
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 15, React 18, TypeScript, Tailwind CSS, Zustand |
+| Backend | FastAPI, asyncpg, Python 3.11+ |
+| Database | PostgreSQL 16 |
+| LLM inference | Ollama (local) |
+| Vector DB | Qdrant *(planned)* |
+| Cache / jobs | Redis + Celery *(planned)* |
 
-## 🛠️ Tech Stack
+---
 
-- **Backend**: FastAPI (Python)
-- **AI/ML**:
-  - Sentence Transformers (embeddings)
-  - Ollama (LLM)
-- **Frontend**: HTML/CSS/JavaScript
-- **Future**:
-  - Qdrant (vector database)
-  - PostgreSQL (metadata storage)
-  - React (frontend framework)
+## Prerequisites
 
-## 📦 Installation
+- Docker + Docker Compose
+- Node.js 20+ and npm
+- NVIDIA GPU with `nvidia-container-toolkit` (optional — CPU fallback works)
 
-### Prerequisites
-- Python 3.11+
-- Ollama
+---
 
-### Steps
+## Setup
 
-1. **Clone the repository**
+### 1. Clone and configure
+
 ```bash
-git clone https://github.com/YOUR_USERNAME/athena-practice.git
-cd athena-practice
+git clone <repo-url>
+cd athena
+cp .env.example .env
 ```
 
-2. **Create virtual environment**
+Edit `.env` and set a real `JWT_SECRET_KEY` (any long random string). Everything else can stay as-is for local dev.
+
+### 2. Start backend services
+
 ```bash
-python -m venv venv
-# On Windows:
-venv\Scripts\activate
-# On macOS/Linux:
-source venv/bin/activate
+docker compose up -d
 ```
 
-3. **Install dependencies**
+This starts Postgres, Ollama, and the FastAPI backend. On first run, `init-ollama` pulls `llama3.2:3b` automatically — this takes a few minutes depending on connection speed. Subsequent starts skip the download.
+
+Check that everything is up:
+
 ```bash
-pip install -r requirements.txt
+docker compose ps
+curl http://localhost:8000/api/system/health
 ```
 
-4. **Install and start Ollama**
-- Download from https://ollama.com
-- Run: `ollama pull llama3.2:3b`
+### 3. Install and run the frontend
 
-5. **Start the backend**
 ```bash
-cd backend
-uvicorn athena_api:app --reload --host 0.0.0.0 --port 8000
-# or: fastapi dev athena_api.py
+cd frontend
+npm install
+npm run dev
 ```
 
-6. **Open the frontend**
-- Open `frontend/frontend.html` in your browser
-- Start chatting!
+Open [http://localhost:3000](http://localhost:3000).
 
-## 🎓 Usage
+Default credentials: `admin` / `athena` (set by `SEED_ADMIN_PASSWORD` in `.env`)
 
-### Ask Questions
+---
+
+## GPU support
+
+The Ollama service in `docker-compose.yml` has GPU passthrough commented out. To enable it, uncomment the `deploy` block:
+
+```yaml
+ollama:
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
 ```
-You: "What is backpropagation?"
-Athena: "Based on your materials, backpropagation is..."
-```
 
-### Add Documents (via API)
+Requires `nvidia-container-toolkit` installed on the host. Verify with `nvidia-smi` inside the container after enabling.
+
+---
+
+## Switching machines (dev workflow)
+
 ```bash
-curl -X POST "http://localhost:8000/documents" \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Your study material here"}'
+# Pull latest
+git pull
+
+# Rebuild backend if requirements or Dockerfile changed
+docker compose up -d --build backend
+
+# Update frontend dependencies if package.json changed
+cd frontend && npm install
+
+# Start everything
+docker compose up -d
+cd frontend && npm run dev
 ```
 
-## 📁 Project Structure
+Postgres data persists in a named Docker volume (`postgres_data`). To reset the database completely:
+
+```bash
+docker compose down -v   # destroys volumes
+docker compose up -d
+```
+
+---
+
+## Project structure
 
 ```
-athena-practice/
+athena/
 ├── backend/
-│   ├── athena_api.py      # FastAPI + RAG + LLM API
-│   ├── mini_rag.py        # Basic RAG prototype
-│   ├── mini_rag_advanced.py # Enhanced RAG with MiniRAG class
-│   └── test.py            # Simple FastAPI test
-├── frontend/
-│   └── frontend.html      # Chat UI
-├── docs/
-├── requirements.txt
-└── README.md
+│   ├── app/
+│   │   ├── main.py          # FastAPI entry point, lifespan, router includes
+│   │   ├── config.py        # Pydantic Settings (reads from .env)
+│   │   ├── api/             # Route handlers
+│   │   ├── core/            # Business logic (security; router/RAG/etc. planned)
+│   │   ├── db/              # asyncpg pool + helpers
+│   │   └── models/          # Pydantic schemas
+│   ├── sql/
+│   │   └── schema.sql       # Applied automatically on first Postgres start
+│   ├── requirements.txt
+│   └── Dockerfile
+├── frontend/                # Next.js app
+│   ├── app/                 # Next.js App Router pages
+│   ├── components/          # UI components (chat, documents, layout, etc.)
+│   ├── hooks/               # useSSEChat, useSystemStats
+│   ├── stores/              # Zustand stores (auth, chat, ui, system)
+│   ├── api/                 # API client wrapper
+│   └── types/
+├── docker-compose.yml
+├── .env.example
+├── init-ollama.sh           # Pulls LLM model on first Ollama start
+└── CLAUDE.md                # Full architecture spec and phase plan
 ```
 
-## 📚 Project Status
+---
 
-- [x] Basic RAG implementation
-- [x] FastAPI backend
-- [x] Ollama LLM integration
-- [x] Simple web UI
-- [ ] PDF upload
-- [ ] Quiz generation
-- [ ] Knowledge graph
-- [ ] User authentication
-- [ ] Vector database (Qdrant)
+## Environment variables
 
-## 🗺️ Roadmap
+See `.env.example` for all options. Key ones:
 
-**Phase 1 (Current)**: Basic RAG + Chat  
-**Phase 2**: Quiz generation  
-**Phase 3**: Knowledge graph  
-**Phase 4**: Autonomous research  
-**Phase 5**: Production deployment  
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JWT_SECRET_KEY` | (weak default) | **Change this.** Signs auth tokens. |
+| `SEED_ADMIN_PASSWORD` | `athena` | Password for the auto-created admin account |
+| `DB_PASSWORD` | `changeme` | Postgres password |
+| `LOG_LEVEL` | `INFO` | Backend log verbosity |
+| `SERP_API_KEY` | *(empty)* | SerpAPI key for web search (leave empty to disable) |
 
-## 🤝 Contributing
+---
 
-This is a personal learning project, but suggestions are welcome!
+## Architecture notes
 
-## 📝 License
-
-MIT License
+For the full design — LLM tiers, two-tier knowledge model, research pipeline, schema, and phase plan — see [`CLAUDE.md`](./CLAUDE.md).
