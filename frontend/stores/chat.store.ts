@@ -9,6 +9,11 @@ interface ChatState {
   messages: Record<string, Message[]>;
   streamingContent: string;
   isStreaming: boolean;
+  // Developer mode: context window state
+  contextTokens: Record<string, number>; // per-conversation token count (from context_debug SSE event)
+  contextBudget: number;                 // total token budget (8192) — same for all conversations
+  messageTokens: number;                 // live estimate as user types
+  statusMessage: string | null;          // e.g. "summarizing context..."
   setConversations: (convs: Conversation[]) => void;
   addConversation: (conv: Conversation) => void;
   setActiveConversation: (id: string | null) => void;
@@ -18,6 +23,9 @@ interface ChatState {
   setIsStreaming: (val: boolean) => void;
   clearStream: () => void;
   updateConversationTitle: (id: string, title: string) => void;
+  setContextTokens: (conversationId: string, tokens: number) => void;
+  setMessageTokens: (tokens: number) => void;
+  setStatusMessage: (msg: string | null) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -26,6 +34,10 @@ export const useChatStore = create<ChatState>((set) => ({
   messages: {},
   streamingContent: '',
   isStreaming: false,
+  contextTokens: {},
+  contextBudget: 4096,
+  messageTokens: 0,
+  statusMessage: null,
 
   setConversations: (convs) => set({ conversations: convs }),
 
@@ -57,7 +69,7 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setIsStreaming: (val) => set({ isStreaming: val }),
 
-  clearStream: () => set({ streamingContent: '' }),
+  clearStream: () => set({ streamingContent: '', statusMessage: null }),
 
   updateConversationTitle: (id, title) =>
     set((s) => ({
@@ -65,4 +77,11 @@ export const useChatStore = create<ChatState>((set) => ({
         c.conversation_id === id ? { ...c, title } : c
       ),
     })),
+
+  setContextTokens: (conversationId, tokens) =>
+    set((s) => ({ contextTokens: { ...s.contextTokens, [conversationId]: tokens } })),
+
+  setMessageTokens: (tokens) => set({ messageTokens: tokens }),
+
+  setStatusMessage: (msg) => set({ statusMessage: msg }),
 }));

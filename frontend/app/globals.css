@@ -6,7 +6,7 @@
 
 :root {
   --background: 240 10% 3.9%;
-  --foreground: 0 0% 92%;
+  --foreground: 0 0% 98%;
   --card: 240 10% 6%;
   --primary: 217 91% 60%;
   --primary-foreground: 0 0% 100%;
@@ -16,8 +16,8 @@
   --muted: 240 5% 15%;
   --muted-foreground: 240 5% 55%;
   --border: 240 5% 20%;
-  --glass-bg: 0 0% 100%;
-  --glass-border: 0 0% 100%;
+  --glass-bg: 240 5% 10%;
+  --glass-border: 240 5% 25%;
 }
 
 * {

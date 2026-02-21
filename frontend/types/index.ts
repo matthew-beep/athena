@@ -44,7 +44,23 @@ export interface StreamError {
   content: string;
 }
 
-export type StreamEvent = StreamToken | StreamDone | StreamError;
+export interface StreamStatus {
+  type: 'status';
+  content: string;
+}
+
+export interface StreamContextDebug {
+  type: 'context_debug';
+  tokens: number;
+  budget: number;
+}
+
+export type StreamEvent =
+  | StreamToken
+  | StreamDone
+  | StreamError
+  | StreamStatus
+  | StreamContextDebug;
 
 export interface ResourceStats {
   cpu_pct: number;

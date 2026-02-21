@@ -1,6 +1,7 @@
 'use client';
 
 import { useSystemStore } from '@/stores/system.store';
+import { useUIStore } from '@/stores/ui.store';
 import { useSystemStats } from '@/hooks/useSystemStats';
 import { cn } from '@/utils/cn';
 
@@ -19,6 +20,7 @@ function PrecisionBar({ value, color }: { value: number; color: string }) {
 export function SystemFooter({ className }: { className?: string }) {
   useSystemStats();
   const stats = useSystemStore((s) => s.stats);
+  const { devMode, toggleDevMode } = useUIStore();
 
   const fallback = {
     cpu_pct: 0,
@@ -63,9 +65,26 @@ export function SystemFooter({ className }: { className?: string }) {
           {s.gpu_used_gb.toFixed(1)}/{s.gpu_total_gb}GB
         </span>
       </div>
-      <div className="flex items-center gap-2 ml-auto">
-        <div className="status-online" />
-        <span className="font-mono text-[10px] text-muted-foreground">Athena v0.2.0</span>
+
+      <div className="flex items-center gap-3 ml-auto">
+        {/* Developer mode toggle */}
+        <button
+          onClick={toggleDevMode}
+          title={devMode ? 'Disable developer mode' : 'Enable developer mode'}
+          className={cn(
+            'font-mono text-[10px] px-2 py-0.5 rounded-sm border transition-colors',
+            devMode
+              ? 'border-primary/50 text-primary/80 bg-primary/10'
+              : 'border-border/30 text-muted-foreground/40 hover:text-muted-foreground/70 hover:border-border/50'
+          )}
+        >
+          {'</>'}
+        </button>
+
+        <div className="flex items-center gap-2">
+          <div className="status-online" />
+          <span className="font-mono text-[10px] text-muted-foreground">Athena v0.2.0</span>
+        </div>
       </div>
     </div>
   );

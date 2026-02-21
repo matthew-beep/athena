@@ -4,18 +4,29 @@ import { useState, type KeyboardEvent, useRef } from 'react';
 import { Send } from 'lucide-react';
 import { useSSEChat } from '@/hooks/useSSEChat';
 import { useChatStore } from '@/stores/chat.store';
+import { useUIStore } from '@/stores/ui.store';
 import { cn } from '@/utils/cn';
+
+// Rough approximation: ~4 chars per token (good enough for a live estimate)
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+const MAX_TOKENS = 5500;
+const WARN_TOKENS = 3000;
 
 export function MessageInput() {
   const [text, setText] = useState('');
   const { sendMessage } = useSSEChat();
-  const { isStreaming, activeConversationId } = useChatStore();
+  const { isStreaming, activeConversationId, setMessageTokens, statusMessage } = useChatStore();
+  const devMode = useUIStore((s) => s.devMode);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSend = async () => {
     const msg = text.trim();
     if (!msg || isStreaming) return;
     setText('');
+    setMessageTokens(0);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     await sendMessage(msg, activeConversationId ?? undefined);
   };
@@ -34,13 +45,35 @@ export function MessageInput() {
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   };
 
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setText(val);
+    setMessageTokens(estimateTokens(val));
+  };
+
+  const tokenEst = estimateTokens(text);
+  const isOverWarn = devMode && tokenEst > WARN_TOKENS;
+  const isOverMax = tokenEst > MAX_TOKENS;
+
   return (
     <div className="px-4 pb-4 pt-2 flex-shrink-0">
-      <div className="glass rounded-2xl border border-border/50 flex items-end gap-2 px-4 py-3 focus-within:border-border transition-colors">
+      {/* Status message (e.g. "summarizing context...") */}
+      {statusMessage && (
+        <p className="text-center text-[10px] text-muted-foreground/60 font-mono mb-1.5 animate-pulse">
+          {statusMessage}
+        </p>
+      )}
+
+      <div
+        className={cn(
+          'glass rounded-2xl border flex items-end gap-2 px-4 py-3 focus-within:border-border transition-colors',
+          isOverWarn ? 'border-yellow-500/40' : 'border-border/50'
+        )}
+      >
         <textarea
           ref={textareaRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={handleChange}
           onKeyDown={handleKeyDown}
           onInput={handleInput}
           placeholder="Message Athena… (Enter to send, Shift+Enter for new line)"
@@ -50,10 +83,10 @@ export function MessageInput() {
         />
         <button
           onClick={handleSend}
-          disabled={!text.trim() || isStreaming}
+          disabled={!text.trim() || isStreaming || isOverMax}
           className={cn(
             'px-3 py-1 rounded-lg text-xs font-semibold transition-all flex-shrink-0 flex items-center gap-1.5',
-            text.trim() && !isStreaming
+            text.trim() && !isStreaming && !isOverMax
               ? 'bg-foreground text-background hover:bg-foreground/90'
               : 'text-muted-foreground bg-muted/30 cursor-not-allowed opacity-50'
           )}
@@ -61,9 +94,30 @@ export function MessageInput() {
           <Send size={12} />
         </button>
       </div>
-      <p className="text-center text-[10px] text-muted-foreground/40 font-mono mt-2">
-        qwen2.5:7b · Tier 1
-      </p>
+
+      <div className="flex items-center justify-between mt-1.5 px-1">
+        <p className="text-[10px] text-muted-foreground/40 font-mono">
+          qwen2.5:7b · Tier 1
+        </p>
+        {devMode && text.length > 0 && (
+          <p
+            className={cn(
+              'text-[10px] font-mono tabular-nums',
+              isOverMax
+                ? 'text-red-400'
+                : isOverWarn
+                ? 'text-yellow-400'
+                : 'text-muted-foreground/40'
+            )}
+          >
+            {isOverMax
+              ? `~${tokenEst} tok — too long, split message`
+              : isOverWarn
+              ? `~${tokenEst} tok — getting long`
+              : `~${tokenEst} tok`}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

@@ -8,9 +8,11 @@ export function ChatWindow() {
   const { activeConversationId } = useChatStore();
 
   return (
-    <div className="h-full flex flex-col">
-      <MessageList conversationId={activeConversationId} />
-      <MessageInput />
+    <div className='h-full w-full flex flex-col p-10'>
+      <div className="h-full w-full border-2 flex flex-col glass shadow-glass animate-scale-in rounded-lg">
+        <MessageList conversationId={activeConversationId} />
+        <MessageInput />
+      </div>
     </div>
   );
 }

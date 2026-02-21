@@ -14,6 +14,8 @@ export function useSSEChat() {
     addConversation,
     setActiveConversation,
     activeConversationId,
+    setContextTokens,
+    setStatusMessage,
   } = useChatStore();
 
   const sendMessage = useCallback(
@@ -22,6 +24,8 @@ export function useSSEChat() {
 
       setIsStreaming(true);
       clearStream();
+      // Capture context_debug tokens here; stored under the real conversation_id on 'done'
+      let pendingContextTokens = 0;
 
       const convId = conversationId ?? activeConversationId ?? undefined;
 
@@ -73,11 +77,20 @@ export function useSSEChat() {
               const event = JSON.parse(raw) as StreamEvent;
 
               if (event.type === 'token') {
-
                 appendStreamToken(event.content);
-                
+                // Clear status message once tokens start arriving
+                setStatusMessage(null);
+
+              } else if (event.type === 'status') {
+                setStatusMessage(event.content);
+
+              } else if (event.type === 'context_debug') {
+                // Hold until 'done' so we know the real conversation_id
+                pendingContextTokens = event.tokens;
 
               } else if (event.type === 'done') {
+                // Now we have the real conversation_id — store tokens against it
+                setContextTokens(event.conversation_id, pendingContextTokens);
                 setActiveConversation(event.conversation_id);
 
                 const newConv: Conversation = {
@@ -105,8 +118,10 @@ export function useSSEChat() {
                   timestamp: new Date().toISOString(),
                 };
                 addMessage(event.conversation_id, assistantMsg);
+
               } else if (event.type === 'error') {
                 console.error('Stream error:', event.content);
+                setStatusMessage(null);
               }
             } catch {
               // skip malformed SSE lines
@@ -117,6 +132,7 @@ export function useSSEChat() {
         console.error('Chat error:', err);
       } finally {
         setIsStreaming(false);
+        setStatusMessage(null);
       }
     },
     [
@@ -127,6 +143,8 @@ export function useSSEChat() {
       addConversation,
       setActiveConversation,
       activeConversationId,
+      setContextTokens,
+      setStatusMessage,
     ]
   );
 

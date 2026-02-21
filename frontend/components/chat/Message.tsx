@@ -2,6 +2,8 @@
 
 import { TierBadge } from './TierBadge';
 import type { Message as MessageType } from '@/types';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface MessageProps {
   message: MessageType;
@@ -37,9 +39,9 @@ export function Message({ message }: MessageProps) {
           }`}
           style={isUser ? { background: 'hsl(var(--glass-bg)/0.08)' } : undefined}
         >
-          <div className="message-content whitespace-pre-wrap">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
             {message.content}
-          </div>
+          </ReactMarkdown>
         </div>
         {!isUser && message.model_used && (
           <div className="px-1">

@@ -1,4 +1,4 @@
-// File: /Users/matthewherradura/Documents/code/athena/frontend/app/(app)/research/page.tsx
+// File: C:\Users\minoo\Documents\Code\athena\frontend\app\(app)\research\page.tsx
 import * as entry from '../../../../../app/(app)/research/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

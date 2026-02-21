@@ -4,10 +4,12 @@ import { Sidebar } from './Sidebar';
 import { SystemFooter } from './SystemFooter';
 import { MobileHeader } from './MobileHeader';
 import { BottomNav } from './BottomNav';
+import { DevModeOverlay } from '@/components/chat/DevModeOverlay';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden relative">      {/* Ceiling light — ambient highlight */}
+    <div className="h-screen w-screen flex flex-col overflow-hidden relative">
+      {/* Ceiling light — ambient highlight */}
       <div
         className="pointer-events-none fixed top-0 left-1/2 -translate-x-1/2 z-0"
         style={{
@@ -30,6 +32,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <SystemFooter className="hidden md:flex" />
       <BottomNav />
+
+      {/* Developer mode overlay — fixed panel, visible on all pages */}
+      <DevModeOverlay />
     </div>
   );
 }
