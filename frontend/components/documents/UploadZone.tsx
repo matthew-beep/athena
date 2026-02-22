@@ -10,12 +10,13 @@ export function UploadZone() {
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]); // State for the "staged" files
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
+    const files = Array.from(e.dataTransfer.files);    
+    if (files.length > 0) setSelectedFiles((prev) => [...prev, ...files]);  
   };
 
   const handleFile = async (file: File) => {
@@ -66,8 +67,8 @@ export function UploadZone() {
         className="hidden"
         accept=".pdf,.txt,.md"
         onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) handleFile(f);
+          const files = Array.from(e.target.files || []);
+          setSelectedFiles((prev) => [...prev, ...files]);
         }}
       />
       <div className="flex flex-col items-center gap-3">
