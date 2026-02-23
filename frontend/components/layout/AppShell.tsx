@@ -7,6 +7,8 @@ import { BottomNav } from './BottomNav';
 import { DevModeOverlay } from '@/components/chat/DevModeOverlay';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+
+
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden relative">
       {/* Ceiling light — ambient highlight */}

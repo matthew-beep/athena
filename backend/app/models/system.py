@@ -1,9 +1,14 @@
 from pydantic import BaseModel
 
 
+class DependencyHealth(BaseModel):
+    postgres: str
+    qdrant: str
+    ollama: str
+
 class HealthResponse(BaseModel):
-    status: str
-    version: str
+    status: str  # ok / fail
+    dependencies: DependencyHealth
 
 
 class ResourceStats(BaseModel):

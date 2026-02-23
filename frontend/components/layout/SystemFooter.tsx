@@ -4,6 +4,7 @@ import { useSystemStore } from '@/stores/system.store';
 import { useUIStore } from '@/stores/ui.store';
 import { useSystemStats } from '@/hooks/useSystemStats';
 import { cn } from '@/utils/cn';
+import { useHealthCheck } from '@/hooks/useHealthCheck';
 
 function PrecisionBar({ value, color }: { value: number; color: string }) {
   const pct = Math.min(100, Math.max(0, value));
@@ -19,7 +20,9 @@ function PrecisionBar({ value, color }: { value: number; color: string }) {
 
 export function SystemFooter({ className }: { className?: string }) {
   useSystemStats();
+  useHealthCheck();
   const stats = useSystemStore((s) => s.stats);
+  const health = useSystemStore((s) => s.health);
   const { devMode, toggleDevMode } = useUIStore();
 
   const fallback = {
