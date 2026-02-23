@@ -14,6 +14,7 @@ interface ChatState {
   contextBudget: number;                 // total token budget (8192) — same for all conversations
   messageTokens: number;                 // live estimate as user types
   statusMessage: string | null;          // e.g. "summarizing context..."
+  activeModel: string | null;            // last model name returned by the backend
   setConversations: (convs: Conversation[]) => void;
   addConversation: (conv: Conversation) => void;
   setActiveConversation: (id: string | null) => void;
@@ -26,6 +27,7 @@ interface ChatState {
   setContextTokens: (conversationId: string, tokens: number) => void;
   setMessageTokens: (tokens: number) => void;
   setStatusMessage: (msg: string | null) => void;
+  setActiveModel: (model: string) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -38,6 +40,7 @@ export const useChatStore = create<ChatState>((set) => ({
   contextBudget: 4096,
   messageTokens: 0,
   statusMessage: null,
+  activeModel: process.env.NEXT_PUBLIC_OLLAMA_MODEL ?? null,
 
   setConversations: (convs) => set({ conversations: convs }),
 
@@ -84,4 +87,5 @@ export const useChatStore = create<ChatState>((set) => ({
   setMessageTokens: (tokens) => set({ messageTokens: tokens }),
 
   setStatusMessage: (msg) => set({ statusMessage: msg }),
+  setActiveModel: (model) => set({ activeModel: model }),
 }));

@@ -7,6 +7,7 @@ from loguru import logger
 
 from app.config import get_settings
 from app.db import postgres
+from app.db import qdrant
 from app.core.security import hash_password
 from app.api import auth, chat, documents, research, quizzes, graph, system
 
@@ -51,6 +52,12 @@ async def lifespan(app: FastAPI):
                 raise
 
     await seed_admin_user()
+
+    try:
+        await qdrant.ensure_collection()
+    except Exception as e:
+        logger.warning("Qdrant not available at startup (will retry on first use): {}", e)
+
     logger.info("Athena backend ready")
     yield
 

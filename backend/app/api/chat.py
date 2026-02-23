@@ -9,14 +9,12 @@ from loguru import logger
 
 from app.models.chat import ChatRequest, ConversationOut, MessageOut
 from app.core.security import get_current_user
+from app.core.context import build_messages, count_tokens_text, MAX_MESSAGE_TOKENS, save_message
+from app.core import rag as rag_module
 from app.config import get_settings
 from app.db import postgres
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
-
-SYSTEM_PROMPT = """You are Athena, a personal AI assistant. You are helpful, concise, and thoughtful.
-You remember the context of this conversation and build on it naturally.
-Keep responses clear and well-structured."""
 
 
 async def _get_or_create_conversation(
@@ -43,37 +41,6 @@ async def _get_or_create_conversation(
     return new_id
 
 
-async def _load_history(conversation_id: str) -> list[dict]:
-    rows = await postgres.fetch_all(
-        """SELECT role, content FROM messages
-           WHERE conversation_id = $1
-           ORDER BY timestamp ASC
-           LIMIT 40""",
-        conversation_id,
-    )
-    return [{"role": r["role"], "content": r["content"]} for r in rows]
-
-
-async def _save_message(
-    conversation_id: str, role: str, content: str, model: str | None = None
-) -> str:
-    msg_id = f"msg_{uuid.uuid4().hex[:16]}"
-    await postgres.execute(
-        """INSERT INTO messages (message_id, conversation_id, role, content, model_used)
-           VALUES ($1, $2, $3, $4, $5)""",
-        msg_id,
-        conversation_id,
-        role,
-        content,
-        model,
-    )
-    await postgres.execute(
-        "UPDATE conversations SET last_active = NOW() WHERE conversation_id = $1",
-        conversation_id,
-    )
-    return msg_id
-
-
 async def _update_title(conversation_id: str, first_message: str) -> None:
     title = first_message[:50].strip()
     if len(first_message) > 50:
@@ -91,28 +58,59 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
     settings = get_settings()
     start_time = time.monotonic()
 
+    # Pre-flight token check — must happen before streaming starts so we can
+    # return a proper 400 response (streaming responses can't change status code mid-stream)
+    current_tokens = count_tokens_text(body.message)
+    if current_tokens > MAX_MESSAGE_TOKENS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "message_too_long",
+                "tokens": current_tokens,
+                "max": MAX_MESSAGE_TOKENS,
+                "message": "Message too long — try splitting code and question into separate messages",
+            },
+        )
+
     conversation_id = await _get_or_create_conversation(
         body.conversation_id, current_user["id"], body.knowledge_tier
     )
-
-    history = await _load_history(conversation_id)
-    await _save_message(conversation_id, "user", body.message)
     await _update_title(conversation_id, body.message)
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.extend(history)
-    messages.append({"role": "user", "content": body.message})
-
     async def stream_response():
-        full_response: list[str] = []
         model = settings.ollama_model
+
+        # RAG: embed query → retrieve relevant chunks → format context string.
+        # Falls back to [] gracefully if Qdrant is unavailable or collection is empty.
+        rag_sources = await rag_module.retrieve(body.message)
+        rag_context = rag_module.format_rag_context(rag_sources) if rag_sources else None
+
+        # Build token-managed message array.
+        # will_summarize=True means a summarization LLM call was made — tell frontend.
+        try:
+            chat_messages, will_summarize, total_tokens = await build_messages(
+                conversation_id=conversation_id,
+                current_message=body.message,
+                rag_context=rag_context,
+            )
+        except HTTPException as exc:
+            yield f"data: {json.dumps({'type': 'error', 'content': exc.detail.get('message', 'Request error')})}\n\n"
+            return
+
+        if will_summarize:
+            yield f"data: {json.dumps({'type': 'status', 'content': 'summarizing context...'})}\n\n"
+
+        # Emit total context token count for the developer mode overlay
+        yield f"data: {json.dumps({'type': 'context_debug', 'tokens': total_tokens, 'budget': 8192})}\n\n"
+
+        full_response: list[str] = []
 
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 async with client.stream(
                     "POST",
                     f"{settings.ollama_base_url}/api/chat",
-                    json={"model": model, "messages": messages, "stream": True},
+                    json={"model": model, "messages": chat_messages, "stream": True},
                 ) as resp:
                     if resp.status_code != 200:
                         error_body = await resp.aread()
@@ -147,7 +145,9 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
 
         complete_response = "".join(full_response)
         if complete_response:
-            await _save_message(conversation_id, "assistant", complete_response, model)
+            # Save both messages after streaming — keeps token_count accurate on conversation
+            await save_message(conversation_id, "user", body.message)
+            await save_message(conversation_id, "assistant", complete_response, model)
 
         latency_ms = int((time.monotonic() - start_time) * 1000)
         done_event = {
@@ -156,6 +156,16 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
             "model_tier": 1,
             "model": model,
             "latency_ms": latency_ms,
+            "rag_sources": [
+                {
+                    "filename": s["filename"],
+                    "score": s["score"],
+                    "chunk_index": s["chunk_index"],
+                    "document_id": s["document_id"],
+                    "text": s["text"],
+                }
+                for s in rag_sources
+            ],
         }
         yield f"data: {json.dumps(done_event)}\n\n"
 

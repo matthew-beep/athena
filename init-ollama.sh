@@ -23,4 +23,14 @@ else
   echo "[init-ollama] Model pull complete."
 fi
 
+EMBED_MODEL="nomic-embed-text"
+echo "[init-ollama] Checking for embedding model: ${EMBED_MODEL}"
+if ollama list | grep -q "^${EMBED_MODEL}"; then
+  echo "[init-ollama] Model ${EMBED_MODEL} already present. Skipping pull."
+else
+  echo "[init-ollama] Pulling embedding model ${EMBED_MODEL}..."
+  ollama pull "${EMBED_MODEL}"
+  echo "[init-ollama] Embedding model pull complete."
+fi
+
 echo "[init-ollama] Done."

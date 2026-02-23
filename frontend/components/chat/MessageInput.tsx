@@ -18,7 +18,7 @@ const WARN_TOKENS = 3000;
 export function MessageInput() {
   const [text, setText] = useState('');
   const { sendMessage } = useSSEChat();
-  const { isStreaming, activeConversationId, setMessageTokens, statusMessage } = useChatStore();
+  const { isStreaming, activeConversationId, setMessageTokens, statusMessage, activeModel } = useChatStore();
   const devMode = useUIStore((s) => s.devMode);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -97,7 +97,7 @@ export function MessageInput() {
 
       <div className="flex items-center justify-between mt-1.5 px-1">
         <p className="text-[10px] text-muted-foreground/40 font-mono">
-          qwen2.5:7b · Tier 1
+          {activeModel ?? '—'} · Tier 1
         </p>
         {devMode && text.length > 0 && (
           <p

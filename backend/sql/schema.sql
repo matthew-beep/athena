@@ -1,4 +1,7 @@
--- Athena Phase 1 Prototype Schema
+-- Athena Phase 1 Schema
+-- Note: conversations.summarized_up_to_id intentionally has no FK constraint
+-- to avoid a circular dependency (messages → conversations → messages).
+-- Context management in app/core/context.py guarantees referential integrity.
 
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
@@ -14,8 +17,50 @@ CREATE TABLE IF NOT EXISTS conversations (
     title VARCHAR(255),
     knowledge_tier VARCHAR(20) DEFAULT 'ephemeral',
     started_at TIMESTAMP DEFAULT NOW(),
-    last_active TIMESTAMP DEFAULT NOW()
+    last_active TIMESTAMP DEFAULT NOW(),
+    -- Token tracking — incremented by save_message() on every write
+    token_count INTEGER DEFAULT 0,
+    message_count INTEGER DEFAULT 0,
+    -- Cached summary generated when history first exceeds token budget.
+    -- Reused on every subsequent request without regenerating.
+    -- summarized_up_to_id references messages.id (no FK — see note above)
+    summary TEXT,
+    summarized_up_to_id INTEGER,
+    last_summarized_at TIMESTAMP,
+    -- Phase 4: Celery sweeps this flag to know which summaries need Qdrant embedding
+    summary_embedded BOOLEAN DEFAULT false,
+    last_embedded_at TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS documents (
+    id SERIAL PRIMARY KEY,
+    document_id VARCHAR(255) UNIQUE NOT NULL,
+    filename VARCHAR(255),
+    file_type VARCHAR(50),
+    source_url TEXT,
+    upload_date TIMESTAMP DEFAULT NOW(),
+    content_hash VARCHAR(64),
+    chunk_count INTEGER DEFAULT 0,
+    word_count INTEGER,
+    processing_status VARCHAR(50) DEFAULT 'pending',
+    knowledge_tier VARCHAR(20) DEFAULT 'persistent',
+    error_message TEXT,
+    metadata JSONB
+);
+
+CREATE TABLE IF NOT EXISTS document_chunks (
+    id SERIAL PRIMARY KEY,
+    chunk_id VARCHAR(255) UNIQUE NOT NULL,
+    document_id VARCHAR(255) REFERENCES documents(document_id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    token_count INTEGER,
+    qdrant_point_id VARCHAR(255),
+    metadata JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(processing_status);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id);
 
 CREATE TABLE IF NOT EXISTS messages (
     id SERIAL PRIMARY KEY,

@@ -12,10 +12,13 @@ export function useSSEChat() {
     clearStream,
     addMessage,
     addConversation,
+    setConversations,
     setActiveConversation,
+    setMessages,
     activeConversationId,
     setContextTokens,
     setStatusMessage,
+    setActiveModel,
   } = useChatStore();
 
   const sendMessage = useCallback(
@@ -28,20 +31,30 @@ export function useSSEChat() {
       let pendingContextTokens = 0;
 
       const convId = conversationId ?? activeConversationId ?? undefined;
+      const isNewConversation = !convId;
+      const tempConvId = isNewConversation ? `temp_conv_${Date.now()}` : convId;
 
-      // Optimistic user message
+      // Optimistic user message — show immediately (use temp conversation id for new convos)
       const tempUserMsg: Message = {
         message_id: `temp_${Date.now()}`,
-        conversation_id: convId ?? '',
+        conversation_id: tempConvId,
         role: 'user',
         content,
         model_used: null,
         timestamp: new Date().toISOString(),
       };
 
-      if (convId) {
-        addMessage(convId, tempUserMsg);
+      if (isNewConversation) {
+        addConversation({
+          conversation_id: tempConvId,
+          title: content.slice(0, 50),
+          knowledge_tier: 'ephemeral',
+          started_at: new Date().toISOString(),
+          last_active: new Date().toISOString(),
+        });
+        setActiveConversation(tempConvId);
       }
+      addMessage(tempConvId, tempUserMsg);
 
       try {
         const response = await apiClient.postStream('/chat', {
@@ -89,35 +102,44 @@ export function useSSEChat() {
                 pendingContextTokens = event.tokens;
 
               } else if (event.type === 'done') {
-                // Now we have the real conversation_id — store tokens against it
-                setContextTokens(event.conversation_id, pendingContextTokens);
-                setActiveConversation(event.conversation_id);
+                const realId = event.conversation_id;
+                setContextTokens(realId, pendingContextTokens);
+                setActiveModel(event.model);
 
                 const newConv: Conversation = {
-                  conversation_id: event.conversation_id,
+                  conversation_id: realId,
                   title: content.slice(0, 50),
                   knowledge_tier: 'ephemeral',
                   started_at: new Date().toISOString(),
                   last_active: new Date().toISOString(),
                 };
-                addConversation(newConv);
-
-                if (!convId) {
-                  addMessage(event.conversation_id, {
-                    ...tempUserMsg,
-                    conversation_id: event.conversation_id,
-                  });
-                }
 
                 const assistantMsg: Message = {
                   message_id: `msg_${Date.now()}`,
-                  conversation_id: event.conversation_id,
+                  conversation_id: realId,
                   role: 'assistant',
                   content: useChatStore.getState().streamingContent,
                   model_used: event.model,
                   timestamp: new Date().toISOString(),
+                  rag_sources: event.rag_sources,
                 };
-                addMessage(event.conversation_id, assistantMsg);
+
+                if (isNewConversation) {
+                  // Replace temp conversation with real one; set messages for real id
+                  const state = useChatStore.getState();
+                  const conversationsWithoutTemp = state.conversations.filter(
+                    (c) => c.conversation_id !== tempConvId
+                  );
+                  setConversations([newConv, ...conversationsWithoutTemp]);
+                  setMessages(realId, [
+                    { ...tempUserMsg, conversation_id: realId },
+                    assistantMsg,
+                  ]);
+                  setActiveConversation(realId);
+                } else {
+                  setActiveConversation(realId);
+                  addMessage(realId, assistantMsg);
+                }
 
               } else if (event.type === 'error') {
                 console.error('Stream error:', event.content);
@@ -141,10 +163,13 @@ export function useSSEChat() {
       clearStream,
       addMessage,
       addConversation,
+      setConversations,
       setActiveConversation,
+      setMessages,
       activeConversationId,
       setContextTokens,
       setStatusMessage,
+      setActiveModel,
     ]
   );
 

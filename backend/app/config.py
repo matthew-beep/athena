@@ -13,7 +13,12 @@ class Settings(BaseSettings):
     # Ollama
     ollama_host: str = "localhost"
     ollama_port: int = 11434
-    ollama_model: str = "llama3.2:3b"
+    ollama_model: str = "qwen2.5:7b"
+    ollama_embed_model: str = "nomic-embed-text"
+
+    # Qdrant
+    qdrant_host: str = "localhost"
+    qdrant_port: int = 6333
 
     # Auth
     jwt_secret_key: str = "supersecretkey-change-in-production"
@@ -34,6 +39,10 @@ class Settings(BaseSettings):
     @property
     def ollama_base_url(self) -> str:
         return f"http://{self.ollama_host}:{self.ollama_port}"
+
+    @property
+    def qdrant_base_url(self) -> str:
+        return f"http://{self.qdrant_host}:{self.qdrant_port}"
 
     class Config:
         env_file = ".env"

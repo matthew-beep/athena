@@ -17,6 +17,14 @@ export interface Conversation {
   last_active: string;
 }
 
+export interface RagSource {
+  filename: string;
+  score: number;
+  chunk_index: number;
+  document_id: string;
+  text: string;
+}
+
 export interface Message {
   message_id: string;
   conversation_id: string;
@@ -24,6 +32,7 @@ export interface Message {
   content: string;
   model_used: string | null;
   timestamp: string;
+  rag_sources?: RagSource[];
 }
 
 export interface StreamToken {
@@ -37,6 +46,7 @@ export interface StreamDone {
   model_tier: number;
   model: string;
   latency_ms: number;
+  rag_sources?: RagSource[];
 }
 
 export interface StreamError {
