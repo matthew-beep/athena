@@ -144,7 +144,6 @@ body {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  border-left: 2px solid transparent;
   color: hsl(var(--muted-foreground));
   transition: color 0.15s ease, border-color 0.15s ease;
   cursor: pointer;
@@ -157,9 +156,9 @@ body {
 }
 
 .nav-item.active {
-  color: hsl(var(--foreground));
-  border-left: 2px solid hsl(var(--primary));
-  padding-left: 10px;
+  color: hsl(var(--background));
+  background-color: hsl(var(--foreground));
+  border-radius: 8px;
 }
 
 /* Input field */

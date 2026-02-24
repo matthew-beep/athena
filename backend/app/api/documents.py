@@ -10,9 +10,10 @@ from loguru import logger
 
 from app.config import get_settings
 from app.core.security import get_current_user
-from app.core.ingestion import extract_text, chunk_text, VIDEO_MIME_TYPES, _resolve_mime
+from app.core.ingestion import extract_text, chunk_text, VIDEO_MIME_TYPES, _resolve_mime, normalize_filename
 from app.db import postgres
 from app.db import qdrant
+from app.core.rag import get_or_build_bm25
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -74,6 +75,7 @@ async def _process_document(
         # ── 1. Extract ─────────────────────────────────────────────────────
         _progress[document_id] = {"stage": "extracting", "done": 0, "total": 0}
         text, error = await asyncio.to_thread(extract_text, BytesIO(body), mime, filename)
+        normalized_filename = normalize_filename(filename)
         if error:
             _progress.pop(document_id, None)
             await postgres.execute(
@@ -130,6 +132,8 @@ async def _process_document(
                     "payload": {
                         "document_id": document_id,
                         "chunk_id": chunk_id,
+                        "filename": filename,
+                        "normalized_filename": normalized_filename,
                         "chunk_index": i,
                         "text": chunk["text"],
                         "source_type": file_type,

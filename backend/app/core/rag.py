@@ -9,11 +9,42 @@ import httpx
 from loguru import logger
 
 from app.config import get_settings
-from app.db import qdrant
+from app.db import qdrant, postgres
+from app.core.ingestion import normalize_filename
 
 RAG_BUDGET_TOKENS = 2000
-RAG_TOP_K = 6
 
+# Module-level cache — lives for the lifetime of the FastAPI process
+_bm25_cache: dict[str, dict] = {}
+
+
+async def get_or_build_bm25(project_id: str = "default") -> dict:
+    """
+    Load BM25 index data for a project from Postgres (bm25_indexes table).
+    Caches in memory per project_id. Returns {"chunk_ids": list[str], "corpus": list[list[str]]}
+    where corpus is tokenized documents for BM25Okapi.
+    """
+    if project_id not in _bm25_cache:
+        row = await postgres.fetch_one(
+            "SELECT chunk_ids, corpus FROM bm25_indexes WHERE project_id = $1",
+            project_id,
+        )
+        if row:
+            # asyncpg returns JSONB as Python list; fallback to [] if null
+            chunk_ids = row["chunk_ids"] if row["chunk_ids"] is not None else []
+            corpus = row["corpus"] if row["corpus"] is not None else []
+            _bm25_cache[project_id] = {"chunk_ids": chunk_ids, "corpus": corpus}
+        else:
+            _bm25_cache[project_id] = {"chunk_ids": [], "corpus": []}
+    return _bm25_cache[project_id]
+
+
+def invalidate_bm25_cache(project_id: str | None = None) -> None:
+    """Clear BM25 cache for one project or all. Call after updating bm25_indexes."""
+    if project_id is None:
+        _bm25_cache.clear()
+    else:
+        _bm25_cache.pop(project_id, None)
 
 async def embed_text(text: str) -> list[float]:
     """Embed text using the Ollama embedding model."""
@@ -27,13 +58,35 @@ async def embed_text(text: str) -> list[float]:
         return resp.json()["embedding"]
 
 
-async def retrieve(query: str, top_k: int = RAG_TOP_K) -> list[dict]:
+
+# future function to find referenced documents in projects
+async def find_referenced_documents(query: str, project_id: str) -> str | None:
+    """
+    Check if the user's query references a specific document by name.
+    Returns document_id if found, None otherwise.
+    """
+    docs = await postgres.fetch(
+        "SELECT id, filename FROM documents WHERE project_id = $1 AND processing_status = 'complete'",
+        project_id
+    )
+
+    query_lower = query.lower()
+    for doc in docs:
+        normalized = normalize_filename(doc["filename"])
+        if normalized in query_lower:
+            return doc["id"]
+
+    return None
+
+async def retrieve(query: str, top_k: int | None = None) -> list[dict]:
     """
     Embed the query, search Qdrant, return structured results.
 
     Each result: { text, filename, score, chunk_index, document_id }
     Returns [] gracefully if Qdrant is unavailable or the collection is empty.
     """
+    if top_k is None:
+        top_k = get_settings().rag_top_k
     try:
         vector = await embed_text(query)
         results = await qdrant.search(vector, top_k=top_k)
@@ -48,6 +101,10 @@ async def retrieve(query: str, top_k: int = RAG_TOP_K) -> list[dict]:
                 "document_id": payload.get("document_id", ""),
             })
         logger.debug("[rag] retrieved {} chunks for query: {!r}", len(sources), query[:60])
+
+        if all(source["score"] < get_settings().rag_threshold for source in sources):
+            return []
+
         return sources
     except Exception as e:
         logger.warning("[rag] retrieval failed — falling back to no context: {}", e)

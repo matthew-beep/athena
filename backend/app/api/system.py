@@ -40,7 +40,6 @@ async def check_ollama(settings) -> bool:
         print(f"Ollama check failed: {e}")
         return False
 
-
 @router.get("/health", response_model=HealthResponse)
 async def health():
     settings = get_settings()
@@ -78,8 +77,9 @@ async def resources(current_user: dict = Depends(get_current_user)):
 
 @router.get("/models")
 async def list_models(current_user: dict = Depends(get_current_user)):
+    settings = get_settings()
     return {
         "models": [
-            {"name": "llama3.2:3b", "tier": 1, "status": "loaded"},
+            {"name": settings.ollama_model, "tier": 1, "status": "loaded"},
         ]
     }

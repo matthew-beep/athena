@@ -3,6 +3,7 @@
 import { useUIStore } from '@/stores/ui.store';
 import { useChatStore } from '@/stores/chat.store';
 import { useSystemStore } from '@/stores/system.store';
+import { useShallow } from 'zustand/react/shallow';
 
 function MiniBar({ value, max, color }: { value: number; max: number; color: string }) {
   const pct = Math.min(100, Math.max(0, (value / max) * 100));
@@ -24,7 +25,14 @@ function Row({ label, value }: { label: string; value: string }) {
 
 export function DevModeOverlay() {
   const devMode = useUIStore((s) => s.devMode);
-  const { contextTokens, contextBudget, messageTokens, activeConversationId } = useChatStore();
+  const { contextTokens, contextBudget, messageTokens, activeConversationId } = useChatStore(
+    useShallow((s) => ({
+      contextTokens: s.contextTokens,
+      contextBudget: s.contextBudget,
+      messageTokens: s.messageTokens,
+      activeConversationId: s.activeConversationId,
+    }))
+  );
   const stats = useSystemStore((s) => s.stats);
 
   if (!devMode) return null;

@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     seed_admin_password: str = "athena"
 
+    # RAG
+    rag_top_k: int = 6
+    rag_threshold: float = 0.35
+
     @property
     def database_url(self) -> str:
         return (

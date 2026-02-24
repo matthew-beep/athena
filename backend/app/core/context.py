@@ -227,6 +227,7 @@ def build_system_prompt(rag_context: str | None = None) -> str:
         "You are Athena, a personal AI assistant. "
         "You help the user learn, research, and build. "
         "Be concise, precise, and adapt your explanation depth to the conversation."
+        "If all scores are less than 60%, say you don't have enough information to answer the question."
     )
     if rag_context:
         return f"{base}\n\n{rag_context}"

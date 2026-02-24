@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { Message } from './Message';
 import { useChatStore } from '@/stores/chat.store';
+import { useShallow } from 'zustand/react/shallow';
 import type { Message as MessageType } from '@/types';
 
 interface MessageListProps {
@@ -10,7 +11,13 @@ interface MessageListProps {
 }
 
 export function MessageList({ conversationId }: MessageListProps) {
-  const { messages, streamingContent, isStreaming } = useChatStore();
+  const { messages, streamingContent, isStreaming } = useChatStore(
+    useShallow((s) => ({
+      messages: s.messages,
+      streamingContent: s.streamingContent,
+      isStreaming: s.isStreaming,
+    }))
+  );
 
   const bottomRef = useRef<HTMLDivElement>(null);
 

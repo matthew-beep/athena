@@ -125,7 +125,7 @@ export function UploadZone({ onUploadStart, onUploadComplete, onUploadFailed }: 
           ref={inputRef}
           type="file"
           className="hidden"
-          accept=".pdf,.txt,.md"
+          accept=".pdf,.txt,.md,.docx"
           multiple
           onChange={(e) => {
             stageFiles(Array.from(e.target.files || []));

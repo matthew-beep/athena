@@ -6,6 +6,7 @@ import { useSSEChat } from '@/hooks/useSSEChat';
 import { useChatStore } from '@/stores/chat.store';
 import { useUIStore } from '@/stores/ui.store';
 import { cn } from '@/utils/cn';
+import { useShallow } from 'zustand/react/shallow';
 
 // Rough approximation: ~4 chars per token (good enough for a live estimate)
 function estimateTokens(text: string): number {
@@ -18,9 +19,18 @@ const WARN_TOKENS = 3000;
 export function MessageInput() {
   const [text, setText] = useState('');
   const { sendMessage } = useSSEChat();
-  const { isStreaming, activeConversationId, setMessageTokens, statusMessage, activeModel } = useChatStore();
+  const { isStreaming, activeConversationId, setMessageTokens, statusMessage, activeModel } = useChatStore(
+    useShallow((s) => ({
+      isStreaming: s.isStreaming,
+      activeConversationId: s.activeConversationId,
+      setMessageTokens: s.setMessageTokens,
+      statusMessage: s.statusMessage,
+      activeModel: s.activeModel,
+    }))
+  );
   const devMode = useUIStore((s) => s.devMode);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const tokenDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSend = async () => {
     const msg = text.trim();
@@ -48,7 +58,9 @@ export function MessageInput() {
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setText(val);
-    setMessageTokens(estimateTokens(val));
+    // Debounce store write — only DevModeOverlay reads messageTokens, no need to update every keystroke
+    if (tokenDebounceRef.current) clearTimeout(tokenDebounceRef.current);
+    tokenDebounceRef.current = setTimeout(() => setMessageTokens(estimateTokens(val)), 150);
   };
 
   const tokenEst = estimateTokens(text);

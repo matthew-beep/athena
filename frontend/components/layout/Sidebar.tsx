@@ -15,6 +15,7 @@ import {
   LogOut,
   ChevronLeft,
   X,
+  PanelLeft
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chat.store';
 import { useAuthStore } from '@/stores/auth.store';
@@ -81,12 +82,15 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className={cn('border-b border-border/30', collapsed ? 'px-2 py-4' : 'px-4 py-4')}>
-        <div className={cn('flex items-center mb-4', collapsed ? 'justify-center' : 'gap-2.5')}>
-          <div className="w-6 h-6 rounded-lg bg-foreground/10 border border-foreground/20 flex items-center justify-center flex-shrink-0">
-            <span className="text-foreground text-xs font-bold font-display">A</span>
-          </div>
-          {!collapsed && (
+        <div className={cn('flex items-center mb-4 justify-between', collapsed ? 'justify-center' : 'gap-2.5')}>
+        {!collapsed && (
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-foreground/10 border border-foreground/20 flex items-center justify-center flex-shrink-0">
+              <span className="text-foreground text-xs font-bold font-display">A</span>
+            </div>
             <span className="font-display font-semibold text-sm tracking-tight">Athena</span>
+          </div>
+
           )}
           {isMobileDrawer && (
             <button
@@ -96,6 +100,15 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
               <X size={16} />
             </button>
           )}
+          <button
+            onClick={toggleSidebarCollapsed}
+            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/5 transition-all"
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <PanelLeft
+              size={15}
+            />
+          </button>
         </div>
 
         {/* Main navigation */}
@@ -109,9 +122,9 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
                   href={href}
                   title={label}
                   className={cn(
-                    'flex items-center justify-center p-2 border-l-2 transition-colors',
+                    'flex items-center justify-center p-2 transition-colors rounded-lg',
                     active
-                      ? 'border-primary text-foreground'
+                      ? 'border-primary text-background bg-foreground'
                       : 'border-transparent text-muted-foreground hover:text-foreground'
                   )}
                 >
@@ -140,7 +153,7 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
           <div className="px-3 pt-3 pb-2">
             <button
               onClick={handleNewChat}
-              className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg bg-foreground text-background text-xs font-semibold hover:bg-foreground/90 transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg hover:text-foreground text-muted-foreground text-xs font-semibold transition-colors"
             >
               <PlusCircle size={12} />
               New conversation
@@ -191,21 +204,6 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
       {!isOnChat && <div className="flex-1" />}
       {isOnChat && collapsed && <div className="flex-1" />}
 
-      {/* Collapse toggle — desktop only */}
-      {!isMobileDrawer && (
-        <div className={cn('border-t border-border/20', collapsed ? 'flex justify-center px-2 py-2' : 'px-3 py-2')}>
-          <button
-            onClick={toggleSidebarCollapsed}
-            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/5 transition-all"
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            <ChevronLeft
-              size={14}
-              className={cn('transition-transform duration-200', collapsed && 'rotate-180')}
-            />
-          </button>
-        </div>
-      )}
 
       {/* Footer */}
       <div className={cn('py-3', collapsed ? 'px-2' : 'px-3')}>

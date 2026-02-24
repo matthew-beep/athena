@@ -6,11 +6,14 @@ from pypdf.errors import PdfReadError
 import docx
 from loguru import logger
 from typing import IO
+import json
+from rank_bm25 import BM25Okapi
 
 enc = tiktoken.get_encoding("cl100k_base")
 
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 64
+DEFAULT_PROJECT_ID = "default"
 
 VIDEO_MIME_TYPES = {
     "video/mp4",
@@ -122,6 +125,21 @@ def _transcribe_audio_or_video(file_obj: IO[bytes]) -> str:
         return "\n".join(seg.text for seg in segments if seg.text).strip()
     finally:
         os.unlink(tmp_path)
+
+
+def normalize_filename(filename: str) -> str:
+    """
+    Normalize a filename to a consistent display-friendly format.
+    Strips extension (using the last dot only), lowercases, replaces _/- with space,
+    collapses repeated spaces, and strips leading/trailing dots and spaces.
+    """
+    if not filename or not filename.strip():
+        return ""
+    base, _ = os.path.splitext(filename)
+    name = base.lower().strip(".").strip()
+    name = name.replace("_", " ").replace("-", " ")
+    name = " ".join(name.split())
+    return name
 
 
 def extract_text(file_obj: IO[bytes], mime_type: str, filename: str = "") -> tuple[str, None] | tuple[None, str]:
