@@ -9,7 +9,7 @@ export function ChatWindow() {
 
   return (
     <div className='h-full w-full flex flex-col p-10'>
-      <div className="h-full w-full border-2 flex flex-col glass shadow-glass animate-scale-in rounded-lg">
+      <div className="h-full w-full border-2 flex flex-col glass-strong shadow-glass animate-scale-in rounded-lg">
         <MessageList conversationId={activeConversationId} />
         <MessageInput />
       </div>

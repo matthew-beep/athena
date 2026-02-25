@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type KeyboardEvent, useRef } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Square } from 'lucide-react';
 import { useSSEChat } from '@/hooks/useSSEChat';
 import { useChatStore } from '@/stores/chat.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -78,7 +78,7 @@ export function MessageInput() {
 
       <div
         className={cn(
-          'glass rounded-2xl border flex items-end gap-2 px-4 py-3 focus-within:border-border transition-colors',
+          'glass rounded-2xl border flex items-center justify-between gap-2 px-4 py-2 focus-within:border-border transition-colors',
           isOverWarn ? 'border-yellow-500/40' : 'border-border/50'
         )}
       >
@@ -97,13 +97,13 @@ export function MessageInput() {
           onClick={handleSend}
           disabled={!text.trim() || isStreaming || isOverMax}
           className={cn(
-            'px-3 py-1 rounded-lg text-xs font-semibold transition-all flex-shrink-0 flex items-center gap-1.5',
+            'px-3 py-3 rounded-lg text-xs font-semibold transition-all flex-grow-0 flex items-center gap-1.5',
             text.trim() && !isStreaming && !isOverMax
               ? 'bg-foreground text-background hover:bg-foreground/90'
-              : 'text-muted-foreground bg-muted/30 cursor-not-allowed opacity-50'
+              : 'text-muted-foreground cursor-not-allowed bg-foreground'
           )}
         >
-          <Send size={12} />
+          {isStreaming ? <Square size={12} /> : <Send size={12} />}
         </button>
       </div>
 

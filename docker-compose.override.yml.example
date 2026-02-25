@@ -1,0 +1,18 @@
+# GPU override for machines with an NVIDIA GPU.
+#
+# Usage:
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#
+# Docker Compose automatically merges docker-compose.override.yml on top of
+# docker-compose.yml when both files are present. The override file is
+# git-ignored — only this example is committed.
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

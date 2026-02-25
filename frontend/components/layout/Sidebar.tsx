@@ -81,8 +81,8 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className={cn('border-b border-border/30', collapsed ? 'px-2 py-4' : 'px-4 py-4')}>
-        <div className={cn('flex items-center mb-4 justify-between', collapsed ? 'justify-center' : 'gap-2.5')}>
+      <div className={cn('border-b border-border/30 flex items-center flex-col', collapsed ? 'px-2 py-4' : 'px-4 py-4')}>
+        <div className={cn('flex items-center mb-4 w-full', collapsed ? 'justify-center' : 'gap-2.5 justify-between')}>
         {!collapsed && (
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-lg bg-foreground/10 border border-foreground/20 flex items-center justify-center flex-shrink-0">
@@ -112,7 +112,7 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
         </div>
 
         {/* Main navigation */}
-        <nav className="space-y-0.5">
+        <nav className="space-y-0.5 w-full">
           {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
             const active = pathname.startsWith(href);
             if (collapsed) {
@@ -173,8 +173,8 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
                 className={cn(
                   'w-full text-left px-3 py-2 rounded-lg text-xs transition-all flex items-start gap-2',
                   activeConversationId === conv.conversation_id
-                    ? 'text-foreground border-l-2 border-primary pl-[10px]'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+                    ? 'text-foreground bg-white/5'
+                    : 'text-muted-foreground hover:text-foreground'
                 )}
               >
                 <MessageSquare size={11} className="mt-0.5 shrink-0 opacity-50" />
@@ -232,7 +232,7 @@ export function Sidebar() {
       {/* Desktop / Tablet sidebar */}
       <div
         className={cn(
-          'hidden md:flex h-full flex-col glass-subtle border-r border-border/50 flex-shrink-0 transition-all duration-200',
+          'hidden md:flex h-full flex-col glass-strong border-r border-border/50 flex-shrink-0 transition-all duration-200',
           sidebarCollapsed ? 'w-14' : 'w-60'
         )}
       >

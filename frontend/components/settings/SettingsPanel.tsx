@@ -134,6 +134,73 @@ export function SettingsPanel() {
                 >
                   {/* Swatch preview */}
                   <div
+                    className="h-16 rounded-lg overflow-hidden border border-border/20 w-full"
+                    style={{
+                      background: `hsl(var(--background))`,
+                      backgroundImage: BG_GRADIENTS[id] || undefined,
+                    }}
+                  />
+                  <span className="text-[10px] font-mono text-muted-foreground text-center w-full block">
+                    {label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </GlassCard>
+
+        {/* Appearance */}
+        <GlassCard className="p-5">
+          <h3 className="text-sm font-display font-semibold mb-4 tracking-tight">System</h3>
+
+          {/* Color mode */}
+          <div className="mb-5">
+            <p className="text-xs text-muted-foreground font-mono mb-2">Color mode</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setColorMode('dark')}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border',
+                  colorMode === 'dark'
+                    ? 'bg-foreground text-background border-foreground'
+                    : 'glass-subtle border-border/40 text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <Moon size={14} />
+                Dark
+              </button>
+              <button
+                onClick={() => setColorMode('light')}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border',
+                  colorMode === 'light'
+                    ? 'bg-foreground text-background border-foreground'
+                    : 'glass-subtle border-border/40 text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <Sun size={14} />
+                Light
+              </button>
+            </div>
+          </div>
+
+          {/* Background theme */}
+          <div>
+            <p className="text-xs text-muted-foreground font-mono mb-2">Ambient background</p>
+            <div className="grid grid-cols-5 gap-2">
+              {BG_THEMES.map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => setBgTheme(id)}
+                  className={cn(
+                    'flex flex-col gap-1.5 p-1 rounded-xl transition-all',
+                    bgTheme === id
+                      ? 'ring-1 ring-primary'
+                      : 'ring-1 ring-transparent hover:ring-border/50'
+                  )}
+                >
+                  {/* Swatch preview */}
+                  <div
                     className="h-16 rounded-lg overflow-hidden border border-border/20"
                     style={{
                       background: `hsl(var(--background))`,

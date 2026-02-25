@@ -2,7 +2,7 @@
 # Wait for ollama service to be ready then pull the model
 
 OLLAMA_HOST_ADDR=${OLLAMA_HOST:-ollama:11434}
-MODEL=${OLLAMA_MODEL:-llama3.2:3b}
+MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
 
 export OLLAMA_HOST="http://${OLLAMA_HOST_ADDR}"
 

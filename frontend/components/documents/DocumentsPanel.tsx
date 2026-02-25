@@ -27,6 +27,7 @@ export function DocumentsPanel() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [processingDocs, setProcessingDocs] = useState<ProcessingDoc[]>([]);
   const startedAt = useRef<Map<string, number>>(new Map());
+  const [search, setSearch] = useState('');
 
   const onUploadStart = useCallback((payload: { file: File; tempId: string }) => {
     setProcessingDocs((prev) => [
@@ -129,13 +130,13 @@ export function DocumentsPanel() {
         </div>
         <UploadZone onUploadStart={onUploadStart} onUploadComplete={onUploadComplete} onUploadFailed={onUploadFailed} />
         <GlassCard>
-         <input type="text" placeholder="Search documents" className="font-mono w-full bg-transparent outline-none p-2" />
+         <input type="text" placeholder="Search documents" className="w-full bg-transparent outline-none p-2" value={search} onChange={(e) => setSearch(e.target.value)} />
         </GlassCard>
         <GlassCard className="p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Knowledge Base</h3>
           </div>
-          <DocumentList refreshKey={refreshKey} processingDocs={processingDocs} />
+          <DocumentList refreshKey={refreshKey} processingDocs={processingDocs} search={search}/>
         </GlassCard>
       </div>
     </div>

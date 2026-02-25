@@ -42,3 +42,6 @@ logs/
 venv/
 .venv/
 env/
+
+# Local Docker Compose overrides (e.g. GPU config)
+docker-compose.override.yml
