@@ -66,6 +66,15 @@ async def _embed(client: httpx.AsyncClient, text: str) -> list[float]:
     resp.raise_for_status()
     return resp.json()["embedding"]
 
+async def tag_document(document_id: str, tag:str) -> None:
+    await postgres.execute(
+        """INSERT INTO document_tags (document_id, tag)
+           VALUES ($1, $2) ON CONFLICT DO NOTHING""",
+        document_id, tag
+    )
+
+    # await rebuild_bm25_for_tag(tag)
+
 
 async def _process_document(
     document_id: str, body: bytes, mime: str, filename: str, file_type: str

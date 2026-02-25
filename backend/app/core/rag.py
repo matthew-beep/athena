@@ -11,6 +11,8 @@ from loguru import logger
 from app.config import get_settings
 from app.db import qdrant, postgres
 from app.core.ingestion import normalize_filename
+from rapidfuzz import fuzz
+
 
 RAG_BUDGET_TOKENS = 2000
 
@@ -38,6 +40,33 @@ async def get_or_build_bm25(project_id: str = "default") -> dict:
             _bm25_cache[project_id] = {"chunk_ids": [], "corpus": []}
     return _bm25_cache[project_id]
 
+    
+
+async def update_bm25_index(chunk_ids: list[str], texts: list[str], project_id: str = "default") -> None:
+    """Append new chunks to the project's BM25 index in Postgres and invalidate cache."""
+    existing = await postgres.fetch_one(
+        "SELECT chunk_ids, corpus FROM bm25_indexes WHERE project_id = $1",
+        project_id,
+    )
+    
+    if existing:
+        all_chunk_ids = (existing["chunk_ids"] or []) + chunk_ids
+        all_corpus = (existing["corpus"] or []) + [t.lower().split() for t in texts]
+    else:
+        all_chunk_ids = chunk_ids
+        all_corpus = [t.lower().split() for t in texts]
+    
+    await postgres.execute(
+        """INSERT INTO bm25_indexes (project_id, chunk_ids, corpus)
+           VALUES ($1, $2::jsonb, $3::jsonb)
+           ON CONFLICT (project_id) DO UPDATE
+           SET chunk_ids = $2::jsonb, corpus = $3::jsonb, updated_at = NOW()""",
+        project_id,
+        json.dumps(all_chunk_ids),
+        json.dumps(all_corpus),
+    )
+    invalidate_bm25_cache(project_id)
+
 
 def invalidate_bm25_cache(project_id: str | None = None) -> None:
     """Clear BM25 cache for one project or all. Call after updating bm25_indexes."""
@@ -45,6 +74,8 @@ def invalidate_bm25_cache(project_id: str | None = None) -> None:
         _bm25_cache.clear()
     else:
         _bm25_cache.pop(project_id, None)
+
+        
 
 async def embed_text(text: str) -> list[float]:
     """Embed text using the Ollama embedding model."""
@@ -60,25 +91,36 @@ async def embed_text(text: str) -> list[float]:
 
 
 # future function to find referenced documents in projects
-async def find_referenced_documents(query: str, project_id: str) -> str | None:
+async def find_referenced_documents(query: str, project_id: str = "") -> str | None:
     """
     Check if the user's query references a specific document by name.
     Returns document_id if found, None otherwise.
     """
-    docs = await postgres.fetch(
-        "SELECT id, filename FROM documents WHERE project_id = $1 AND processing_status = 'complete'",
-        project_id
-    )
+
+    if project_id:
+        docs = await postgres.fetch(
+            "SELECT id, filename FROM documents WHERE project_id = $1 AND processing_status = 'complete'",
+            project_id
+        )
+    else:
+        docs = await postgres.fetch(
+            "SELECT id, filename FROM documents WHERE processing_status = 'complete'",
+        )
+    
+    best_match = None
+    best_score = 0
 
     query_lower = query.lower()
     for doc in docs:
         normalized = normalize_filename(doc["filename"])
-        if normalized in query_lower:
-            return doc["id"]
+        score = fuzz.partial_ratio(normalized, query_lower)
+        if score > 80 and score > best_score:
+            best_match = doc["id"]
+            best_score = score
 
-    return None
+    return best_match
 
-async def retrieve(query: str, top_k: int | None = None) -> list[dict]:
+async def retrieve(query: str, top_k: int | None = None, scope: str = "global") -> list[dict]:
     """
     Embed the query, search Qdrant, return structured results.
 
@@ -89,7 +131,17 @@ async def retrieve(query: str, top_k: int | None = None) -> list[dict]:
         top_k = get_settings().rag_top_k
     try:
         vector = await embed_text(query)
-        results = await qdrant.search(vector, top_k=top_k)
+
+        document_id = await find_referenced_documents(query)
+        if doc_id:
+            search_filter = Filter(
+                must=[FieldCondition(key="document_id", match=MatchValue(value=doc_id))]
+            )
+        else:
+            search_filter = None
+
+
+        results = await qdrant.search(vector, top_k=top_k, filter=search_filter)
         sources = []
         for r in results:
             payload = r.get("payload", {})

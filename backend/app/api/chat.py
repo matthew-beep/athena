@@ -17,9 +17,21 @@ from app.db import postgres
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
+def resolve_mode(document_ids: list[str]) -> str:
+    if len(document_ids) == 0:
+        return "general"
+    else:
+        return "documents"
+
+
 async def _get_or_create_conversation(
-    conversation_id: str | None, user_id: int, knowledge_tier: str
+    conversation_id: str | None, 
+    user_id: int, 
+    knowledge_tier: str,
+    document_ids: list[str] = []
 ) -> str:
+
+    # if conversation exists, return it
     if conversation_id:
         row = await postgres.fetch_one(
             "SELECT conversation_id FROM conversations WHERE conversation_id = $1 AND user_id = $2",
@@ -29,14 +41,18 @@ async def _get_or_create_conversation(
         if row:
             return conversation_id
 
+    # if conversation does not exist, create it
+    # add mode to the conversation
     new_id = f"conv_{uuid.uuid4().hex[:16]}"
+    mode = resolve_mode(document_ids)
     await postgres.execute(
-        """INSERT INTO conversations (conversation_id, user_id, title, knowledge_tier)
+        """INSERT INTO conversations (conversation_id, user_id, title, knowledge_tier, mode)
            VALUES ($1, $2, $3, $4)""",
         new_id,
         user_id,
         "New Conversation",
         knowledge_tier,
+        mode
     )
     return new_id
 
@@ -51,6 +67,56 @@ async def _update_title(conversation_id: str, first_message: str) -> None:
         title,
         conversation_id,
     )
+
+async def attach_doc_to_conversation(conversation_id: str, document_id: str) -> None:
+    """Attach a document to a conversation and update mode."""
+    await postgres.execute(
+        """INSERT INTO conversation_documents (conversation_id, document_id)
+           VALUES ($1, $2) ON CONFLICT DO NOTHING""",
+        conversation_id, document_id
+    )
+
+        # Recalculate mode based on current document count
+    doc_ids = await get_conversation_document_ids(conversation_id)
+    new_mode = resolve_mode(doc_ids)
+
+    await postgres.execute(
+        """UPDATE conversations SET mode = $1, updated_at = NOW()
+           WHERE conversation_id = $2""",
+        new_mode, conversation_id
+    )
+
+async def get_conversation_document_ids(conversation_id: str) -> list[str]:
+    """Fetch all document IDs attached to a conversation."""
+    rows = await postgres.fetch_all(
+        """SELECT document_id FROM conversation_documents
+           WHERE conversation_id = $1
+           ORDER BY added_at ASC""",
+        conversation_id
+    )
+    return [r["document_id"] for r in rows]
+
+
+async def detach_document_from_conversation(
+    conversation_id: str,
+    document_id: str,
+) -> None:
+    """Remove a document from a conversation and update mode."""
+    await postgres.execute(
+        """DELETE FROM conversation_documents
+           WHERE conversation_id = $1 AND document_id = $2""",
+        conversation_id, document_id
+    )
+
+    doc_ids = await get_conversation_document_ids(conversation_id)
+    new_mode = resolve_mode(doc_ids)
+
+    await postgres.execute(
+        """UPDATE conversations SET mode = $1, updated_at = NOW()
+           WHERE conversation_id = $2""",
+        new_mode, conversation_id
+    )
+
 
 
 @router.post("")
@@ -73,8 +139,11 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
         )
 
     conversation_id = await _get_or_create_conversation(
-        body.conversation_id, current_user["id"], body.knowledge_tier
+        body.conversation_id, current_user["id"], body.knowledge_tier, document_ids
     )
+
+    
+    # we should update this to only change once
     await _update_title(conversation_id, body.message)
 
     async def stream_response():
@@ -214,3 +283,50 @@ async def get_messages(
         conversation_id,
     )
     return [MessageOut(**dict(r)) for r in rows]
+
+
+@router.get("/{conversation_id}/documents")
+async def get_conversation_documents(
+    conversation_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """List documents attached to a conversation."""
+    rows = await postgres.fetch_all(
+        """SELECT d.document_id, d.filename, d.file_type, d.word_count, cd.added_at
+           FROM conversation_documents cd
+           JOIN documents d ON cd.document_id = d.document_id
+           WHERE cd.conversation_id = $1
+           ORDER BY cd.added_at ASC""",
+        conversation_id
+    )
+    return {"documents": [dict(r) for r in rows]}
+
+@router.delete("/{conversation_id}/documents/{document_id}")
+async def detach_document(
+    conversation_id: str,
+    document_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Remove a document from a conversation."""
+    await detach_document_from_conversation(conversation_id, document_id)
+    doc_ids = await get_conversation_document_ids(conversation_id)
+    return {
+        "conversation_id": conversation_id,
+        "mode": resolve_mode(doc_ids),
+        "document_ids": doc_ids
+    }
+
+@router.post("/{conversation_id}/documents/{document_id}")
+async def attach_document(
+    conversation_id: str,
+    document_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Attach a document to an existing conversation."""
+    await attach_document_to_conversation(conversation_id, document_id)
+    doc_ids = await get_conversation_document_ids(conversation_id)
+    return {
+        "conversation_id": conversation_id,
+        "mode": resolve_mode(doc_ids),
+        "document_ids": doc_ids
+    }

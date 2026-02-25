@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     knowledge_tier VARCHAR(20) DEFAULT 'ephemeral',
     started_at TIMESTAMP DEFAULT NOW(),
     last_active TIMESTAMP DEFAULT NOW(),
+    mode TEXT NOT NULL DEFAULT 'general',  -- 'general' | 'documents' | 'project' | 'research
     -- Token tracking — incremented by save_message() on every write
     token_count INTEGER DEFAULT 0,
     message_count INTEGER DEFAULT 0,
@@ -27,10 +28,22 @@ CREATE TABLE IF NOT EXISTS conversations (
     summary TEXT,
     summarized_up_to_id INTEGER,
     last_summarized_at TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT NOW(),
     -- Phase 4: Celery sweeps this flag to know which summaries need Qdrant embedding
     summary_embedded BOOLEAN DEFAULT false,
     last_embedded_at TIMESTAMP
 );
+
+-- 2. Documents attached to a conversation (drives RAG scope)
+CREATE TABLE conversation_documents (
+    conversation_id  TEXT REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+    document_id      TEXT REFERENCES documents(document_id) ON DELETE CASCADE,
+    added_at         TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY      (conversation_id, document_id)
+);
+
+CREATE INDEX idx_conv_docs_conversation ON conversation_documents(conversation_id);
+CREATE INDEX idx_conv_docs_document ON conversation_documents(document_id);
 
 CREATE TABLE IF NOT EXISTS documents (
     id SERIAL PRIMARY KEY,
@@ -62,6 +75,17 @@ CREATE TABLE IF NOT EXISTS document_chunks (
 CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(processing_status);
 CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id);
 
+CREATE TABLE IF NOT EXISTS document_tags (
+    document_id  TEXT REFERENCES documents(document_id) ON DELETE CASCADE,
+    tag          TEXT NOT NULL,
+    added_at     TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY  (document_id, tag)
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_tags_tag ON document_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_document_tags_document ON document_tags(document_id);
+
+
 CREATE TABLE IF NOT EXISTS messages (
     id SERIAL PRIMARY KEY,
     message_id VARCHAR(255) UNIQUE NOT NULL,
@@ -70,4 +94,12 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT NOT NULL,
     model_used VARCHAR(100),
     timestamp TIMESTAMP DEFAULT NOW()
+);
+
+
+CREATE TABLE IF NOT EXISTS bm25_indexes (
+    project_id TEXT PRIMARY KEY,
+    chunk_ids   JSONB NOT NULL DEFAULT '[]',
+    corpus      JSONB NOT NULL DEFAULT '[]',
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
