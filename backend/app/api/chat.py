@@ -33,7 +33,7 @@ async def create_conversation(
 ) -> str:
     """Create a new conversation and attach any initial documents."""
     new_id = f"conv_{uuid.uuid4().hex[:16]}"
-    mode = "general" if not document_ids else "document"
+    mode = "general" if not document_ids else "documents"
 
     await postgres.execute(
         """INSERT INTO conversations (conversation_id, user_id, title, knowledge_tier, mode)
@@ -45,11 +45,8 @@ async def create_conversation(
         mode,
     )
 
-    for doc_id in document_ids:
-        await attach_document(new_id, doc_id)
-
+    await attach_documents(new_id, document_ids)
     return new_id
-
 
 
 async def get_conversation(conversation_id: str, user_id: int) -> dict | None:
@@ -61,26 +58,38 @@ async def get_conversation(conversation_id: str, user_id: int) -> dict | None:
     )
 
 
-
 async def _get_or_create_conversation(
-    conversation_id: str | None, 
-    user_id: int, 
+    conversation_id: str | None,
+    user_id: int,
     knowledge_tier: str,
-    document_ids: list[str] = []
-) -> str:
-
+    document_ids: list[str] = [],
+) -> dict:
     """
-    Used at the chat endpoint — if a conversation_id is provided, verify it exists.
-    If not provided, create a fresh one.
+    Used at the chat endpoint — if a conversation_id is provided, verify it exists
+    and return its row + resolved document_ids. If not provided, create a fresh
+    one (optionally with initial document_ids) and return the new row + document_ids.
     Raises if conversation_id is provided but not found.
+    Returns: {"conversation_id": str, "document_ids": list[str], "conversation": dict}
     """
     if conversation_id:
         row = await get_conversation(conversation_id, user_id)
         if not row:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        return conversation_id
+        doc_ids = await get_conversation_document_ids(conversation_id)
+        return {
+            "conversation_id": conversation_id,
+            "document_ids": doc_ids,
+            "conversation": dict(row),
+        }
 
-    return await create_conversation(user_id, knowledge_tier)
+    new_id = await create_conversation(user_id, knowledge_tier, document_ids=document_ids)
+    row = await get_conversation(new_id, user_id)
+    doc_ids = await get_conversation_document_ids(new_id)
+    return {
+        "conversation_id": new_id,
+        "document_ids": doc_ids,
+        "conversation": dict(row) if row else {},
+    }
 
 
 async def _update_title(conversation_id: str, first_message: str) -> None:
@@ -94,26 +103,35 @@ async def _update_title(conversation_id: str, first_message: str) -> None:
         conversation_id,
     )
 
-async def attach_document(conversation_id: str, document_id: str) -> None:
-    """Attach a document to a conversation and update mode."""
-    await postgres.execute(
-        """INSERT INTO conversation_documents (conversation_id, document_id)
-           VALUES ($1, $2) ON CONFLICT DO NOTHING""",
-        conversation_id, document_id
-    )
-
+async def attach_documents(conversation_id: str, document_ids: list[str]) -> None:
+    """Attach documents to a conversation and sync mode. Pass one or more document_ids."""
+    if not document_ids:
+        return
+    insert_sql = """INSERT INTO conversation_documents (conversation_id, document_id)
+                   VALUES ($1, $2) ON CONFLICT DO NOTHING"""
+    if len(document_ids) == 1:
+        await postgres.execute(insert_sql, conversation_id, document_ids[0])
+    else:
+        await postgres.execute_many(
+            insert_sql,
+            [(conversation_id, doc_id) for doc_id in document_ids],
+        )
     await _sync_conversation_mode(conversation_id)
 
 
-async def detach_document(conversation_id: str, document_id: str) -> None:
-    """Remove a document from a conversation. Updates mode automatically."""
-    await postgres.execute(
-        """
-        DELETE FROM conversation_documents
-        WHERE conversation_id = $1 AND document_id = $2
-        """",
-        conversation_id, document_id
-    )
+async def detach_documents(conversation_id: str, document_ids: list[str]) -> None:
+    """Remove documents from a conversation and sync mode. Pass one or more document_ids."""
+    if not document_ids:
+        return
+    delete_sql = """DELETE FROM conversation_documents
+                   WHERE conversation_id = $1 AND document_id = $2"""
+    if len(document_ids) == 1:
+        await postgres.execute(delete_sql, conversation_id, document_ids[0])
+    else:
+        await postgres.execute_many(
+            delete_sql,
+            [(conversation_id, doc_id) for doc_id in document_ids],
+        )
     await _sync_conversation_mode(conversation_id)
 
 
@@ -137,28 +155,6 @@ async def _sync_conversation_mode(conversation_id: str) -> None:
     )
 
 
-async def detach_document_from_conversation(
-    conversation_id: str,
-    document_id: str,
-) -> None:
-    """Remove a document from a conversation and update mode."""
-    await postgres.execute(
-        """DELETE FROM conversation_documents
-           WHERE conversation_id = $1 AND document_id = $2""",
-        conversation_id, document_id
-    )
-
-    doc_ids = await get_conversation_document_ids(conversation_id)
-    new_mode = resolve_mode(doc_ids)
-
-    await postgres.execute(
-        """UPDATE conversations SET mode = $1, updated_at = NOW()
-           WHERE conversation_id = $2""",
-        new_mode, conversation_id
-    )
-
-
-
 @router.post("")
 async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)):
     settings = get_settings()
@@ -178,20 +174,26 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
             },
         )
 
-    conversation_id = await _get_or_create_conversation(
-        body.conversation_id, current_user["id"], body.knowledge_tier, document_ids
+    conv_result = await _get_or_create_conversation(
+        body.conversation_id,
+        current_user["id"],
+        body.knowledge_tier,
+        document_ids=body.document_ids if not body.conversation_id else [],
     )
+    conversation_id = conv_result["conversation_id"]
 
-    
-    # we should update this to only change once
-    await _update_title(conversation_id, body.message)
+    if conv_result["conversation"].get("title") == "New Conversation":
+        await _update_title(conversation_id, body.message)
 
     async def stream_response():
         model = settings.ollama_model
 
-        # RAG: embed query → retrieve relevant chunks → format context string.
-        # Falls back to [] gracefully if Qdrant is unavailable or collection is empty.
-        rag_sources = await rag_module.retrieve(body.message)
+        # RAG: scoped to this conversation's attached docs (conv_result["document_ids"])
+        rag_sources = await rag_module.retrieve(
+            body.message,
+            current_user["id"],
+            document_ids=conv_result["document_ids"],
+        )
         rag_context = rag_module.format_rag_context(rag_sources) if rag_sources else None
 
         # Build token-managed message array.
@@ -331,6 +333,9 @@ async def get_conversation_documents(
     current_user: dict = Depends(get_current_user)
 ):
     """List documents attached to a conversation."""
+    conv = await get_conversation(conversation_id, current_user["id"])
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     rows = await postgres.fetch_all(
         """SELECT d.document_id, d.filename, d.file_type, d.word_count, cd.added_at
            FROM conversation_documents cd
@@ -348,7 +353,10 @@ async def detach_document(
     current_user: dict = Depends(get_current_user)
 ):
     """Remove a document from a conversation."""
-    await detach_document_from_conversation(conversation_id, document_id)
+    conv = await get_conversation(conversation_id, current_user["id"])
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    await detach_documents(conversation_id, [document_id])
     doc_ids = await get_conversation_document_ids(conversation_id)
     return {
         "conversation_id": conversation_id,
@@ -363,7 +371,10 @@ async def attach_document(
     current_user: dict = Depends(get_current_user)
 ):
     """Attach a document to an existing conversation."""
-    await attach_document_to_conversation(conversation_id, document_id)
+    conv = await get_conversation(conversation_id, current_user["id"])
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    await attach_documents(conversation_id, [document_id])
     doc_ids = await get_conversation_document_ids(conversation_id)
     return {
         "conversation_id": conversation_id,

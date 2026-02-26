@@ -105,5 +105,4 @@ CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(do
 -- For scoping queries by user
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
 CREATE INDEX IF NOT EXISTS idx_document_chunks_user ON document_chunks(user_id);
-CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id);
 

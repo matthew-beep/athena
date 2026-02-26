@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import uuid
+from datetime import datetime, timezone
 from io import BytesIO
 
 import httpx
@@ -13,7 +14,6 @@ from app.core.security import get_current_user
 from app.core.ingestion import extract_text, chunk_text, VIDEO_MIME_TYPES, _resolve_mime, normalize_filename
 from app.db import postgres
 from app.db import qdrant
-from app.core.rag import get_or_build_bm25
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -66,18 +66,9 @@ async def _embed(client: httpx.AsyncClient, text: str) -> list[float]:
     resp.raise_for_status()
     return resp.json()["embedding"]
 
-async def tag_document(document_id: str, tag:str) -> None:
-    await postgres.execute(
-        """INSERT INTO document_tags (document_id, tag)
-           VALUES ($1, $2) ON CONFLICT DO NOTHING""",
-        document_id, tag
-    )
-
-    # await rebuild_bm25_for_tag(tag)
-
 
 async def _process_document(
-    document_id: str, body: bytes, mime: str, filename: str, file_type: str
+    document_id: str, body: bytes, mime: str, filename: str, file_type: str, user_id: int
 ) -> None:
     """Full ingestion pipeline: extract → chunk → embed → store."""
     try:
@@ -127,12 +118,13 @@ async def _process_document(
 
                 await postgres.execute(
                     """INSERT INTO document_chunks
-                           (chunk_id, document_id, chunk_index, text, token_count, qdrant_point_id)
-                       VALUES ($1, $2, $3, $4, $5, $6)
+                           (chunk_id, document_id, chunk_index, text, token_count, qdrant_point_id, user_id)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7)
                        ON CONFLICT (chunk_id) DO NOTHING""",
                     chunk_id, document_id, i,
                     chunk["text"], chunk["token_count"],
                     str(_chunk_id_to_qdrant_id(chunk_id)),
+                    user_id,
                 )
 
                 qdrant_points.append({
@@ -140,14 +132,14 @@ async def _process_document(
                     "vector": embedding,
                     "payload": {
                         "document_id": document_id,
+                        "user_id": user_id,
                         "chunk_id": chunk_id,
                         "filename": filename,
                         "normalized_filename": normalized_filename,
                         "chunk_index": i,
-                        "text": chunk["text"],
                         "source_type": file_type,
                         "knowledge_tier": "persistent",
-                        "metadata": {"filename": filename},
+                        "created_at": datetime.now(timezone.utc).isoformat(),
                     },
                 })
 
@@ -184,8 +176,10 @@ async def list_documents(current_user: dict = Depends(get_current_user)):
         """SELECT document_id, filename, file_type, processing_status,
                   upload_date, word_count, chunk_count, error_message
            FROM documents
+           WHERE user_id = $1
            ORDER BY upload_date DESC
-           LIMIT 50"""
+           LIMIT 50""",
+        current_user["id"],
     )
     return {"documents": [dict(r) for r in rows], "total": len(rows)}
 
@@ -218,12 +212,12 @@ async def upload_document(
     file_type = _MIME_TO_TYPE.get(mime, "unknown")
 
     await postgres.execute(
-        """INSERT INTO documents (document_id, filename, file_type, processing_status, word_count)
-           VALUES ($1, $2, $3, 'processing', 0)""",
-        document_id, filename, file_type,
+        """INSERT INTO documents (document_id, filename, file_type, processing_status, word_count, user_id)
+           VALUES ($1, $2, $3, 'processing', 0, $4)""",
+        document_id, filename, file_type, current_user["id"],
     )
 
-    background_tasks.add_task(_process_document, document_id, body, mime, filename, file_type)
+    background_tasks.add_task(_process_document, document_id, body, mime, filename, file_type, current_user["id"])
     logger.info("Upload accepted: {} → {}", filename, document_id)
 
     return JSONResponse(
@@ -249,7 +243,7 @@ async def get_document_progress(document_id: str, current_user: dict = Depends(g
         return {**prog, "active": True}
     # Not actively processing — return DB status as fallback
     row = await postgres.fetch_one(
-        "SELECT processing_status FROM documents WHERE document_id = $1", document_id
+        "SELECT processing_status FROM documents WHERE document_id = $1 AND user_id = $2", document_id, current_user["id"],
     )
     if not row:
         return JSONResponse(status_code=404, content={"detail": "Document not found."})
@@ -261,8 +255,9 @@ async def get_document(document_id: str, current_user: dict = Depends(get_curren
     row = await postgres.fetch_one(
         """SELECT document_id, filename, file_type, processing_status,
                   upload_date, word_count, chunk_count, error_message
-           FROM documents WHERE document_id = $1""",
+           FROM documents WHERE document_id = $1 AND user_id = $2""",
         document_id,
+        current_user["id"],
     )
     if not row:
         return JSONResponse(status_code=404, content={"detail": "Document not found."})
@@ -272,13 +267,13 @@ async def get_document(document_id: str, current_user: dict = Depends(get_curren
 @router.delete("/{document_id}")
 async def delete_document(document_id: str, current_user: dict = Depends(get_current_user)):
     row = await postgres.fetch_one(
-        "SELECT document_id FROM documents WHERE document_id = $1", document_id
+        "SELECT document_id FROM documents WHERE document_id = $1 AND user_id = $2", document_id, current_user["id"],
     )
     if not row:
         return JSONResponse(status_code=404, content={"detail": "Document not found."})
 
     # Remove from postgres (cascades to document_chunks)
-    await postgres.execute("DELETE FROM documents WHERE document_id = $1", document_id)
+    await postgres.execute("DELETE FROM documents WHERE document_id = $1 AND user_id = $2", document_id, current_user["id"])
 
     # Remove vectors from Qdrant
     try:

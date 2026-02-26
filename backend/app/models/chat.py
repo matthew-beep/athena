@@ -6,6 +6,7 @@ from datetime import datetime
 class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None
+    document_ids: list[str] = []
     knowledge_tier: Literal["ephemeral", "persistent"] = "ephemeral"
 
 

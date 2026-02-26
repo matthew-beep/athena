@@ -52,3 +52,9 @@ async def execute(query: str, *args) -> str:
     pool = await get_pool()
     async with pool.acquire() as conn:
         return await conn.execute(query, *args)
+
+
+async def execute_many(query: str, args: list[tuple]) -> None:                                         
+    pool = await get_pool()
+    async with pool.acquire() as conn:                                                                 
+        await conn.executemany(query, args)

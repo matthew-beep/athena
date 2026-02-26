@@ -1,386 +1,238 @@
-# Athena — Current Codebase Status
-
-This document describes what is **actually implemented** in the Athena monorepo as of the current state. It is intended to complement `CLAUDE.md` (which defines the target architecture and phases). Use this for onboarding, planning, or gap analysis.
-
----
-
-## 1. Overview
-
-| Area | Status | Notes |
-|------|--------|--------|
-| **Backend** | Phase 1 partial | Auth + chat (Ollama streaming) + Postgres; documents/research/quizzes/graph are API shells only |
-| **Frontend** | Phase 1 partial | Login, chat (SSE), sidebar/conversations, documents upload UI, system stats; Research/Graph/Quizzes are placeholders |
-| **Database** | Minimal schema | `users`, `conversations`, `messages` only — no documents, graph, research, quizzes, or learning tables |
-| **Infrastructure** | Not in code | No Redis, Qdrant, Celery, or MCP in backend; Docker Compose present at repo root |
-
-**Reference:** Full target design and phase order are in `CLAUDE.md`.
+# Athena — Codebase Status
+## 2026-02-25
 
 ---
 
-## 2. Backend
+## What Was Worked On This Session
 
-### 2.1 Directory layout
+Focus: **General Chat + Document-Scoped Chat** — the retrieval pipeline, conversation scoping, and backend correctness.
+
+---
+
+## Backend Changes
+
+### `app/core/rag.py` — Full Rewrite
+
+The file had a critical syntax error: the old `retrieve()` function body was left dangling after the new one was pasted in, making the entire backend fail to import. The file was rewritten cleanly.
+
+**Changes:**
+- Removed the old `retrieve()` body (lines 166–207) that caused a `SyntaxError` on startup
+- Replaced SDK-style `Filter`, `FieldCondition`, `MatchValue`, `MatchAny` objects with plain REST API dicts — the Qdrant client is httpx-based, not the Python SDK, so SDK classes don't exist
+- Fixed `within_ids=doc_ids` kwarg mismatch → `document_ids=doc_ids` on `find_referenced_document` call
+- Fixed `filter=search_filter` → `filters=search_filter` to match the actual `qdrant.search()` signature
+- Changed `user_id: str` → `user_id: int` to match `find_referenced_document` and Postgres queries
+- Cleaned up indentation (original had 6-space body indent with trailing whitespace on signature lines)
+
+**Retrieval logic as-built:**
+- `document_ids` empty + `search_all=False` → return `[]` immediately, no Qdrant call
+- `document_ids` populated → check fuzzy filename match within scope, filter to matched doc or all scope docs
+- `search_all=True` + no docs → filter to user only, search everything
+- After Qdrant returns hits: batch fetch chunk text from `document_chunks` Postgres table in one query, preserving rank order via `array_position`
+- Per-chunk score threshold filtering (drops weak hits, keeps strong ones)
+
+### `app/api/documents.py` — Ingestion Fixes
+
+- Added `datetime, timezone` import
+- Added `"created_at": datetime.now(timezone.utc).isoformat()` to Qdrant payload — required for future recency scoring
+- Removed redundant nested `"metadata": {"filename": filename}` from Qdrant payload (filename already exists at top level)
+- Fixed `background_tasks.add_task(_process_document, ...)` — `user_id` was missing from the call, causing every background ingestion task to fail with a `TypeError`
+
+### `app/api/chat.py` — Minor Fixes
+
+- Changed `str(current_user["id"])` → `current_user["id"]` in `retrieve()` call — `user_id` is an `int` throughout, casting to string caused type mismatch with Postgres queries in `find_referenced_document`
+- `_update_title` now guarded: only fires a DB write if the conversation title is still `"New Conversation"`. Previously it executed a DB round trip on every single chat message
+
+### `sql/schema.sql`
+- No changes required — duplicate index (`idx_document_chunks_document_id`) was already resolved
+
+---
+
+## Architecture As-Built (Chat + RAG)
 
 ```
-backend/
-├── app/
-│   ├── main.py              # FastAPI app, lifespan, CORS, router includes
-│   ├── config.py            # Pydantic Settings (DB, Ollama, JWT, app)
-│   ├── api/
-│   │   ├── auth.py          # Login, JWT, GET /me
-│   │   ├── chat.py          # Conversations, messages, SSE stream to Ollama
-│   │   ├── documents.py     # Route shells only
-│   │   ├── research.py      # Route shells only
-│   │   ├── quizzes.py       # Route shells only
-│   │   ├── graph.py         # Route shells only
-│   │   └── system.py        # Health (real), resources (mock), models (static)
-│   ├── core/
-│   │   └── security.py      # JWT + bcrypt only
-│   ├── db/
-│   │   └── postgres.py      # asyncpg pool, fetch_one/fetch_all/execute
-│   └── models/
-│       ├── auth.py
-│       ├── chat.py
-│       └── system.py
-├── sql/
-│   └── schema.sql           # users, conversations, messages only
-├── requirements.txt
-└── Dockerfile
+User message
+    │
+    ▼
+_get_or_create_conversation()
+    ├─ existing conv_id → load document_ids from conversation_documents table
+    └─ new conv → create conversation, attach any initial document_ids
+    │
+    ▼
+retrieve(query, user_id, document_ids)
+    ├─ doc_ids empty → return []  (general chat path)
+    └─ doc_ids populated
+           │
+           ├─ find_referenced_document()  (fuzzy filename match within scope)
+           ├─ embed query → Qdrant search (filtered by user_id + document_ids)
+           └─ batch fetch text from document_chunks (Postgres)
+    │
+    ▼
+build_messages(conversation_id, message, rag_context)
+    ├─ load + token-manage conversation history
+    ├─ build_system_prompt (base | base + rag_context)
+    └─ assemble messages array
+    │
+    ▼
+Ollama stream → SSE to client
+    │
+    ▼
+save_message() × 2  (user + assistant)
 ```
 
-**Not present (vs CLAUDE.md):** `core/` (router, rag, ingestion, research, quiz, graph, context), `db/redis.py`, `db/qdrant.py`, `tasks/`, `mcp/`.
-
-### 2.2 Implemented vs stubbed
-
-| Module | Implemented | Stubbed / placeholder |
-|--------|-------------|------------------------|
-| **main.py** | Lifespan (Postgres retry 10×, seed admin), CORS, routers, `GET /` | — |
-| **Auth** | Login, JWT issue, `GET /me`, bcrypt, `get_current_user` | — |
-| **Chat** | Create/get conversation by user, save messages, load last 40 messages, fixed system prompt, **SSE stream to Ollama**, list conversations, get messages | No RAG, no router, no promotion, no Qdrant/Redis; single model from config |
-| **Documents** | Route shapes + auth | All handlers: empty list, fake IDs, or “not yet implemented” |
-| **Research** | Route shapes + auth | Fake `research_id`, “Research pipeline not yet implemented” |
-| **Quizzes** | Route shapes + auth | Empty lists / “not yet implemented” |
-| **Graph** | Route shapes + auth | Empty `nodes` / `edges` / `gaps` |
-| **System** | Health (real), version | Resources: mock (random CPU/RAM); models: hardcoded list |
-| **DB** | PostgreSQL pool, helpers | No Redis, no Qdrant |
-| **Core** | JWT + bcrypt in `security.py` | No router, RAG, ingestion, research, quiz, graph, context |
-
-### 2.3 API routes (summary)
-
-All under `/api/`. Auth routes are public for login; all others require `Authorization: Bearer <token>` unless noted.
-
-| Method | Path | Behavior |
-|--------|------|----------|
-| **Auth** | | |
-| POST | `/api/auth/login` | Body: `{ username, password }`. Returns JWT. 401 if invalid. |
-| GET | `/api/auth/me` | Returns current user (id, username, created_at). |
-| **Chat** | | |
-| POST | `/api/chat` | Body: `message`, `conversation_id?`, `knowledge_tier`. Streams SSE from Ollama; final `done` event with conversation_id, model_tier=1, model, latency_ms. |
-| GET | `/api/chat/conversations` | List conversations for current user. |
-| GET | `/api/chat/conversations/{id}/messages` | Messages for that conversation (404 if not owned). |
-| **Documents** | | |
-| GET | `/api/documents` | Returns `{ documents: [], total: 0 }`. |
-| POST | `/api/documents/upload` | Accepts file; returns fake document_id + “Document processing not yet implemented”. |
-| POST | `/api/documents/url` | Body: `{ url }`; returns fake document_id + “URL ingestion not yet implemented”. |
-| GET | `/api/documents/{id}` | Returns `{ document_id, status: "not_found" }`. |
-| DELETE | `/api/documents/{id}` | Returns `{ deleted: id }` (no real DB delete). |
-| **Research** | | |
-| GET | `/api/research` | `{ sessions: [], total: 0 }`. |
-| POST | `/api/research` | Fake `research_id`, status `pending`, “Research pipeline not yet implemented”. |
-| **Quizzes** | | |
-| GET | `/api/quizzes/due` | `{ quizzes: [], total: 0 }`. |
-| POST | `/api/quizzes/generate` | “Quiz generation not yet implemented”. |
-| GET | `/api/quizzes/concepts/mastery` | `{ concepts: [] }`. |
-| **Graph** | | |
-| GET | `/api/graph/visualize` | `{ nodes: [], edges: [] }`. |
-| GET | `/api/graph/nodes` | `{ nodes: [] }`. |
-| GET | `/api/graph/gaps` | `{ gaps: [] }`. |
-| **System** | | |
-| GET | `/api/system/health` | No auth. `{ status: "ok", version: "0.1.0" }`. |
-| GET | `/api/system/resources` | Mock CPU/RAM/GPU/NVMe/HDD. |
-| GET | `/api/system/models` | Hardcoded list (e.g. one model: `llama3.2:3b`, tier 1). |
-
-### 2.4 Database schema (current)
-
-**File:** `backend/sql/schema.sql`
-
-- **users:** `id`, `username`, `hashed_password`, `created_at`
-- **conversations:** `id`, `conversation_id`, `user_id` (FK users), `title`, `knowledge_tier`, `started_at`, `last_active`
-- **messages:** `id`, `message_id`, `conversation_id` (FK conversations), `role`, `content`, `model_used`, `timestamp`
-
-No tables yet for: documents, document_chunks, graph_nodes, graph_edges, research_sessions, quizzes, quiz_questions, concept_mastery, learning_signals, topic_engagement, promotion_events.
-
-### 2.5 Config and dependencies
-
-- **config.py:** Postgres (host, port, db, user, password), Ollama (host, port, model default `llama3.2:3b`), JWT (secret, algorithm, expire_days), seed_admin_password.
-- **requirements.txt:** fastapi, uvicorn, asyncpg, pydantic, pydantic-settings, python-jose, bcrypt, httpx, loguru, python-multipart. No Redis, Qdrant, Celery, Crawl4AI, yt-dlp, Whisper, SerpAPI, or MCP.
+### Qdrant Payload (current)
+```json
+{
+  "document_id": "doc_abc123",
+  "chunk_id": "doc_abc123_chunk_0",
+  "user_id": 1,
+  "filename": "paper.pdf",
+  "normalized_filename": "paper",
+  "chunk_index": 0,
+  "source_type": "pdf",
+  "knowledge_tier": "persistent",
+  "created_at": "2026-02-25T10:00:00Z"
+}
+```
+Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` in Postgres.
 
 ---
 
-## 3. Frontend
+## What Was NOT Implemented (Deferred)
 
-### 3.1 Directory layout
+From the Chat & RAG spec, the following priorities were scoped out:
 
-```
-frontend/src/
-├── App.tsx
-├── main.tsx
-├── index.css
-├── api/
-│   └── client.ts            # BASE_URL /api, Bearer, get/post/delete/postStream; 401 → logout
-├── components/
-│   ├── auth/
-│   │   └── LoginPage.tsx
-│   ├── chat/
-│   │   ├── ChatWindow.tsx
-│   │   ├── MessageList.tsx
-│   │   ├── Message.tsx
-│   │   ├── MessageInput.tsx
-│   │   └── TierBadge.tsx
-│   ├── documents/
-│   │   ├── DocumentsPanel.tsx
-│   │   ├── UploadZone.tsx
-│   │   └── DocumentList.tsx   # Stub: always “No documents yet”
-│   ├── graph/
-│   │   └── KnowledgeGraph.tsx  # Placeholder + small dummy viz
-│   ├── layout/
-│   │   ├── AppShell.tsx
-│   │   ├── Sidebar.tsx
-│   │   ├── TabBar.tsx
-│   │   └── SystemFooter.tsx
-│   ├── quizzes/
-│   │   └── QuizzesPanel.tsx   # “Coming in Phase 3”
-│   ├── research/
-│   │   └── ResearchPanel.tsx   # “Coming in Phase 5”
-│   ├── settings/
-│   │   └── SettingsPanel.tsx
-│   └── ui/
-│       ├── GlassCard.tsx
-│       ├── GlassButton.tsx
-│       ├── GlassInput.tsx
-│       ├── Badge.tsx
-│       └── Spinner.tsx
-├── hooks/
-│   ├── useSSEChat.ts         # POST /api/chat, parse SSE token/done/error, update chat store
-│   └── useSystemStats.ts     # GET /api/system/resources on interval → system store
-├── stores/
-│   ├── auth.store.ts         # token, user, setAuth, logout (persisted athena-auth)
-│   ├── chat.store.ts         # conversations, activeConversationId, messages, streaming, setters
-│   ├── system.store.ts       # stats, lastUpdated, setStats
-│   └── ui.store.ts           # activeTab, sidebarOpen
-├── types/
-│   └── index.ts              # User, TokenResponse, Conversation, Message, stream types, ResourceStats, etc.
-└── utils/
-    └── cn.ts
-```
+### Priority 3 — Tighter System Prompt
+`build_rag_prompt()` with restrictive citation rules ("do not use training data", "cite sources as [N]", explicit fallback) was not implemented. The current `build_system_prompt()` in `context.py` appends RAG context to the base prompt without any retrieval-specific instructions. The model will answer freely from training knowledge alongside retrieved chunks. **This is a retrieval quality gap, not a crash.**
 
-### 3.2 Routing and layout
+### Priority 4 — Recency Scoring
+`apply_recency_scoring()` (exponential decay blending cosine score with chunk age) was not implemented. `created_at` is now stored in the Qdrant payload so this can be added without a backfill. Qdrant results are currently returned in raw similarity order.
 
-- **Routes:** `/login` → `LoginPage`; all other paths → `ProtectedRoute` → `AppShell`. No path-based sub-routes; content is tab-driven.
-- **AppShell:** Sidebar (conversations) + TabBar (Chat, Research, Knowledge, Quizzes, Documents, Settings) + tab content + SystemFooter.
-
-### 3.3 Implemented vs stubbed (frontend)
-
-| Area | Implemented | Stubbed / partial |
-|------|-------------|-------------------|
-| **Auth** | Login form → POST login, GET me → setAuth → navigate | — |
-| **Chat** | SSE send, token stream, done event, store update, MessageList, MessageInput, TierBadge | TierBadge tier hardcoded 1; latency/tier from `done` not on message |
-| **Sidebar** | Load conversations, select conversation, load messages | — |
-| **Documents** | UploadZone → POST upload (shows “processing not yet implemented”) | DocumentList does not call GET /api/documents; always empty state |
-| **Research / Graph / Quizzes** | Tab + panel UI | “Coming in Phase X”; no API calls |
-| **Settings** | Uses system store (resources from API) | Model/embedding/vector DB lines static; no settings API |
-| **Footer** | NVMe/HDD/CPU/GPU from `/api/system/resources` | Version/health static |
-
-### 3.4 Backend connections
-
-| Frontend feature | Backend endpoint(s) | Status |
-|------------------|---------------------|--------|
-| Login | `POST /api/auth/login`, `GET /api/auth/me` | ✅ |
-| Chat stream | `POST /api/chat` (streaming) | ✅ |
-| Conversation list | `GET /api/chat/conversations` | ✅ |
-| Messages | `GET /api/chat/conversations/:id/messages` | ✅ |
-| Document upload | `POST /api/documents/upload` | ✅ (backend returns placeholder message) |
-| Document list | `GET /api/documents` | ❌ Not used (DocumentList is stub) |
-| System resources | `GET /api/system/resources` | ✅ |
-| Research / Graph / Quizzes | Various API routes | ❌ Panels are stubs, no calls |
-
-### 3.5 Stack and build
-
-- **Dependencies:** React 18, react-router-dom 7, Zustand 5, Framer Motion 11, Lucide React, Tailwind 3.4.
-- **Build:** TypeScript 5.6, Vite 6, @vitejs/plugin-react. Scripts: `dev`, `build` (tsc && vite build), `preview`.
-- **Dev proxy:** `/api` → `http://localhost:8000`.
+### Priority 5 — Chunk Size Tuning
+Chunking defaults were not adjusted. Current: 512 tokens, 64 overlap. Spec recommendation: 400 tokens, 50 overlap. Re-ingesting existing documents would be required after any change to defaults.
 
 ---
 
-## 4. Gaps vs CLAUDE.md (concise)
+## Further Recommendations
 
-- **Auth:** Implemented (JWT + admin seed); CLAUDE.md says “No authentication in Phase 1” — already ahead.
-- **Schema:** Only 3 tables; full Athena schema (documents, chunks, graph, research, quizzes, learning_signals, etc.) not applied.
-- **Chat:** No RAG, router, promotion, token budgeting, or summarization; single model; no Qdrant/Redis.
-- **Documents:** No storage, chunking, embeddings, or Qdrant; API returns placeholders.
-- **Research:** No Celery, stages, WebSocket, SerpAPI/Crawl4AI/synthesis.
-- **Quizzes / Graph:** No backend logic or DB tables; API returns empty data.
-- **System:** Resources mock; models static; no storage stats or Prometheus.
-- **Missing backend modules:** core (router, rag, ingestion, research, quiz, graph, context), db (redis, qdrant), tasks, mcp.
+### Restrictive RAG System Prompt (Priority 3 — do first)
+The first backend task to pick up after the frontend is functional. The current prompt produces unreliable document chat — the model answers from training data and doesn't cite sources. The fix is contained entirely to `context.py`: replace `build_system_prompt` with a branch that uses a restrictive template when `rag_context` is present (cite sources, don't use training knowledge, explicit fallback message).
+
+### Backfill Existing Documents
+Documents ingested before today are missing `created_at` in their Qdrant payloads and may still have the redundant `metadata.filename` nesting. Run the `backfill_chunk_payloads()` script outlined in the Chat & RAG spec to:
+1. Strip any remaining `text` fields from Qdrant payloads
+2. Add `created_at` to old points
+3. Clean up `metadata` nesting
+
+No Postgres changes needed — `document_chunks` text is already correct.
+
+### BM25 Hybrid Search
+Vector search alone misses exact keyword matches — model names, paper titles, algorithm names, version numbers. BM25 excels at these. Correctly deferred to the project/research phase. When ready:
+
+- Add a `bm25_indexes` table keyed by `document_id` storing the tokenized corpus per document
+- At ingestion, build and store the BM25 index alongside the Qdrant upsert
+- At search time, run `bm25_search()` alongside `vector_search()` and merge results via Reciprocal Rank Fusion (RRF)
+- `retrieve()` extends cleanly — `document_ids` is already the scope primitive, BM25 slots in as a second retrieval path with no architectural changes
+
+### Recency Scoring (Priority 4)
+`created_at` is now in every new Qdrant payload. Adding recency scoring is additive — wrap the existing Qdrant results with `apply_recency_scoring()` before the Postgres text fetch. Start with `recency_weight=0.3`, `half_life_days=30`. Tune based on observed behavior.
+
+### Celery for Ingestion
+Document ingestion currently runs as a FastAPI `BackgroundTask`. Works at low volume but has no retry logic, no persistence across restarts, and no visibility beyond the in-memory `_progress` dict. Moving to Celery is scheduled for Phase 2 and becomes necessary once video/audio transcription is added (slow, long-running, must survive restarts).
 
 ---
 
-## 5. Suggested next steps (for Phase 1 completion)
+## Frontend — Items to Implement
 
-1. **Schema:** Add `documents`, `document_chunks` (and optionally keep current users/conversations/messages as-is for Phase 1).
-2. **Documents:** Implement upload → store file → chunk → embed → Qdrant (add Qdrant + embedding client); wire GET/DELETE to real DB.
-3. **Chat:** Add RAG: embed query, search Qdrant, inject context into system prompt; keep single model for Phase 1.
-4. **Frontend:** DocumentList to call `GET /api/documents` and show list; optionally wire TierBadge/latency from stream `done` to message.
-5. **System:** Replace mock resources with real stats (or leave mock until Prometheus/agents exist); optional: call `/api/system/health` in footer.
+Ordered by dependency — earlier items unblock later ones.
 
-This document can be updated as the codebase evolves. For full architecture and phase definitions, see `CLAUDE.md`.
+### 1. Fix `contextBudget` value
+**File:** `stores/chat.store.ts`
+`contextBudget` is hardcoded as `4096`. The backend uses `8192`. The dev mode overlay shows the wrong budget. One-line fix.
 
+---
 
- Overview
+### 2. Add `mode` to `Conversation` type
+**File:** `types/index.ts`
+Add `mode: 'general' | 'documents'` to the `Conversation` interface. Update anywhere `Conversation` objects are constructed in `useSSEChat.ts` (the `newConv` object built on the `done` event).
 
-  A working look-and-feel prototype with real auth, real streaming chat, and a full UI shell across all 6 tabs. No RAG, no vector database, no background jobs — just the core interaction loop running end to end.
+---
 
-  ---
-  Infrastructure
+### 3. Add `Document` type
+**File:** `types/index.ts`
+Add a `Document` interface for items from the document library:
+```ts
+interface Document {
+  document_id: string;
+  filename: string;
+  file_type: string;
+  processing_status: string;
+  upload_date: string;
+  word_count: number | null;
+  chunk_count: number | null;
+}
+```
+And a `ConversationDocument` type for the attach/detach context:
+```ts
+interface ConversationDocument {
+  document_id: string;
+  filename: string;
+  file_type: string;
+  word_count: number | null;
+  added_at: string;
+}
+```
 
-  docker-compose.yml — 4 services:
+---
 
-  ┌────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────────┐
-  │      Service       │                                             What it does                                             │
-  ├────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────┤
-  │ postgres:16-alpine │ Stores users, conversations, messages                                                                │
-  ├────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────┤
-  │ ollama/ollama      │ Serves the LLM locally on port 11434                                                                 │
-  ├────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────┤
-  │ init-ollama        │ One-shot container that waits for Ollama to be healthy, then pulls llama3.2:3b if not already cached │
-  ├────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────┤
-  │ backend            │ FastAPI app on port 8000                                                                             │
-  └────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────┘
+### 4. Add conversation document state to store
+**File:** `stores/chat.store.ts`
+Add:
+```ts
+conversationDocuments: Record<string, ConversationDocument[]>
+setConversationDocuments: (convId: string, docs: ConversationDocument[]) => void
+addConversationDocument: (convId: string, doc: ConversationDocument) => void
+removeConversationDocument: (convId: string, docId: string) => void
+```
+This is the source of truth for which documents are attached to which conversation.
 
-  The frontend is not in Docker — you run it with npm run dev on your host for fast HMR. Vite proxies all /api/* requests to localhost:8000 so there are no CORS issues.
+---
 
-  .env.example — all configurable values. Copy to .env and change JWT_SECRET_KEY before production use.
+### 5. Add API methods for conversation document management
+**File:** `api/client.ts`
+Add typed wrappers for:
+- `GET /chat/{conv_id}/documents` → returns `{ documents: ConversationDocument[] }`
+- `POST /chat/{conv_id}/documents/{doc_id}` → attach, returns updated doc list + mode
+- `DELETE /chat/{conv_id}/documents/{doc_id}` → detach, returns updated doc list + mode
 
-  init-ollama.sh — polls GET /api/tags until Ollama responds, then pulls the model. On subsequent starts, it detects the model is already cached and exits immediately.
+---
 
-  ---
-  Backend
+### 6. Load conversation documents on conversation switch
+When `activeConversationId` changes, call `GET /chat/{conv_id}/documents` and populate `conversationDocuments` in the store. Best placed in a `useConversation.ts` hook or inside the existing conversation-switching logic.
 
-  Built with FastAPI + asyncpg + python-jose + passlib.
+---
 
-  app/config.py — Pydantic Settings reads all config from environment variables with sensible defaults. Single get_settings() call cached with @lru_cache.
+### 7. Document scope bar in chat view
+**File:** `components/chat/ChatWindow.tsx` (new `DocumentScopeBar` component)
+A bar that sits above the message list showing:
+- Nothing / "General chat" when no documents are attached
+- Document chips with filename when in document mode, each with an × to detach
+- An "Attach document" button that opens a picker from the user's document library
 
-  app/db/postgres.py — asyncpg connection pool. Simple helper functions (fetch_one, fetch_all, execute) used throughout. Pool is created in the FastAPI lifespan and retries up to 10 times with 2s delays so the
-  backend doesn't crash if Postgres is still starting.
+On attach: call `POST /chat/{conv_id}/documents/{doc_id}`, update store, update conversation mode
+On detach: call `DELETE /chat/{conv_id}/documents/{doc_id}`, update store
 
-  app/core/security.py — bcrypt password hashing via passlib, JWT creation/decode via python-jose, and a get_current_user FastAPI dependency that decodes the Bearer token and loads the user from the database. All
-  protected routes use Depends(get_current_user).
+---
 
-  app/main.py — lifespan handler creates the DB pool, then calls seed_admin_user() which inserts admin with the bcrypt hash of SEED_ADMIN_PASSWORD (defaults to athena) — but only if the user doesn't already exist.
-  Then includes all routers.
+### 8. Send `document_ids` on new conversation creation
+**File:** `hooks/useSSEChat.ts`
+When creating a new conversation (`isNewConversation`) and the store has pending documents for that conversation, include `document_ids` in the chat POST body. This ensures new document-scoped conversations are created with the correct scope from the first message.
 
-  backend/sql/schema.sql — mounted into the Postgres container at /docker-entrypoint-initdb.d/ so it runs automatically on first boot. Three tables: users, conversations, messages.
+---
 
-  API routes
+### 9. Conversation mode indicator in sidebar
+**File:** `components/layout/Sidebar.tsx`
+Add a small document icon or `doc` pill on each conversation list item when `mode === 'documents'`. Gives the user a quick read on which conversations have document context.
 
-  POST /api/auth/login — verifies username + bcrypt password, returns a 7-day JWT.
+---
 
-  GET /api/auth/me — decodes token, returns user info.
-
-  POST /api/chat — the main endpoint. It:
-  1. Gets or creates a conversation in Postgres
-  2. Loads conversation history (last 40 messages)
-  3. Saves the user message
-  4. Updates the conversation title if it's still "New Conversation"
-  5. Builds the messages array: system prompt + history + new user message
-  6. Streams to Ollama's /api/chat endpoint via httpx
-  7. Yields SSE events: {"type": "token", "content": "..."} for each token
-  8. When Ollama signals done, saves the full assembled response to Postgres
-  9. Yields a final {"type": "done", "conversation_id": "...", "model_tier": 1, "model": "llama3.2:3b", "latency_ms": N}
-
-  GET /api/chat/conversations — lists conversations for the current user, ordered by last active.
-
-  GET /api/chat/conversations/{id}/messages — loads full message history for a conversation.
-
-  GET /api/system/health — unauthenticated health check (used by Docker healthcheck).
-
-  GET /api/system/resources — returns mock CPU/RAM/GPU/storage stats (randomized slightly so the footer looks live).
-
-  All other endpoints (documents, research, quizzes, graph) are stubs that return empty arrays or pending status messages.
-
-  ---
-  Frontend
-
-  Built with React 18 + TypeScript + Tailwind CSS v3 + Zustand + Vite.
-
-  Design system (src/index.css)
-
-  All CSS variables defined on :root:
-  - --background: 0 0% 4% — near-black zinc
-  - --primary: 217 91% 60% — blue-500
-  - --accent: 142 71% 45% — emerald
-
-  Utility classes written as plain CSS (not Tailwind plugins): .glass-subtle, .glass, .glass-strong — three blur tiers using backdrop-filter. .btn-glow — primary button with box-shadow glow. .typing-dot — bouncing
-  dots for the "thinking" indicator. .animate-fade-up, .animate-scale-in, .animate-float — entrance animations.
-
-  State management (Zustand stores)
-
-  auth.store.ts — token, user, isAuthenticated. Persisted to localStorage via zustand/middleware. On page reload, if a token exists it restores isAuthenticated: true without hitting the server.
-
-  chat.store.ts — conversations[], activeConversationId, messages (keyed by conversation ID), streamingContent (the in-flight token accumulator), isStreaming. The streaming content lives here so both MessageList
-  (displays it) and useSSEChat (writes to it) can share it.
-
-  ui.store.ts — activeTab, sidebarOpen.
-
-  system.store.ts — stats (resource numbers), lastUpdated.
-
-  SSE streaming (src/hooks/useSSEChat.ts)
-
-  Uses fetch with apiClient.postStream() (not EventSource — EventSource doesn't support POST or custom headers). Reads the response body as a ReadableStream, decodes chunks with TextDecoder, buffers partial lines,
-  and parses each data: {...} line as JSON.
-
-  On a token event: calls appendStreamToken() in the store — the running text appears in real time.
-
-  On the done event: pulls the fully accumulated streamingContent out of the store, creates a Message object, and calls addMessage(). This is the moment the streaming bubble becomes a permanent message.
-
-  Auth flow
-
-  App.tsx renders a ProtectedRoute wrapper. If isAuthenticated is false → redirects to /login. The LoginPage does a plain fetch to /api/auth/login, gets the token, then fetches /api/auth/me to get the user object,
-  then calls setAuth(token, user) in the store. The store persists to localStorage. On next visit the auth is restored without re-logging in.
-
-  Any API call that gets a 401 response calls logout() in apiClient.handleResponse(), which clears the store and triggers the redirect.
-
-  Layout
-
-  AppShell is the root component when authenticated:
-
-  ┌────────────────────────────────────────────────────┐
-  │ Sidebar (256px)  │ TabBar                          │
-  │                  │─────────────────────────────────│
-  │ [A] Athena       │                                 │
-  │ + New convo      │  <TabContent />                 │
-  │                  │                                 │
-  │ conv 1           │                                 │
-  │ conv 2           │                                 │
-  │ ...              │                                 │
-  │                  │                                 │
-  │ [admin] [logout] │                                 │
-  ├──────────────────┴─────────────────────────────────┤
-  │ SystemFooter (always visible)                      │
-  └────────────────────────────────────────────────────┘
-
-  Sidebar loads conversations from the API on mount. Clicking a conversation loads its messages. "New conversation" sets activeConversationId to null, which makes MessageList show the empty state.
-
-  TabBar switches between the 6 tabs — only Chat is fully wired, the other 5 render stub panels with "coming in Phase X" cards.
-
-  SystemFooter calls useSystemStats which polls /api/system/resources every 10 seconds and renders progress bars for NVMe, HDD, CPU, GPU.
-
-  ---
-  What's Not There Yet (by design)
-
-  - No RAG — no Qdrant, no embeddings, no document chunking
-  - No background jobs — no Celery, no Redis
-  - No Nginx — Vite dev server proxies directly to the backend
-  - No Tier 2 or Tier 3 models — only llama3.2:3b via Ollama
-  - No knowledge graph, no quizzes, no research pipeline
-  - No two-tier ephemeral/persistent distinction (all chat is ephemeral by shape, just stored in Postgres)
+*Athena · Codebase Status · 2026-02-25*

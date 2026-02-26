@@ -16,66 +16,6 @@ from rapidfuzz import fuzz
 
 RAG_BUDGET_TOKENS = 2000
 
-# Module-level cache — lives for the lifetime of the FastAPI process
-_bm25_cache: dict[str, dict] = {}
-
-
-async def get_or_build_bm25(project_id: str = "default") -> dict:
-    """
-    Load BM25 index data for a project from Postgres (bm25_indexes table).
-    Caches in memory per project_id. Returns {"chunk_ids": list[str], "corpus": list[list[str]]}
-    where corpus is tokenized documents for BM25Okapi.
-    """
-    if project_id not in _bm25_cache:
-        row = await postgres.fetch_one(
-            "SELECT chunk_ids, corpus FROM bm25_indexes WHERE project_id = $1",
-            project_id,
-        )
-        if row:
-            # asyncpg returns JSONB as Python list; fallback to [] if null
-            chunk_ids = row["chunk_ids"] if row["chunk_ids"] is not None else []
-            corpus = row["corpus"] if row["corpus"] is not None else []
-            _bm25_cache[project_id] = {"chunk_ids": chunk_ids, "corpus": corpus}
-        else:
-            _bm25_cache[project_id] = {"chunk_ids": [], "corpus": []}
-    return _bm25_cache[project_id]
-
-    
-
-async def update_bm25_index(chunk_ids: list[str], texts: list[str], project_id: str = "default") -> None:
-    """Append new chunks to the project's BM25 index in Postgres and invalidate cache."""
-    existing = await postgres.fetch_one(
-        "SELECT chunk_ids, corpus FROM bm25_indexes WHERE project_id = $1",
-        project_id,
-    )
-    
-    if existing:
-        all_chunk_ids = (existing["chunk_ids"] or []) + chunk_ids
-        all_corpus = (existing["corpus"] or []) + [t.lower().split() for t in texts]
-    else:
-        all_chunk_ids = chunk_ids
-        all_corpus = [t.lower().split() for t in texts]
-    
-    await postgres.execute(
-        """INSERT INTO bm25_indexes (project_id, chunk_ids, corpus)
-           VALUES ($1, $2::jsonb, $3::jsonb)
-           ON CONFLICT (project_id) DO UPDATE
-           SET chunk_ids = $2::jsonb, corpus = $3::jsonb, updated_at = NOW()""",
-        project_id,
-        json.dumps(all_chunk_ids),
-        json.dumps(all_corpus),
-    )
-    invalidate_bm25_cache(project_id)
-
-
-def invalidate_bm25_cache(project_id: str | None = None) -> None:
-    """Clear BM25 cache for one project or all. Call after updating bm25_indexes."""
-    if project_id is None:
-        _bm25_cache.clear()
-    else:
-        _bm25_cache.pop(project_id, None)
-
-        
 
 async def embed_text(text: str) -> list[float]:
     """Embed text using the Ollama embedding model."""
@@ -89,75 +29,146 @@ async def embed_text(text: str) -> list[float]:
         return resp.json()["embedding"]
 
 
-
-# future function to find referenced documents in projects
-async def find_referenced_documents(query: str, project_id: str = "") -> str | None:
+async def find_referenced_document(
+    query: str,
+    user_id: int,
+    document_ids: list[str] | None = None,
+) -> str | None:
     """
-    Check if the user's query references a specific document by name.
-    Returns document_id if found, None otherwise.
+    Check if the query references a specific document by name.
+    document_ids: if provided, only checks those documents (conversation scope).
+    Returns document_id if match found, None otherwise.
     """
+    if document_ids is not None and len(document_ids) == 0:
+        return None
 
-    if project_id:
-        docs = await postgres.fetch(
-            "SELECT id, filename FROM documents WHERE project_id = $1 AND processing_status = 'complete'",
-            project_id
+    if document_ids:
+        docs = await postgres.fetch_all(
+            """SELECT document_id, filename FROM documents
+               WHERE document_id = ANY($1)
+               AND user_id = $2
+               AND processing_status = 'complete'""",
+            document_ids,
+            user_id,
         )
     else:
-        docs = await postgres.fetch(
-            "SELECT id, filename FROM documents WHERE processing_status = 'complete'",
+        docs = await postgres.fetch_all(
+            """SELECT document_id, filename FROM documents
+               WHERE user_id = $1
+               AND processing_status = 'complete'""",
+            user_id,
         )
-    
+
+    if not docs:
+        return None
+
+    query_lower = query.lower()
+    query_words = set(query_lower.split())
     best_match = None
     best_score = 0
 
-    query_lower = query.lower()
     for doc in docs:
-        normalized = normalize_filename(doc["filename"])
+        normalized = normalize_filename(doc["filename"] or "")
+        if not normalized:
+            continue
+        if not query_words & set(normalized.split()):
+            continue
         score = fuzz.partial_ratio(normalized, query_lower)
         if score > 80 and score > best_score:
-            best_match = doc["id"]
             best_score = score
+            best_match = doc["document_id"]
 
     return best_match
 
-async def retrieve(query: str, top_k: int | None = None, scope: str = "global") -> list[dict]:
-    """
-    Embed the query, search Qdrant, return structured results.
 
-    Each result: { text, filename, score, chunk_index, document_id }
-    Returns [] gracefully if Qdrant is unavailable or the collection is empty.
-    """
+async def retrieve(
+    query: str,
+    user_id: int,
+    document_ids: list[str] | None = None,
+    top_k: int | None = None,
+    search_all: bool = False,
+) -> list[dict]:
     if top_k is None:
         top_k = get_settings().rag_top_k
+
+    doc_ids = document_ids or []
+
+    # No documents attached and not explicitly searching everything — skip RAG
+    if not doc_ids and not search_all:
+        return []
+
     try:
         vector = await embed_text(query)
 
-        document_id = await find_referenced_documents(query)
-        if doc_id:
-            search_filter = Filter(
-                must=[FieldCondition(key="document_id", match=MatchValue(value=doc_id))]
-            )
+        if doc_ids:
+            referenced_id = await find_referenced_document(query, user_id, document_ids=doc_ids)
+            if referenced_id:
+                search_filter = {
+                    "must": [
+                        {"key": "user_id", "match": {"value": user_id}},
+                        {"key": "document_id", "match": {"value": referenced_id}},
+                    ]
+                }
+            elif len(doc_ids) == 1:
+                search_filter = {
+                    "must": [
+                        {"key": "user_id", "match": {"value": user_id}},
+                        {"key": "document_id", "match": {"value": doc_ids[0]}},
+                    ]
+                }
+            else:
+                search_filter = {
+                    "must": [
+                        {"key": "user_id", "match": {"value": user_id}},
+                        {"key": "document_id", "match": {"any": doc_ids}},
+                    ]
+                }
         else:
-            search_filter = None
+            # search_all=True, no document scope — still scope to user
+            search_filter = {
+                "must": [
+                    {"key": "user_id", "match": {"value": user_id}},
+                ]
+            }
 
+        hits = await qdrant.search(vector, top_k=top_k, filters=search_filter)
 
-        results = await qdrant.search(vector, top_k=top_k, filter=search_filter)
-        sources = []
-        for r in results:
-            payload = r.get("payload", {})
-            sources.append({
-                "text": payload.get("text", ""),
-                "filename": payload.get("metadata", {}).get("filename", "unknown"),
-                "score": round(r.get("score", 0.0), 3),
-                "chunk_index": payload.get("chunk_index", 0),
-                "document_id": payload.get("document_id", ""),
-            })
-        logger.debug("[rag] retrieved {} chunks for query: {!r}", len(sources), query[:60])
-
-        if all(source["score"] < get_settings().rag_threshold for source in sources):
+        if not hits:
             return []
 
+        # Batch fetch text from Postgres, preserving Qdrant rank order
+        chunk_ids = [h.get("payload", {}).get("chunk_id") for h in hits]
+        rows = await postgres.fetch_all(
+            """SELECT dc.chunk_id, dc.text, d.filename, dc.chunk_index, dc.document_id
+               FROM document_chunks dc
+               JOIN documents d ON dc.document_id = d.document_id
+               WHERE dc.chunk_id = ANY($1)
+               ORDER BY array_position($1::text[], dc.chunk_id)""",
+            chunk_ids,
+        )
+
+        chunk_map = {row["chunk_id"]: row for row in rows}
+        sources = []
+        for h in hits:
+            cid = h.get("payload", {}).get("chunk_id")
+            row = chunk_map.get(cid)
+            if not row:
+                continue
+            score = round(h.get("score", 0.0), 3)
+            if score < get_settings().rag_threshold:
+                continue
+            sources.append({
+                "chunk_id": cid,
+                "text": row["text"],
+                "filename": row["filename"],
+                "chunk_index": row["chunk_index"],
+                "document_id": row["document_id"],
+                "score": score,
+            })
+
+        logger.debug("[rag] retrieved {} chunks for query: {!r}", len(sources), query[:60])
         return sources
+
     except Exception as e:
         logger.warning("[rag] retrieval failed — falling back to no context: {}", e)
         return []
