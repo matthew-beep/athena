@@ -24,6 +24,44 @@ def resolve_mode(document_ids: list[str]) -> str:
         return "documents"
 
 
+
+async def create_conversation(
+    user_id: int,
+    knowledge_tier: str = "ephemeral",
+    title: str = "New Conversation",
+    document_ids: list[str] = [],
+) -> str:
+    """Create a new conversation and attach any initial documents."""
+    new_id = f"conv_{uuid.uuid4().hex[:16]}"
+    mode = "general" if not document_ids else "document"
+
+    await postgres.execute(
+        """INSERT INTO conversations (conversation_id, user_id, title, knowledge_tier, mode)
+           VALUES ($1, $2, $3, $4, $5)""",
+        new_id,
+        user_id,
+        title,
+        knowledge_tier,
+        mode,
+    )
+
+    for doc_id in document_ids:
+        await attach_document(new_id, doc_id)
+
+    return new_id
+
+
+
+async def get_conversation(conversation_id: str, user_id: int) -> dict | None:
+    """Returns conversation row or None if not found / not owned by user."""
+    return await postgres.fetch_one(
+        "SELECT * FROM conversations WHERE conversation_id = $1 AND user_id = $2",
+        conversation_id,
+        user_id,
+    )
+
+
+
 async def _get_or_create_conversation(
     conversation_id: str | None, 
     user_id: int, 
@@ -31,30 +69,18 @@ async def _get_or_create_conversation(
     document_ids: list[str] = []
 ) -> str:
 
-    # if conversation exists, return it
+    """
+    Used at the chat endpoint — if a conversation_id is provided, verify it exists.
+    If not provided, create a fresh one.
+    Raises if conversation_id is provided but not found.
+    """
     if conversation_id:
-        row = await postgres.fetch_one(
-            "SELECT conversation_id FROM conversations WHERE conversation_id = $1 AND user_id = $2",
-            conversation_id,
-            user_id,
-        )
-        if row:
-            return conversation_id
+        row = await get_conversation(conversation_id, user_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return conversation_id
 
-    # if conversation does not exist, create it
-    # add mode to the conversation
-    new_id = f"conv_{uuid.uuid4().hex[:16]}"
-    mode = resolve_mode(document_ids)
-    await postgres.execute(
-        """INSERT INTO conversations (conversation_id, user_id, title, knowledge_tier, mode)
-           VALUES ($1, $2, $3, $4)""",
-        new_id,
-        user_id,
-        "New Conversation",
-        knowledge_tier,
-        mode
-    )
-    return new_id
+    return await create_conversation(user_id, knowledge_tier)
 
 
 async def _update_title(conversation_id: str, first_message: str) -> None:
@@ -68,7 +94,7 @@ async def _update_title(conversation_id: str, first_message: str) -> None:
         conversation_id,
     )
 
-async def attach_doc_to_conversation(conversation_id: str, document_id: str) -> None:
+async def attach_document(conversation_id: str, document_id: str) -> None:
     """Attach a document to a conversation and update mode."""
     await postgres.execute(
         """INSERT INTO conversation_documents (conversation_id, document_id)
@@ -76,15 +102,20 @@ async def attach_doc_to_conversation(conversation_id: str, document_id: str) -> 
         conversation_id, document_id
     )
 
-        # Recalculate mode based on current document count
-    doc_ids = await get_conversation_document_ids(conversation_id)
-    new_mode = resolve_mode(doc_ids)
+    await _sync_conversation_mode(conversation_id)
 
+
+async def detach_document(conversation_id: str, document_id: str) -> None:
+    """Remove a document from a conversation. Updates mode automatically."""
     await postgres.execute(
-        """UPDATE conversations SET mode = $1, updated_at = NOW()
-           WHERE conversation_id = $2""",
-        new_mode, conversation_id
+        """
+        DELETE FROM conversation_documents
+        WHERE conversation_id = $1 AND document_id = $2
+        """",
+        conversation_id, document_id
     )
+    await _sync_conversation_mode(conversation_id)
+
 
 async def get_conversation_document_ids(conversation_id: str) -> list[str]:
     """Fetch all document IDs attached to a conversation."""
@@ -95,6 +126,15 @@ async def get_conversation_document_ids(conversation_id: str) -> list[str]:
         conversation_id
     )
     return [r["document_id"] for r in rows]
+
+async def _sync_conversation_mode(conversation_id: str) -> None:
+    doc_ids = await get_conversation_document_ids(conversation_id)
+    mode = resolve_mode(doc_ids)
+    await postgres.execute(
+        """UPDATE conversations SET mode = $1, updated_at = NOW()
+           WHERE conversation_id = $2""",
+        mode, conversation_id
+    )
 
 
 async def detach_document_from_conversation(

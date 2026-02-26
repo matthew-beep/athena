@@ -3,12 +3,17 @@
 -- to avoid a circular dependency (messages → conversations → messages).
 -- Context management in app/core/context.py guarantees referential integrity.
 
+
+-- USERS TABLE
+
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(100) UNIQUE NOT NULL,
     hashed_password TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT NOW()
 );
+
+-- CONVERSATIONS TABLE
 
 CREATE TABLE IF NOT EXISTS conversations (
     id SERIAL PRIMARY KEY,
@@ -34,57 +39,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     last_embedded_at TIMESTAMP
 );
 
--- 2. Documents attached to a conversation (drives RAG scope)
-CREATE TABLE conversation_documents (
-    conversation_id  TEXT REFERENCES conversations(conversation_id) ON DELETE CASCADE,
-    document_id      TEXT REFERENCES documents(document_id) ON DELETE CASCADE,
-    added_at         TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY      (conversation_id, document_id)
-);
 
-CREATE INDEX idx_conv_docs_conversation ON conversation_documents(conversation_id);
-CREATE INDEX idx_conv_docs_document ON conversation_documents(document_id);
-
-CREATE TABLE IF NOT EXISTS documents (
-    id SERIAL PRIMARY KEY,
-    document_id VARCHAR(255) UNIQUE NOT NULL,
-    filename VARCHAR(255),
-    file_type VARCHAR(50),
-    source_url TEXT,
-    upload_date TIMESTAMP DEFAULT NOW(),
-    content_hash VARCHAR(64),
-    chunk_count INTEGER DEFAULT 0,
-    word_count INTEGER,
-    processing_status VARCHAR(50) DEFAULT 'pending',
-    knowledge_tier VARCHAR(20) DEFAULT 'persistent',
-    error_message TEXT,
-    metadata JSONB
-);
-
-CREATE TABLE IF NOT EXISTS document_chunks (
-    id SERIAL PRIMARY KEY,
-    chunk_id VARCHAR(255) UNIQUE NOT NULL,
-    document_id VARCHAR(255) REFERENCES documents(document_id) ON DELETE CASCADE,
-    chunk_index INTEGER NOT NULL,
-    text TEXT NOT NULL,
-    token_count INTEGER,
-    qdrant_point_id VARCHAR(255),
-    metadata JSONB
-);
-
-CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(processing_status);
-CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id);
-
-CREATE TABLE IF NOT EXISTS document_tags (
-    document_id  TEXT REFERENCES documents(document_id) ON DELETE CASCADE,
-    tag          TEXT NOT NULL,
-    added_at     TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY  (document_id, tag)
-);
-
-CREATE INDEX IF NOT EXISTS idx_document_tags_tag ON document_tags(tag);
-CREATE INDEX IF NOT EXISTS idx_document_tags_document ON document_tags(document_id);
-
+-- MESSAGES TABLE
 
 CREATE TABLE IF NOT EXISTS messages (
     id SERIAL PRIMARY KEY,
@@ -96,10 +52,58 @@ CREATE TABLE IF NOT EXISTS messages (
     timestamp TIMESTAMP DEFAULT NOW()
 );
 
+-- DOCUMENTS TABLE
 
-CREATE TABLE IF NOT EXISTS bm25_indexes (
-    project_id TEXT PRIMARY KEY,
-    chunk_ids   JSONB NOT NULL DEFAULT '[]',
-    corpus      JSONB NOT NULL DEFAULT '[]',
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS documents (
+    id SERIAL PRIMARY KEY,
+    document_id VARCHAR(255) UNIQUE NOT NULL,
+    user_id INTEGER REFERENCES users(id),
+    filename VARCHAR(255),
+    file_type VARCHAR(50),
+    source_url TEXT,
+    upload_date TIMESTAMP DEFAULT NOW(),
+    content_hash VARCHAR(64),
+    chunk_count INTEGER DEFAULT 0,
+    word_count INTEGER,
+    processing_status VARCHAR(50) DEFAULT 'pending',
+    knowledge_tier VARCHAR(20) DEFAULT 'persistent',
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    metadata JSONB
 );
+
+-- CONVERSATION DOCUMENTS TABLE
+
+CREATE TABLE IF NOT EXISTS conversation_documents (
+    conversation_id  VARCHAR(255) REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+    document_id      VARCHAR(255) REFERENCES documents(document_id) ON DELETE CASCADE,
+    added_at         TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY      (conversation_id, document_id)
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_conv_docs_conversation ON conversation_documents(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_conv_docs_document ON conversation_documents(document_id);
+
+
+CREATE TABLE IF NOT EXISTS document_chunks (
+    id SERIAL PRIMARY KEY,
+    chunk_id VARCHAR(255) UNIQUE NOT NULL,
+    user_id INTEGER REFERENCES users(id),
+    document_id VARCHAR(255) REFERENCES documents(document_id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    token_count INTEGER,
+    qdrant_point_id VARCHAR(255),
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(processing_status);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id);
+
+-- For scoping queries by user
+CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_user ON document_chunks(user_id);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id);
+
