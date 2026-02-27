@@ -207,8 +207,8 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | postgres | ✅ Running | ✅ |
 | ollama | ✅ Running | ✅ |
 | init-ollama | ✅ (pulls llama3.2:3b) | Update to pull qwen2.5:7b |
+| qdrant | ✅ Running (named volume `qdrant_data`) | ✅ |
 | backend | ✅ Running | ✅ |
-| qdrant | ❌ Missing | Add to compose |
 | redis | ❌ Missing | Add to compose |
 | celery worker | ❌ Missing | Add (Phase 2) |
 | celery beat | ❌ Missing | Add (Phase 2) |
@@ -221,7 +221,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 | Phase | Status | Blocker |
 |---|---|---|
-| Phase 1: Foundation | ~75% | Missing: Celery, Redis, sentence-aware chunking, correct model, bulk progress endpoint |
+| Phase 1: Foundation | ~80% | Missing: Celery, Redis, sentence-aware chunking, correct model, bulk progress endpoint |
 | Phase 2: Document Processing | ~10% | Crawl4AI, video/Whisper, Celery all missing |
 | Phase 3: Learning Features | 0% | |
 | Phase 4: Two-Tier Knowledge | 0% | |

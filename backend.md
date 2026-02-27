@@ -41,8 +41,8 @@ This document is a practical, phase-by-phase implementation guide for the Athena
 | postgres | ✅ Running |
 | ollama | ✅ Running |
 | init-ollama | ✅ Running (pulls llama3.2:3b) |
+| qdrant | ✅ Running (named volume `qdrant_data`) |
 | backend | ✅ Running |
-| qdrant | ❌ Missing from compose (run separately or not at all) |
 | redis | ❌ Missing |
 | celery worker | ❌ Missing |
 | celery beat | ❌ Missing |
@@ -53,7 +53,7 @@ This document is a practical, phase-by-phase implementation guide for the Athena
 
 | Phase | Status |
 |---|---|
-| Phase 1: Foundation | ~75% — core RAG chat works; missing Celery, Redis, sentence-aware chunking, correct model |
+| Phase 1: Foundation | ~80% — core RAG chat + Qdrant + BM25 working; missing Celery, Redis, sentence-aware chunking, correct model |
 | Phase 2: Document Processing | ~10% — upload works; Crawl4AI, video, Celery all missing |
 | Phase 3: Learning Features | 0% |
 | Phase 4: Two-Tier Knowledge | 0% |
