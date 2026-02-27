@@ -12,6 +12,9 @@ from app.config import get_settings
 from app.db import qdrant, postgres
 from app.core.ingestion import normalize_filename
 from rapidfuzz import fuzz
+from app.core.bm25 import get_bm25_index
+from rank_bm25 import BM25Okapi
+import asyncio
 
 
 RAG_BUDGET_TOKENS = 2000
@@ -39,9 +42,6 @@ async def find_referenced_document(
     document_ids: if provided, only checks those documents (conversation scope).
     Returns document_id if match found, None otherwise.
     """
-    if document_ids is not None and len(document_ids) == 0:
-        return None
-
     if document_ids:
         docs = await postgres.fetch_all(
             """SELECT document_id, filename FROM documents
@@ -80,6 +80,75 @@ async def find_referenced_document(
 
     return best_match
 
+async def _bm_25_search(    
+    query: str,
+    document_ids: list[str],
+    top_k: int = 20,
+) -> list[tuple[str, float]]:
+    """
+    Run BM25 keyword search across a set of documents.
+    Merges per-document indexes at search time — only scores chunks
+    from the provided document_ids, never the full knowledge base.
+    Returns list of (chunk_id, score) tuples sorted by score descending.
+    """
+
+    if not document_ids:
+        return []
+
+    # Load and merge indexes for all documents in scope
+    all_chunk_ids: list[str] = []
+    all_corpus: list[list[str]] = []
+
+    for doc_id in document_ids:
+        index = await get_bm25_index(doc_id)
+        all_chunk_ids.extend(index["chunk_ids"])
+        all_corpus.extend(index["corpus"])
+
+    if not all_corpus:
+        return []
+
+    # Run BM25 search against documents and user query
+    bm25 = BM25Okapi(all_corpus)
+    scores = bm25.get_scores(query.lower().split())
+
+    results = [
+        (chunk_id, float(score))
+        for chunk_id, score in zip(all_chunk_ids, scores)
+        if score > 0
+    ]
+
+    return sorted(results, key=lambda x: x[1], reverse=True)[:top_k]
+
+
+def reciprocal_rank_fusion(
+    vector_hits: list,
+    bm25_hits: list[tuple[str, float]],
+    k: int = 60
+) -> list[str]:
+    """
+    Merge vector and BM25 result lists using Reciprocal Rank Fusion.
+    Returns chunk_ids ordered by combined RRF score.
+    k=60 is the standard constant — prevents top results from dominating.
+    """
+
+    scores: dict[str, float] = {}
+
+    for rank, hit in enumerate(vector_hits):
+        chunk_id = hit.get("payload", {}).get("chunk_id")
+        if not chunk_id:
+            continue
+        scores[chunk_id] = scores.get(chunk_id, 0) + 1 / (k + rank + 1)
+
+    
+    for rank, (chunk_id, _) in enumerate(bm25_hits):
+        scores[chunk_id] = scores.get(chunk_id, 0) + 1 / (k + rank + 1)
+
+    return [
+        chunk_id
+        for chunk_id, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    ]
+
+
 
 async def retrieve(
     query: str,
@@ -102,68 +171,69 @@ async def retrieve(
 
         if doc_ids:
             referenced_id = await find_referenced_document(query, user_id, document_ids=doc_ids)
-            if referenced_id:
+            search_ids = [referenced_id] if referenced_id else doc_ids
+
+            if len(search_ids) == 1:
                 search_filter = {
                     "must": [
                         {"key": "user_id", "match": {"value": user_id}},
-                        {"key": "document_id", "match": {"value": referenced_id}},
-                    ]
-                }
-            elif len(doc_ids) == 1:
-                search_filter = {
-                    "must": [
-                        {"key": "user_id", "match": {"value": user_id}},
-                        {"key": "document_id", "match": {"value": doc_ids[0]}},
+                        {"key": "document_id", "match": {"value": search_ids[0]}},
                     ]
                 }
             else:
                 search_filter = {
                     "must": [
                         {"key": "user_id", "match": {"value": user_id}},
-                        {"key": "document_id", "match": {"any": doc_ids}},
+                        {"key": "document_id", "match": {"any": search_ids}},
                     ]
                 }
         else:
-            # search_all=True, no document scope — still scope to user
+            # search_all=True — scope to user only
+            search_ids = []
             search_filter = {
                 "must": [
                     {"key": "user_id", "match": {"value": user_id}},
                 ]
             }
 
-        hits = await qdrant.search(vector, top_k=top_k, filters=search_filter)
+        if search_ids:
+            vector_hits, bm25_hits = await asyncio.gather(
+                qdrant.search(vector, top_k=top_k * 3, filters=search_filter),
+                _bm_25_search(query, search_ids, top_k=top_k * 3),
+            )
+            ranked_ids = reciprocal_rank_fusion(vector_hits, bm25_hits)[:top_k]
+        else:
+            # search_all — no doc_ids so skip BM25, pure vector
+            vector_hits = await qdrant.search(vector, top_k=top_k, filters=search_filter)
+            ranked_ids = [h.get("payload", {}).get("chunk_id") for h in vector_hits]
 
-        if not hits:
+        if not ranked_ids:
             return []
 
-        # Batch fetch text from Postgres, preserving Qdrant rank order
-        chunk_ids = [h.get("payload", {}).get("chunk_id") for h in hits]
         rows = await postgres.fetch_all(
             """SELECT dc.chunk_id, dc.text, d.filename, dc.chunk_index, dc.document_id
                FROM document_chunks dc
                JOIN documents d ON dc.document_id = d.document_id
                WHERE dc.chunk_id = ANY($1)
+                 AND d.user_id = $2
                ORDER BY array_position($1::text[], dc.chunk_id)""",
-            chunk_ids,
+            ranked_ids,
+            user_id,
         )
 
         chunk_map = {row["chunk_id"]: row for row in rows}
         sources = []
-        for h in hits:
-            cid = h.get("payload", {}).get("chunk_id")
-            row = chunk_map.get(cid)
+        for chunk_id in ranked_ids:
+            row = chunk_map.get(chunk_id)
             if not row:
                 continue
-            score = round(h.get("score", 0.0), 3)
-            if score < get_settings().rag_threshold:
-                continue
             sources.append({
-                "chunk_id": cid,
+                "chunk_id": chunk_id,
                 "text": row["text"],
                 "filename": row["filename"],
                 "chunk_index": row["chunk_index"],
                 "document_id": row["document_id"],
-                "score": score,
+                "score": 0.0,  # RRF doesn't produce a meaningful score to show
             })
 
         logger.debug("[rag] retrieved {} chunks for query: {!r}", len(sources), query[:60])
@@ -177,19 +247,20 @@ async def retrieve(
 def format_rag_context(sources: list[dict], token_budget: int = RAG_BUDGET_TOKENS) -> str:
     """
     Format retrieved chunks into a context string for injection into the system prompt.
-    Trims greedily to stay within approximately token_budget (4 chars ≈ 1 token).
-    Returns "" if sources is empty.
+    Each block is numbered [1], [2], ... so the model can cite sources. Order matches
+    rag_sources sent to the frontend. Trims greedily to stay within approximately
+    token_budget (4 chars ≈ 1 token). Returns "" if sources is empty.
     """
     if not sources:
         return ""
 
-    header = "Relevant information from the user's documents:\n"
+    header = "Relevant information from the user's documents (cite as [1], [2], ...):\n\n"
     char_budget = token_budget * 4
     used = len(header)
     snippets: list[str] = []
 
-    for src in sources:
-        snippet = f'\n[Source: {src["filename"]}]\n{src["text"]}\n'
+    for n, src in enumerate(sources, start=1):
+        snippet = f'[{n}] [Source: {src["filename"]}]\n{src["text"]}\n\n'
         if used + len(snippet) > char_budget:
             break
         snippets.append(snippet)

@@ -1,85 +1,129 @@
 # Athena — Codebase Status
-## 2026-02-25
+## 2026-02-26
 
 ---
 
-## What Was Worked On This Session
+## Codebase Metrics
 
-Focus: **General Chat + Document-Scoped Chat** — the retrieval pipeline, conversation scoping, and backend correctness.
+| Metric | Value |
+|---|---|
+| Backend Python LOC | ~2,125 |
+| Frontend TypeScript/TSX LOC | ~3,120 |
+| Total Code LOC | ~5,245 |
+| Backend Python files | 24 |
+| Frontend TS/TSX files | 48 |
+| API endpoints | 25 |
+| Database tables | 7 |
+| SQL migrations | 3 |
 
----
+### Backend File Breakdown
 
-## Backend Changes
-
-### `app/core/rag.py` — Full Rewrite
-
-The file had a critical syntax error: the old `retrieve()` function body was left dangling after the new one was pasted in, making the entire backend fail to import. The file was rewritten cleanly.
-
-**Changes:**
-- Removed the old `retrieve()` body (lines 166–207) that caused a `SyntaxError` on startup
-- Replaced SDK-style `Filter`, `FieldCondition`, `MatchValue`, `MatchAny` objects with plain REST API dicts — the Qdrant client is httpx-based, not the Python SDK, so SDK classes don't exist
-- Fixed `within_ids=doc_ids` kwarg mismatch → `document_ids=doc_ids` on `find_referenced_document` call
-- Fixed `filter=search_filter` → `filters=search_filter` to match the actual `qdrant.search()` signature
-- Changed `user_id: str` → `user_id: int` to match `find_referenced_document` and Postgres queries
-- Cleaned up indentation (original had 6-space body indent with trailing whitespace on signature lines)
-
-**Retrieval logic as-built:**
-- `document_ids` empty + `search_all=False` → return `[]` immediately, no Qdrant call
-- `document_ids` populated → check fuzzy filename match within scope, filter to matched doc or all scope docs
-- `search_all=True` + no docs → filter to user only, search everything
-- After Qdrant returns hits: batch fetch chunk text from `document_chunks` Postgres table in one query, preserving rank order via `array_position`
-- Per-chunk score threshold filtering (drops weak hits, keeps strong ones)
-
-### `app/api/documents.py` — Ingestion Fixes
-
-- Added `datetime, timezone` import
-- Added `"created_at": datetime.now(timezone.utc).isoformat()` to Qdrant payload — required for future recency scoring
-- Removed redundant nested `"metadata": {"filename": filename}` from Qdrant payload (filename already exists at top level)
-- Fixed `background_tasks.add_task(_process_document, ...)` — `user_id` was missing from the call, causing every background ingestion task to fail with a `TypeError`
-
-### `app/api/chat.py` — Minor Fixes
-
-- Changed `str(current_user["id"])` → `current_user["id"]` in `retrieve()` call — `user_id` is an `int` throughout, casting to string caused type mismatch with Postgres queries in `find_referenced_document`
-- `_update_title` now guarded: only fires a DB write if the conversation title is still `"New Conversation"`. Previously it executed a DB round trip on every single chat message
-
-### `sql/schema.sql`
-- No changes required — duplicate index (`idx_document_chunks_document_id`) was already resolved
+| File | Lines | Notes |
+|---|---|---|
+| `api/chat.py` | 346 | SSE streaming, conv management, doc attach/detach |
+| `api/documents.py` | 296 | Upload, ingestion, progress, delete |
+| `api/system.py` | 85 | Health, resources, models |
+| `api/auth.py` | 29 | Login, /me |
+| `api/research.py` | 20 | Stub |
+| `api/quizzes.py` | 20 | Stub |
+| `api/graph.py` | 20 | Stub |
+| `core/context.py` | 336 | Token budget, summarization, history |
+| `core/rag.py` | 272 | BM25 + vector hybrid search, RRF |
+| `core/ingestion.py` | 209 | Chunking, embedding, Qdrant upsert |
+| `core/security.py` | 65 | JWT auth |
+| `core/bm25.py` | 55 | Per-document BM25 index cache |
+| `db/qdrant.py` | 95 | httpx Qdrant REST client |
+| `db/postgres.py` | 60 | asyncpg pool + query helpers |
+| `main.py` | 94 | FastAPI app, lifespan, admin seed |
+| `config.py` | 58 | Pydantic settings |
+| `models/chat.py` | 26 | ChatRequest, ConversationOut, MessageOut |
+| `models/auth.py` | 18 | Token, UserOut |
+| `models/system.py` | 21 | ResourceStats, HealthResponse |
 
 ---
 
-## Architecture As-Built (Chat + RAG)
+## What Was Worked On This Session (2026-02-26)
+
+### Backend Fixes Applied
+
+#### `core/rag.py`
+- **Removed dead branch** in `find_referenced_document` — the `if document_ids is not None and len(document_ids) == 0: return None` guard was unreachable because the outer `if document_ids:` already handled the empty case. Removed.
+- **Fixed RRF attribute access bug** — `hit.payload["chunk_id"]` crashed because Qdrant returns plain JSON dicts, not objects. Fixed to `hit.get("payload", {}).get("chunk_id")` with a `None` guard.
+- **Added `user_id` guard to chunk text fetch** — the Postgres query fetching chunk text from `document_chunks` had no ownership check. Added `AND d.user_id = $2` to the `JOIN documents` clause and passed `user_id` as the second bind parameter. Defense-in-depth against cross-user data leakage.
+- **Removed stray comment** — cleaned up a `# Should be` comment left over from an earlier refactor.
+
+#### `api/chat.py`
+- **Removed `resolve_mode` and `_sync_conversation_mode`** — these were dead code once the DB became the source of truth for document scope. Also removed `resolve_mode` calls from `attach_document` and `detach_document` responses.
+- **Simplified `_get_or_create_conversation`** — now returns `str` only (the conversation ID), not a dict. `get_conversation` is called separately after for the title check.
+- **DB is source of truth for `document_ids`** — `doc_ids` is now fetched inside `stream_response()` from the `conversation_documents` join table via `get_conversation_document_ids(conversation_id)`. The frontend no longer sends `document_ids` in the chat POST body.
+
+#### `models/chat.py`
+- **Removed `document_ids` from `ChatRequest`** — frontend never sends doc IDs in chat body. Ownership and scoping is enforced entirely via the `conversation_documents` join table in Postgres.
+
+### Documentation Updated
+- **`TODO.md`** — rewrote the entire Frontend section with verified status of each item; marked already-implemented items as `[x]`; added stream abort, suggestion pills, document attachment UI, bulk progress, web scraping, SearXNG, and contextBudget bug
+- **`backend.md`** — added `## Current Implementation State` section with what's working, known gaps, Docker Compose status table, phase status table
+- **`frontend.md`** — added `## Current Implementation State` section with actual vs planned tech stack, Precision Glass v2.1 design notes, implemented vs not-implemented feature lists, actual file structure
+
+---
+
+## Architecture As-Built
+
+### Chat + RAG Pipeline
 
 ```
-User message
+POST /api/chat
     │
-    ▼
-_get_or_create_conversation()
-    ├─ existing conv_id → load document_ids from conversation_documents table
-    └─ new conv → create conversation, attach any initial document_ids
+    ├─ token check (reject if > 5500 tokens)
+    ├─ _get_or_create_conversation() → str (conversation_id)
+    ├─ _update_title() if still "New Conversation"
     │
-    ▼
-retrieve(query, user_id, document_ids)
-    ├─ doc_ids empty → return []  (general chat path)
-    └─ doc_ids populated
+    └─ stream_response() [generator]
            │
-           ├─ find_referenced_document()  (fuzzy filename match within scope)
-           ├─ embed query → Qdrant search (filtered by user_id + document_ids)
-           └─ batch fetch text from document_chunks (Postgres)
-    │
-    ▼
-build_messages(conversation_id, message, rag_context)
-    ├─ load + token-manage conversation history
-    ├─ build_system_prompt (base | base + rag_context)
-    └─ assemble messages array
-    │
-    ▼
-Ollama stream → SSE to client
-    │
-    ▼
-save_message() × 2  (user + assistant)
+           ├─ get_conversation_document_ids(conversation_id)  ← DB source of truth
+           │
+           ├─ [if doc_ids] retrieve(query, user_id, document_ids=doc_ids)
+           │       ├─ embed query → nomic-embed-text via Ollama
+           │       ├─ find_referenced_document() → fuzzy filename match in scope
+           │       ├─ asyncio.gather(
+           │       │     qdrant.search(vector, filters=user+doc_ids),
+           │       │     _bm25_search(query, doc_ids)
+           │       │   )
+           │       ├─ reciprocal_rank_fusion(vector_hits, bm25_hits)[:top_k]
+           │       └─ batch fetch chunk text from document_chunks WHERE user_id = $2
+           │
+           ├─ build_messages(conversation_id, message, rag_context)
+           │       ├─ count tokens, check budget
+           │       ├─ get_managed_history() → trim/summarize if over budget
+           │       └─ assemble [system, ...history, user]
+           │
+           ├─ POST ollama /api/chat stream=True
+           │       └─ yield SSE token events
+           │
+           ├─ save_message(user) + save_message(assistant)
+           └─ yield SSE done event {conversation_id, model, latency_ms, rag_sources}
 ```
 
-### Qdrant Payload (current)
+### Document Ingestion Pipeline
+
+```
+POST /api/documents/upload (multipart)
+    │
+    ├─ save file to disk
+    ├─ INSERT documents row (status=pending)
+    └─ BackgroundTask: _process_document(document_id, user_id, filename, filepath)
+           │
+           ├─ extract text (pypdf for PDF, plain read for txt/md)
+           ├─ chunk_text() — sliding 512-token window, 64-token overlap (no sentence awareness yet)
+           ├─ build BM25 index → INSERT bm25_indexes (chunk_ids, corpus)
+           ├─ embed all chunks → nomic-embed-text via Ollama
+           ├─ qdrant.upsert_points() — payload: document_id, chunk_id, user_id, filename, etc.
+           ├─ INSERT document_chunks rows (chunk_id, text, token_count)
+           └─ UPDATE documents SET processing_status='complete', chunk_count=N
+```
+
+### Qdrant Point Payload (current)
+
 ```json
 {
   "document_id": "doc_abc123",
@@ -90,149 +134,135 @@ save_message() × 2  (user + assistant)
   "chunk_index": 0,
   "source_type": "pdf",
   "knowledge_tier": "persistent",
-  "created_at": "2026-02-25T10:00:00Z"
-}
-```
-Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` in Postgres.
-
----
-
-## What Was NOT Implemented (Deferred)
-
-From the Chat & RAG spec, the following priorities were scoped out:
-
-### Priority 3 — Tighter System Prompt
-`build_rag_prompt()` with restrictive citation rules ("do not use training data", "cite sources as [N]", explicit fallback) was not implemented. The current `build_system_prompt()` in `context.py` appends RAG context to the base prompt without any retrieval-specific instructions. The model will answer freely from training knowledge alongside retrieved chunks. **This is a retrieval quality gap, not a crash.**
-
-### Priority 4 — Recency Scoring
-`apply_recency_scoring()` (exponential decay blending cosine score with chunk age) was not implemented. `created_at` is now stored in the Qdrant payload so this can be added without a backfill. Qdrant results are currently returned in raw similarity order.
-
-### Priority 5 — Chunk Size Tuning
-Chunking defaults were not adjusted. Current: 512 tokens, 64 overlap. Spec recommendation: 400 tokens, 50 overlap. Re-ingesting existing documents would be required after any change to defaults.
-
----
-
-## Further Recommendations
-
-### Restrictive RAG System Prompt (Priority 3 — do first)
-The first backend task to pick up after the frontend is functional. The current prompt produces unreliable document chat — the model answers from training data and doesn't cite sources. The fix is contained entirely to `context.py`: replace `build_system_prompt` with a branch that uses a restrictive template when `rag_context` is present (cite sources, don't use training knowledge, explicit fallback message).
-
-### Backfill Existing Documents
-Documents ingested before today are missing `created_at` in their Qdrant payloads and may still have the redundant `metadata.filename` nesting. Run the `backfill_chunk_payloads()` script outlined in the Chat & RAG spec to:
-1. Strip any remaining `text` fields from Qdrant payloads
-2. Add `created_at` to old points
-3. Clean up `metadata` nesting
-
-No Postgres changes needed — `document_chunks` text is already correct.
-
-### BM25 Hybrid Search
-Vector search alone misses exact keyword matches — model names, paper titles, algorithm names, version numbers. BM25 excels at these. Correctly deferred to the project/research phase. When ready:
-
-- Add a `bm25_indexes` table keyed by `document_id` storing the tokenized corpus per document
-- At ingestion, build and store the BM25 index alongside the Qdrant upsert
-- At search time, run `bm25_search()` alongside `vector_search()` and merge results via Reciprocal Rank Fusion (RRF)
-- `retrieve()` extends cleanly — `document_ids` is already the scope primitive, BM25 slots in as a second retrieval path with no architectural changes
-
-### Recency Scoring (Priority 4)
-`created_at` is now in every new Qdrant payload. Adding recency scoring is additive — wrap the existing Qdrant results with `apply_recency_scoring()` before the Postgres text fetch. Start with `recency_weight=0.3`, `half_life_days=30`. Tune based on observed behavior.
-
-### Celery for Ingestion
-Document ingestion currently runs as a FastAPI `BackgroundTask`. Works at low volume but has no retry logic, no persistence across restarts, and no visibility beyond the in-memory `_progress` dict. Moving to Celery is scheduled for Phase 2 and becomes necessary once video/audio transcription is added (slow, long-running, must survive restarts).
-
----
-
-## Frontend — Items to Implement
-
-Ordered by dependency — earlier items unblock later ones.
-
-### 1. Fix `contextBudget` value
-**File:** `stores/chat.store.ts`
-`contextBudget` is hardcoded as `4096`. The backend uses `8192`. The dev mode overlay shows the wrong budget. One-line fix.
-
----
-
-### 2. Add `mode` to `Conversation` type
-**File:** `types/index.ts`
-Add `mode: 'general' | 'documents'` to the `Conversation` interface. Update anywhere `Conversation` objects are constructed in `useSSEChat.ts` (the `newConv` object built on the `done` event).
-
----
-
-### 3. Add `Document` type
-**File:** `types/index.ts`
-Add a `Document` interface for items from the document library:
-```ts
-interface Document {
-  document_id: string;
-  filename: string;
-  file_type: string;
-  processing_status: string;
-  upload_date: string;
-  word_count: number | null;
-  chunk_count: number | null;
-}
-```
-And a `ConversationDocument` type for the attach/detach context:
-```ts
-interface ConversationDocument {
-  document_id: string;
-  filename: string;
-  file_type: string;
-  word_count: number | null;
-  added_at: string;
+  "created_at": "2026-02-26T10:00:00Z"
 }
 ```
 
----
+Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` in Postgres for the actual text fetch.
 
-### 4. Add conversation document state to store
-**File:** `stores/chat.store.ts`
-Add:
-```ts
-conversationDocuments: Record<string, ConversationDocument[]>
-setConversationDocuments: (convId: string, docs: ConversationDocument[]) => void
-addConversationDocument: (convId: string, doc: ConversationDocument) => void
-removeConversationDocument: (convId: string, docId: string) => void
-```
-This is the source of truth for which documents are attached to which conversation.
+### Database Tables
 
----
-
-### 5. Add API methods for conversation document management
-**File:** `api/client.ts`
-Add typed wrappers for:
-- `GET /chat/{conv_id}/documents` → returns `{ documents: ConversationDocument[] }`
-- `POST /chat/{conv_id}/documents/{doc_id}` → attach, returns updated doc list + mode
-- `DELETE /chat/{conv_id}/documents/{doc_id}` → detach, returns updated doc list + mode
+| Table | Purpose |
+|---|---|
+| `users` | Auth — username, hashed_password |
+| `conversations` | Chat sessions — tier, title, token_count, summary, summarized_up_to_id |
+| `messages` | Individual messages — role, content, model_used, timestamp |
+| `documents` | Uploaded documents — status, chunk_count, user_id, error_message |
+| `document_chunks` | Chunks — text, token_count, qdrant_point_id, user_id |
+| `conversation_documents` | Junction table — scopes documents to conversations |
+| `bm25_indexes` | Per-document BM25 corpus — chunk_ids, corpus JSON |
 
 ---
 
-### 6. Load conversation documents on conversation switch
-When `activeConversationId` changes, call `GET /chat/{conv_id}/documents` and populate `conversationDocuments` in the store. Best placed in a `useConversation.ts` hook or inside the existing conversation-switching logic.
+## API Endpoints (25 total)
+
+| Method | Path | Status |
+|---|---|---|
+| POST | `/api/auth/login` | ✅ |
+| GET | `/api/auth/me` | ✅ |
+| POST | `/api/chat` | ✅ SSE streaming |
+| GET | `/api/chat/conversations` | ✅ |
+| GET | `/api/chat/conversations/{id}/messages` | ✅ |
+| GET | `/api/chat/{id}/documents` | ✅ |
+| POST | `/api/chat/{id}/documents/{doc_id}` | ✅ |
+| DELETE | `/api/chat/{id}/documents/{doc_id}` | ✅ |
+| GET | `/api/documents` | ✅ |
+| POST | `/api/documents/upload` | ✅ |
+| POST | `/api/documents/url` | ❌ 501 stub |
+| GET | `/api/documents/{id}` | ✅ |
+| GET | `/api/documents/{id}/progress` | ✅ (per-doc only, bulk TBD) |
+| DELETE | `/api/documents/{id}` | ✅ |
+| GET | `/api/system/health` | ✅ |
+| GET | `/api/system/resources` | ✅ |
+| GET | `/api/system/models` | ✅ |
+| GET/POST | `/api/research` | ❌ stub |
+| POST | `/api/quizzes/generate` | ❌ stub |
+| GET | `/api/quizzes/due` | ❌ stub |
+| GET | `/api/quizzes/concepts/mastery` | ❌ stub |
+| GET | `/api/graph/visualize` | ❌ stub |
+| GET | `/api/graph/nodes` | ❌ stub |
+| GET | `/api/graph/gaps` | ❌ stub |
 
 ---
 
-### 7. Document scope bar in chat view
-**File:** `components/chat/ChatWindow.tsx` (new `DocumentScopeBar` component)
-A bar that sits above the message list showing:
-- Nothing / "General chat" when no documents are attached
-- Document chips with filename when in document mode, each with an × to detach
-- An "Attach document" button that opens a picker from the user's document library
+## Known Bugs / Open Issues
 
-On attach: call `POST /chat/{conv_id}/documents/{doc_id}`, update store, update conversation mode
-On detach: call `DELETE /chat/{conv_id}/documents/{doc_id}`, update store
-
----
-
-### 8. Send `document_ids` on new conversation creation
-**File:** `hooks/useSSEChat.ts`
-When creating a new conversation (`isNewConversation`) and the store has pending documents for that conversation, include `document_ids` in the chat POST body. This ensures new document-scoped conversations are created with the correct scope from the first message.
+| # | Severity | Description | File |
+|---|---|---|---|
+| 1 | High | Wrong LLM — `llama3.2:3b` in use, spec requires `qwen2.5:7b` (Tier 1). Update `OLLAMA_MODEL` env var and `init-ollama` | `config.py`, `docker-compose.yml` |
+| 2 | High | Vector dimension unverified — `VECTOR_SIZE = 768` but spec says 384. Run `curl` check below to confirm | `db/qdrant.py` |
+| 3 | Medium | Per-document progress polling — `DocumentList.tsx:117` fires N fetches/cycle. Need `GET /api/documents/progress?ids=...` bulk endpoint | `api/documents.py`, `DocumentList.tsx` |
+| 4 | Medium | Naive chunking — no sentence-boundary awareness; splits mid-sentence | `core/ingestion.py` |
+| 5 | Medium | Summarization in hot path — `_generate_and_cache_summary()` blocks the next user request | `core/context.py` |
+| 6 | Medium | No Celery/Redis — background processing uses FastAPI `BackgroundTasks`; no retries, no persistence | `api/documents.py` |
+| 7 | Low | `contextBudget` wrong in frontend store — hardcoded 4096, backend uses 8192 | `stores/chat.store.ts` |
+| 8 | Low | No stream abort — `Square` icon shown in `MessageInput` but no `AbortController` wired | `hooks/useSSEChat.ts`, `api/client.ts` |
 
 ---
 
-### 9. Conversation mode indicator in sidebar
-**File:** `components/layout/Sidebar.tsx`
-Add a small document icon or `doc` pill on each conversation list item when `mode === 'documents'`. Gives the user a quick read on which conversations have document context.
+## Docker Compose — Current vs Target
+
+| Service | Current | Target |
+|---|---|---|
+| postgres | ✅ Running | ✅ |
+| ollama | ✅ Running | ✅ |
+| init-ollama | ✅ (pulls llama3.2:3b) | Update to pull qwen2.5:7b |
+| backend | ✅ Running | ✅ |
+| qdrant | ❌ Missing | Add to compose |
+| redis | ❌ Missing | Add to compose |
+| celery worker | ❌ Missing | Add (Phase 2) |
+| celery beat | ❌ Missing | Add (Phase 2) |
+| nginx | ❌ Missing | Add for prod |
+| frontend | ❌ Not containerized | Add for prod |
 
 ---
 
-*Athena · Codebase Status · 2026-02-25*
+## Phase Status
+
+| Phase | Status | Blocker |
+|---|---|---|
+| Phase 1: Foundation | ~75% | Missing: Celery, Redis, sentence-aware chunking, correct model, bulk progress endpoint |
+| Phase 2: Document Processing | ~10% | Crawl4AI, video/Whisper, Celery all missing |
+| Phase 3: Learning Features | 0% | |
+| Phase 4: Two-Tier Knowledge | 0% | |
+| Phase 5: Research Pipeline | 0% | |
+| Phase 6: Knowledge Graph | 0% | |
+| Phase 7: Router + MCP | 0% | |
+| Phase 8: Production Polish | 0% | |
+
+---
+
+## Frontend Status
+
+| Feature | Status |
+|---|---|
+| App shell (Next.js 15 App Router, 6 tabs) | ✅ |
+| JWT auth + auth guard | ✅ |
+| SSE streaming chat | ✅ |
+| Conversation list + switching | ✅ |
+| Markdown rendering (react-markdown + remark-gfm) | ✅ |
+| Source citations (collapsible SourcesPanel) | ✅ |
+| Tier badge on assistant messages | ✅ |
+| Documents tab (upload, staging, progress, delete) | ✅ |
+| System footer (live polling) | ✅ |
+| Typed API client (`api/client.ts`) | ✅ |
+| Stream abort / stop button | ❌ |
+| Token flush throttle (50ms buffer) | ❌ |
+| Auto-scroll at-bottom detection | ❌ |
+| Suggestion/recommendation pills | ❌ |
+| Document attachment UI in chat | ❌ |
+| "Chat about this" button in Documents tab | ❌ |
+| Chat mode selector (ephemeral / search-all) | ❌ |
+| URL ingestion input | ❌ |
+| Delete confirmation | ❌ |
+| Bulk document progress (frontend) | ❌ |
+| PromotionCard + StreamDone.promotion_suggestion | ❌ |
+| Message list virtualization | ❌ |
+| Research tab (beyond stub) | ❌ |
+| Quizzes tab (beyond stub) | ❌ |
+| Knowledge Graph tab (beyond stub) | ❌ |
+| Settings tab (beyond stub) | ❌ |
+
+---
+
+*Athena · Codebase Status · 2026-02-26*

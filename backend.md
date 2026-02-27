@@ -4,6 +4,66 @@
 
 This document is a practical, phase-by-phase implementation guide for the Athena backend. Read CLAUDE.md first for the authoritative spec. This document translates that spec into actionable build steps.
 
+---
+
+## Current Implementation State (as of 2026-02-26)
+
+### What's Working
+
+- **FastAPI app** (`backend/app/main.py`) — lifespan handler, JWT auth, seeded admin user on boot
+- **JWT auth** (`core/security.py`) — `get_current_user` dependency, password hashing, token issuance
+- **Document upload + ingestion** (`api/documents.py`, `core/ingestion.py`) — PDF/text extraction, sliding token-window chunking, nomic-embed-text via Ollama, Qdrant upsert, Postgres metadata
+- **Hybrid BM25 + vector search with RRF** (`core/rag.py`, `core/bm25.py`) — parallel Qdrant vector search + BM25Okapi keyword search merged via reciprocal rank fusion; per-document BM25 indexes cached in `core/bm25.py`
+- **SSE chat streaming** (`api/chat.py`) — `POST /api/chat` streams Ollama tokens via `StreamingResponse`; conversation created/fetched from Postgres; doc_ids fetched from DB (source of truth, not from request body)
+- **Context window management** (`core/context.py`) — 8192 token budget (system 1k, RAG 2k, history 3.5k, message 500, generation 1.2k); summarizes oldest messages when over budget; caches summary in Postgres
+- **Conversation history** — `GET /api/chat/conversations` and `GET /api/chat/conversations/{id}/messages` both implemented
+- **Document attachment to conversation** — `POST/DELETE /api/chat/{id}/documents/{doc_id}` endpoints wired; `conversation_documents` join table enforces scoping
+- **Fuzzy document name matching** — `find_referenced_document()` in `rag.py` uses rapidfuzz `partial_ratio` to detect when a query references a specific document by name, then scopes the search to that document
+- **Document progress polling** — `GET /api/documents/{id}/progress` exists; currently polled per-document (bug — see TODO.md)
+- **System health / resources** — `GET /api/system/health` and `GET /api/system/resources` return live data
+
+### Known Gaps and Bugs
+
+- **Wrong LLM model** — currently using `llama3.2:3b`. Spec requires `qwen2.5:7b` (Tier 1). Needs `OLLAMA_MODEL` env var update and init-ollama container change.
+- **Vector dimension may be wrong** — `db/qdrant.py` has `VECTOR_SIZE = 768` with a comment saying "spec says 384, actual is 768". Verify what `nomic-embed-text` actually produces via `ollama api/embed`, then fix to match.
+- **Naive chunking** — `ingestion.py` uses a sliding token window with no sentence awareness. Splits mid-sentence, degrading retrieval.
+- **No Celery / Redis** — all background processing runs via FastAPI `BackgroundTasks`. Not robust; no retries, no task tracking, blocks on errors.
+- **No Redis client** — `db/redis.py` is a stub.
+- **No Celery** — `tasks/` directory is empty. Required for Phase 2+.
+- **Bulk document progress endpoint missing** — `GET /api/documents/progress?ids=...` not implemented; frontend polls per-document instead (N requests/cycle).
+- **URL ingestion stub** — `POST /api/documents/url` returns 501. Crawl4AI not wired.
+- **Summarization in hot path** — `_generate_and_cache_summary()` runs synchronously during the user's next request, adding latency.
+
+### Docker Compose — Current vs Target
+
+| Service | Status |
+|---|---|
+| postgres | ✅ Running |
+| ollama | ✅ Running |
+| init-ollama | ✅ Running (pulls llama3.2:3b) |
+| backend | ✅ Running |
+| qdrant | ❌ Missing from compose (run separately or not at all) |
+| redis | ❌ Missing |
+| celery worker | ❌ Missing |
+| celery beat | ❌ Missing |
+| nginx | ❌ Missing |
+| frontend | ❌ Not containerized (run via `npm run dev`) |
+
+### Phase Status
+
+| Phase | Status |
+|---|---|
+| Phase 1: Foundation | ~75% — core RAG chat works; missing Celery, Redis, sentence-aware chunking, correct model |
+| Phase 2: Document Processing | ~10% — upload works; Crawl4AI, video, Celery all missing |
+| Phase 3: Learning Features | 0% |
+| Phase 4: Two-Tier Knowledge | 0% |
+| Phase 5: Research Pipeline | 0% |
+| Phase 6: Knowledge Graph | 0% |
+| Phase 7: Router + MCP | 0% |
+| Phase 8: Production Polish | 0% |
+
+---
+
 --- Phase-by-Phase Breakdown
 
   Phase 1: Foundation (Start Here)
@@ -378,8 +438,8 @@ Run `backend/sql/schema.sql` at first boot via the `docker-entrypoint-initdb.d` 
 
 **`db/qdrant.py`**
 - Qdrant client wrapping `qdrant-client`
-- Collection name: `athena_knowledge` (not `athena_documents` — the prototype used the wrong name)
-- Vector size: 384 (nomic-embed-text)
+- Collection name: `athena_knowledge`
+- Vector size: **verify first** — `nomic-embed-text` via Ollama appears to return 768-dim vectors (not 384 as CLAUDE.md states). Run `ollama api/embeddings` and check `len(embedding)`. Currently `VECTOR_SIZE = 768` in `db/qdrant.py`. Fix whichever is wrong — a mismatch silently returns empty search results.
 - Distance: COSINE
 - Create collection if not exists at startup
 

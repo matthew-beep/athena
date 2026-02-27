@@ -14,6 +14,7 @@ from app.core.security import get_current_user
 from app.core.ingestion import extract_text, chunk_text, VIDEO_MIME_TYPES, _resolve_mime, normalize_filename
 from app.db import postgres
 from app.db import qdrant
+from app.core.bm25 import build_bm25_index
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -104,11 +105,16 @@ async def _process_document(
         # ── 3. Embed + store ───────────────────────────────────────────────
         _progress[document_id] = {"stage": "embedding", "done": 0, "total": total}
         qdrant_points = []
+        bm25_chunk_ids = []  # collect here
+        bm25_texts = []
 
         async with httpx.AsyncClient() as client:
             for chunk in chunks:
                 i = chunk["chunk_index"]
                 chunk_id = f"{document_id}_chunk_{i}"
+
+                bm25_chunk_ids.append(chunk_id)   # add to list
+                bm25_texts.append(chunk["text"])   # add to list
 
                 try:
                     embedding = await _embed(client, chunk["text"])
@@ -145,9 +151,12 @@ async def _process_document(
 
                 _progress[document_id] = {"stage": "embedding", "done": i + 1, "total": total}
 
-        # ── 4. Upsert Qdrant ───────────────────────────────────────────────
+        # ── 4. Upsert Qdrant and build BM25 index ───────────────────────────────────────────────
         await qdrant.ensure_collection()
         await qdrant.upsert_points(qdrant_points)
+
+        await build_bm25_index(document_id, bm25_chunk_ids, bm25_texts)
+
 
         # ── 5. Complete ────────────────────────────────────────────────────
         _progress.pop(document_id, None)

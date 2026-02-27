@@ -17,40 +17,28 @@ from app.db import postgres
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
-def resolve_mode(document_ids: list[str]) -> str:
-    if len(document_ids) == 0:
-        return "general"
-    else:
-        return "documents"
-
-
+# ── Conversation helpers ────────────────────────────────────────────────────────
 
 async def create_conversation(
     user_id: int,
     knowledge_tier: str = "ephemeral",
     title: str = "New Conversation",
-    document_ids: list[str] = [],
 ) -> str:
-    """Create a new conversation and attach any initial documents."""
+    """Create a new conversation row and return its ID."""
     new_id = f"conv_{uuid.uuid4().hex[:16]}"
-    mode = "general" if not document_ids else "documents"
-
     await postgres.execute(
         """INSERT INTO conversations (conversation_id, user_id, title, knowledge_tier, mode)
-           VALUES ($1, $2, $3, $4, $5)""",
+           VALUES ($1, $2, $3, $4, 'general')""",
         new_id,
         user_id,
         title,
         knowledge_tier,
-        mode,
     )
-
-    await attach_documents(new_id, document_ids)
     return new_id
 
 
 async def get_conversation(conversation_id: str, user_id: int) -> dict | None:
-    """Returns conversation row or None if not found / not owned by user."""
+    """Return the conversation row or None if not found / not owned by this user."""
     return await postgres.fetch_one(
         "SELECT * FROM conversations WHERE conversation_id = $1 AND user_id = $2",
         conversation_id,
@@ -62,34 +50,18 @@ async def _get_or_create_conversation(
     conversation_id: str | None,
     user_id: int,
     knowledge_tier: str,
-    document_ids: list[str] = [],
-) -> dict:
+) -> str:
     """
-    Used at the chat endpoint — if a conversation_id is provided, verify it exists
-    and return its row + resolved document_ids. If not provided, create a fresh
-    one (optionally with initial document_ids) and return the new row + document_ids.
-    Raises if conversation_id is provided but not found.
-    Returns: {"conversation_id": str, "document_ids": list[str], "conversation": dict}
+    Verify an existing conversation belongs to the user, or create a fresh one.
+    Returns the conversation_id string. Raises 404 if the given ID is not found.
     """
     if conversation_id:
         row = await get_conversation(conversation_id, user_id)
         if not row:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        doc_ids = await get_conversation_document_ids(conversation_id)
-        return {
-            "conversation_id": conversation_id,
-            "document_ids": doc_ids,
-            "conversation": dict(row),
-        }
+        return conversation_id
 
-    new_id = await create_conversation(user_id, knowledge_tier, document_ids=document_ids)
-    row = await get_conversation(new_id, user_id)
-    doc_ids = await get_conversation_document_ids(new_id)
-    return {
-        "conversation_id": new_id,
-        "document_ids": doc_ids,
-        "conversation": dict(row) if row else {},
-    }
+    return await create_conversation(user_id, knowledge_tier)
 
 
 async def _update_title(conversation_id: str, first_message: str) -> None:
@@ -103,8 +75,11 @@ async def _update_title(conversation_id: str, first_message: str) -> None:
         conversation_id,
     )
 
+
+# ── Document attachment helpers ─────────────────────────────────────────────────
+
 async def attach_documents(conversation_id: str, document_ids: list[str]) -> None:
-    """Attach documents to a conversation and sync mode. Pass one or more document_ids."""
+    """Attach one or more documents to a conversation."""
     if not document_ids:
         return
     insert_sql = """INSERT INTO conversation_documents (conversation_id, document_id)
@@ -116,11 +91,10 @@ async def attach_documents(conversation_id: str, document_ids: list[str]) -> Non
             insert_sql,
             [(conversation_id, doc_id) for doc_id in document_ids],
         )
-    await _sync_conversation_mode(conversation_id)
 
 
 async def detach_documents(conversation_id: str, document_ids: list[str]) -> None:
-    """Remove documents from a conversation and sync mode. Pass one or more document_ids."""
+    """Remove one or more documents from a conversation."""
     if not document_ids:
         return
     delete_sql = """DELETE FROM conversation_documents
@@ -132,36 +106,27 @@ async def detach_documents(conversation_id: str, document_ids: list[str]) -> Non
             delete_sql,
             [(conversation_id, doc_id) for doc_id in document_ids],
         )
-    await _sync_conversation_mode(conversation_id)
 
 
 async def get_conversation_document_ids(conversation_id: str) -> list[str]:
-    """Fetch all document IDs attached to a conversation."""
+    """Fetch all document IDs currently attached to a conversation."""
     rows = await postgres.fetch_all(
         """SELECT document_id FROM conversation_documents
            WHERE conversation_id = $1
            ORDER BY added_at ASC""",
-        conversation_id
+        conversation_id,
     )
     return [r["document_id"] for r in rows]
 
-async def _sync_conversation_mode(conversation_id: str) -> None:
-    doc_ids = await get_conversation_document_ids(conversation_id)
-    mode = resolve_mode(doc_ids)
-    await postgres.execute(
-        """UPDATE conversations SET mode = $1, updated_at = NOW()
-           WHERE conversation_id = $2""",
-        mode, conversation_id
-    )
 
+# ── Routes — literal paths defined before parameterized paths ───────────────────
 
 @router.post("")
 async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)):
     settings = get_settings()
     start_time = time.monotonic()
 
-    # Pre-flight token check — must happen before streaming starts so we can
-    # return a proper 400 response (streaming responses can't change status code mid-stream)
+    # Pre-flight token check before streaming starts — can't change status mid-stream
     current_tokens = count_tokens_text(body.message)
     if current_tokens > MAX_MESSAGE_TOKENS:
         raise HTTPException(
@@ -174,30 +139,36 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
             },
         )
 
-    conv_result = await _get_or_create_conversation(
+    conversation_id = await _get_or_create_conversation(
         body.conversation_id,
         current_user["id"],
         body.knowledge_tier,
-        document_ids=body.document_ids if not body.conversation_id else [],
     )
-    conversation_id = conv_result["conversation_id"]
 
-    if conv_result["conversation"].get("title") == "New Conversation":
+    # Title update: separate DB fetch since _get_or_create_conversation only returns the ID
+    conv = await get_conversation(conversation_id, current_user["id"])
+    if conv and conv.get("title") == "New Conversation":
         await _update_title(conversation_id, body.message)
 
     async def stream_response():
         model = settings.ollama_model
 
-        # RAG: scoped to this conversation's attached docs (conv_result["document_ids"])
-        rag_sources = await rag_module.retrieve(
-            body.message,
-            current_user["id"],
-            document_ids=conv_result["document_ids"],
-        )
-        rag_context = rag_module.format_rag_context(rag_sources) if rag_sources else None
+        # DB is the source of truth for which documents are in scope.
+        # Ownership is enforced by the conversation_documents join — only docs
+        # attached to this user's conversation are ever returned.
+        doc_ids = await get_conversation_document_ids(conversation_id)
 
-        # Build token-managed message array.
-        # will_summarize=True means a summarization LLM call was made — tell frontend.
+        if doc_ids:
+            rag_sources = await rag_module.retrieve(
+                body.message,
+                current_user["id"],
+                document_ids=doc_ids,
+            )
+            rag_context = rag_module.format_rag_context(rag_sources) if rag_sources else None
+        else:
+            rag_sources = []
+            rag_context = None
+
         try:
             chat_messages, will_summarize, total_tokens = await build_messages(
                 conversation_id=conversation_id,
@@ -211,7 +182,6 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
         if will_summarize:
             yield f"data: {json.dumps({'type': 'status', 'content': 'summarizing context...'})}\n\n"
 
-        # Emit total context token count for the developer mode overlay
         yield f"data: {json.dumps({'type': 'context_debug', 'tokens': total_tokens, 'budget': 8192})}\n\n"
 
         full_response: list[str] = []
@@ -225,7 +195,7 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
                 ) as resp:
                     if resp.status_code != 200:
                         error_body = await resp.aread()
-                        logger.error(f"Ollama error {resp.status_code}: {error_body}")
+                        logger.error("Ollama error {}: {}", resp.status_code, error_body)
                         yield f"data: {json.dumps({'type': 'error', 'content': 'Model unavailable'})}\n\n"
                         return
 
@@ -250,13 +220,12 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
             yield f"data: {json.dumps({'type': 'error', 'content': 'Cannot connect to Ollama. Is it running?'})}\n\n"
             return
         except Exception as e:
-            logger.exception(f"Streaming error: {e}")
+            logger.exception("Streaming error: {}", e)
             yield f"data: {json.dumps({'type': 'error', 'content': 'Streaming error occurred'})}\n\n"
             return
 
         complete_response = "".join(full_response)
         if complete_response:
-            # Save both messages after streaming — keeps token_count accurate on conversation
             await save_message(conversation_id, "user", body.message)
             await save_message(conversation_id, "assistant", complete_response, model)
 
@@ -330,9 +299,9 @@ async def get_messages(
 @router.get("/{conversation_id}/documents")
 async def get_conversation_documents(
     conversation_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
-    """List documents attached to a conversation."""
+    """List documents currently attached to a conversation."""
     conv = await get_conversation(conversation_id, current_user["id"])
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -342,33 +311,16 @@ async def get_conversation_documents(
            JOIN documents d ON cd.document_id = d.document_id
            WHERE cd.conversation_id = $1
            ORDER BY cd.added_at ASC""",
-        conversation_id
+        conversation_id,
     )
     return {"documents": [dict(r) for r in rows]}
 
-@router.delete("/{conversation_id}/documents/{document_id}")
-async def detach_document(
-    conversation_id: str,
-    document_id: str,
-    current_user: dict = Depends(get_current_user)
-):
-    """Remove a document from a conversation."""
-    conv = await get_conversation(conversation_id, current_user["id"])
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    await detach_documents(conversation_id, [document_id])
-    doc_ids = await get_conversation_document_ids(conversation_id)
-    return {
-        "conversation_id": conversation_id,
-        "mode": resolve_mode(doc_ids),
-        "document_ids": doc_ids
-    }
 
 @router.post("/{conversation_id}/documents/{document_id}")
 async def attach_document(
     conversation_id: str,
     document_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     """Attach a document to an existing conversation."""
     conv = await get_conversation(conversation_id, current_user["id"])
@@ -376,8 +328,19 @@ async def attach_document(
         raise HTTPException(status_code=404, detail="Conversation not found")
     await attach_documents(conversation_id, [document_id])
     doc_ids = await get_conversation_document_ids(conversation_id)
-    return {
-        "conversation_id": conversation_id,
-        "mode": resolve_mode(doc_ids),
-        "document_ids": doc_ids
-    }
+    return {"conversation_id": conversation_id, "document_ids": doc_ids}
+
+
+@router.delete("/{conversation_id}/documents/{document_id}")
+async def detach_document(
+    conversation_id: str,
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Remove a document from a conversation."""
+    conv = await get_conversation(conversation_id, current_user["id"])
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    await detach_documents(conversation_id, [document_id])
+    doc_ids = await get_conversation_document_ids(conversation_id)
+    return {"conversation_id": conversation_id, "document_ids": doc_ids}

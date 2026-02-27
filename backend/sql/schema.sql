@@ -106,3 +106,14 @@ CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(do
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
 CREATE INDEX IF NOT EXISTS idx_document_chunks_user ON document_chunks(user_id);
 
+-- bm25 indexes table
+
+CREATE TABLE IF NOT EXISTS bm25_indexes (
+    document_id  VARCHAR(255) REFERENCES documents(document_id) ON DELETE CASCADE,
+    chunk_ids    JSONB NOT NULL DEFAULT '[]',
+    corpus       JSONB NOT NULL DEFAULT '[]',
+    updated_at   TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY  (document_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bm25_document ON bm25_indexes(document_id);

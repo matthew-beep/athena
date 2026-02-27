@@ -222,6 +222,24 @@ async def _generate_and_cache_summary(
     ], True  # True = summarization LLM call was made this request
 
 
+def _build_rag_system_prompt(rag_context: str) -> str:
+    """
+    System prompt when RAG context is present: restrictive rules so the model
+    answers only from the provided excerpts and cites as [1], [2], etc.
+    """
+    instructions = (
+        "You are Athena, a personal AI assistant helping the user learn and build.\n\n"
+        "The following excerpts are from the user's documents. Use them as the **only** "
+        "source for your answer. Do not use your internal or training knowledge to answer.\n\n"
+        "Rules:\n"
+        "- Base your answer only on the provided excerpts. Cite each claim with the "
+        "corresponding source number, e.g. [1], [2].\n"
+        "- If the excerpts do not contain enough information to answer the question, "
+        "say so clearly and do not guess or invent details.\n\n"
+    )
+    return f"{instructions}{rag_context}"
+
+
 def build_system_prompt(rag_context: str | None = None) -> str:
     base = (
         "You are Athena, a personal AI assistant. "
@@ -230,7 +248,7 @@ def build_system_prompt(rag_context: str | None = None) -> str:
         "If all scores are less than 60%, say you don't have enough information to answer the question."
     )
     if rag_context:
-        return f"{base}\n\n{rag_context}"
+        return _build_rag_system_prompt(rag_context)
     return base
 
 

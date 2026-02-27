@@ -8,6 +8,106 @@ The existing `frontend/frontend.html` is a single-file prototype. The real front
 
 ---
 
+## Current Implementation State (as of 2026-02-26)
+
+### Actual Tech Stack (differs from spec below)
+
+| Concern | Planned | Actual |
+|---|---|---|
+| Framework | Vite + React 18 | **Next.js 15 App Router** |
+| Routing | React Router v7 | **Next.js App Router (`app/`)** |
+| Styling | Tailwind CSS v4 | **Tailwind CSS v3** |
+| Animation | Framer Motion | Framer Motion ✅ |
+| State | Zustand | Zustand ✅ |
+| Icons | Lucide React | Lucide React ✅ |
+| API proxy | vite.config proxy | **next.config.mjs rewrites `/api/*` → `localhost:8000/api/*`** |
+
+### Design System — Precision Glass v2.1 (not original Liquid Glass)
+
+The actual design diverges from the spec below. Key differences:
+
+- Background: `hsl(240 10% 3.9%)` — deep zinc-blue, not pure `#09090b`
+- No glows, no `translateY` hover — `scale(1.01)` + border contrast only
+- Nav active state: 2px left border, no background fill
+- Progress bars: `h-px rounded-none` (1px precision lines)
+- Typing dots: 4px, `hsl(var(--muted-foreground))`, not primary blue
+- Fonts: **Inter Tight** (display/headings), **Inter** (body), **JetBrains Mono** (data)
+- Corners: `rounded-sm` throughout (not `rounded-2xl`)
+- Primary button: `bg-foreground text-background` (white button, no glow effect)
+
+### What's Implemented
+
+- **App shell** — Next.js App Router layout with sidebar, tab bar (6 tabs), system footer
+- **Auth** — JWT login form, `useAuthStore` (Zustand), auth guard on `(app)` layout
+- **Chat tab** — full SSE streaming chat, optimistic user messages, typing indicator, conversation list + switching, message history load on click
+- **Markdown rendering** — `react-markdown` + `remark-gfm` in `Message.tsx`
+- **Source citations** — `SourcesPanel` (collapsible, deduped by filename) in `Message.tsx`
+- **Tier badge** — `TierBadge` rendered on assistant messages with `model_used`
+- **Documents tab** — drag-drop upload zone, staged file queue, per-document progress display, delete with optimistic removal
+- **System footer** — live polling via `useSystemStats` hook, `GET /api/system/resources` every 10s
+- **API client** — `frontend/api/client.ts` with typed `get`, `post`, `del`, `postStream` wrappers
+
+### What's NOT Implemented (frontend)
+
+- **Stream abort / stop button** — `Square` icon is shown in `MessageInput` during streaming but not wired to any `AbortController`. No way to cancel mid-stream.
+- **Token flush throttle** — `appendStreamToken` fires a React state update per SSE token. Needs ref buffer + 50ms flush.
+- **Auto-scroll at-bottom detection** — `MessageList` always scrolls to bottom on token arrival. No check if user has scrolled up.
+- **Suggestion/recommendation pills** — no pre-prompt pill buttons above input
+- **Document attachment UI in chat** — API endpoints exist (`POST/DELETE /api/chat/{id}/documents/{doc_id}`) but no frontend panel to attach/detach docs to an active conversation
+- **Start chat from document** — no "Chat about this" button in Documents tab
+- **Chat mode selector** — `knowledge_tier` hardcoded to `'ephemeral'` in `useSSEChat`; no UI toggle for "search all knowledge base"
+- **URL ingestion UI** — `UploadZone` is file-only; no URL input field
+- **Delete confirmation** — delete fires immediately on hover+click
+- **Bulk document progress** — per-document `forEach` poll loop at `DocumentList.tsx:117`; blocked on backend bulk endpoint
+- **PromotionCard** — not implemented; `StreamDone` type doesn't include `promotion_suggestion`
+- **Virtualization** — no `@tanstack/react-virtual`
+- **`contextBudget` wrong** — hardcoded to `4096` in `chat.store.ts`; should be `8192`
+- **Research, Quizzes, Knowledge Graph, Settings tabs** — all stubs
+
+### File Structure (actual, differs from spec)
+
+```
+frontend/
+├── app/
+│   ├── (auth)/
+│   │   └── login/page.tsx
+│   └── (app)/
+│       ├── layout.tsx              # auth guard
+│       └── [tab]/page.tsx          # 6 routes: chat, research, graph, quizzes, documents, settings
+├── components/
+│   ├── chat/
+│   │   ├── ChatWindow.tsx
+│   │   ├── MessageList.tsx
+│   │   ├── Message.tsx             # markdown, SourcesPanel, TierBadge all here
+│   │   └── MessageInput.tsx        # Square icon shown but not wired for abort
+│   ├── documents/
+│   │   ├── DocumentsPanel.tsx
+│   │   ├── DocumentList.tsx        # per-document polling bug at line 117
+│   │   └── UploadZone.tsx          # file-only, no URL input
+│   ├── layout/
+│   │   ├── Sidebar.tsx             # conversation list + switching ✅
+│   │   └── SystemFooter.tsx        # live polling ✅
+│   └── ui/
+│       ├── GlassCard.tsx
+│       └── GlassButton.tsx
+├── hooks/
+│   ├── useSSEChat.ts               # no AbortController, no token flush throttle
+│   └── useSystemStats.ts           # ✅ implemented
+├── stores/
+│   ├── auth.store.ts
+│   ├── chat.store.ts               # contextBudget wrong (4096 vs 8192)
+│   ├── ui.store.ts
+│   └── system.store.ts
+├── api/
+│   └── client.ts                   # ✅ typed wrappers, no AbortSignal support yet
+└── types/
+    └── index.ts                    # StreamDone missing promotion_suggestion field
+```
+
+---
+
+---
+
 ## Design Language: Liquid Glass Minimalism
 
 ### Philosophy
