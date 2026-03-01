@@ -258,6 +258,24 @@ async def get_document_progress(document_id: str, current_user: dict = Depends(g
         return JSONResponse(status_code=404, content={"detail": "Document not found."})
     return {"stage": row["processing_status"], "done": 0, "total": 0, "active": False}
 
+@router.get("/progress/active")
+async def get_active_progress(current_user: dict = Depends(get_current_user)):
+    rows = await postgres.fetch_all(
+        "SELECT document_id FROM documents WHERE processing_status = 'processing' AND user_id = $1",
+        current_user["id"],
+    )
+    result = {}
+    for row in rows:
+        doc_id = row["document_id"]
+        prog = _progress.get(doc_id)
+        if prog is not None:
+            result[doc_id] = {**prog, "active": True}
+        else:
+            # In DB as processing but not in memory — server restarted mid-ingest
+            result[doc_id] = {"stage": "processing", "done": 0, "total": 0, "active": False}
+    return result
+
+
 
 @router.get("/{document_id}")
 async def get_document(document_id: str, current_user: dict = Depends(get_current_user)):

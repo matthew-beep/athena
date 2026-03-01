@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { FileText, FileType, Video, Loader2, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
+import { FileText, FileType, Video, Loader2, CheckCircle2, AlertCircle, Trash2, MessageSquare } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { cn } from '@/utils/cn';
 
@@ -103,10 +103,10 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
     return () => clearInterval(t);
   }, [documents]);
 
-  // Poll /progress every 800ms for actively processing documents
+  // Poll /progress/active every 800ms — single request for all processing documents
   useEffect(() => {
-    const processingDocs = documents.filter((d) => d.processing_status === 'processing');
-    if (processingDocs.length === 0) {
+    const hasProcessing = documents.some((d) => d.processing_status === 'processing');
+    if (!hasProcessing) {
       setProgressMap({});
       return;
     }
@@ -114,14 +114,10 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
     const poll = () => {
-      processingDocs.forEach((doc) => {
-        fetch(`/api/documents/${doc.document_id}/progress`, { headers })
-          .then((r) => r.json())
-          .then((data: Progress) => {
-            setProgressMap((prev) => ({ ...prev, [doc.document_id]: data }));
-          })
-          .catch(() => {});
-      });
+      fetch('/api/documents/progress/active', { headers })
+        .then((r) => r.json())
+        .then((data: Record<string, Progress>) => setProgressMap(data))
+        .catch(() => {});
     };
 
     poll();
@@ -261,6 +257,10 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
 
           {/* Date + delete */}
           <div className="flex items-center gap-2 flex-shrink-0">
+            <button className="flex items-center gap-1 text-xs px-2 py-1 rounded-sm glass-subtle text-muted-foreground hover:text-foreground transition-all border border-border/20 hover:border-border">
+              <MessageSquare size={12} />
+              <span className="text-xs">Chat</span>
+            </button>
             <span className="text-xs text-muted-foreground font-mono">{doc.date}</span>
             {!doc.isLive && (
               <button

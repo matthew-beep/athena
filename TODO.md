@@ -7,10 +7,9 @@ JWT auth works, SSE streaming works. Everything below is what's missing or broke
 
 ## Bugs / Active Issues
 
-- [ ] **Document progress polling is per-document** — `DocumentList.tsx:117` fires one
-  `GET /api/documents/{id}/progress` request every 800ms for *each* processing document.
-  Fix: add `GET /api/documents/progress?ids=id1,id2` bulk endpoint (backend) + replace
-  `forEach` poll loop with a single bulk fetch (frontend). See Frontend section for details.
+- [x] **Document progress polling is per-document** — replaced per-document poll loop with
+  `GET /api/documents/progress/active` batch endpoint. Single request per 800ms tick regardless
+  of how many documents are processing. Completion detected via disappearance from response.
 - [x] **BM25 hybrid search** — `rank_bm25` wired into `core/rag.py` with RRF fusion. ~~Imported but unused.~~
 - [x] **Dead branch in `find_referenced_document`** — removed unreachable `len(document_ids) == 0` guard.
 - [x] **`rag_threshold` incompatible with RRF** — removed cosine threshold filter; RRF rank position gates quality instead.
@@ -60,7 +59,7 @@ JWT auth works, SSE streaming works. Everything below is what's missing or broke
   Returns document_id immediately, processing happens async.
 - [ ] **Video/audio ingestion** — Faster-Whisper transcription already stubbed in `ingestion.py` but
   not connected to the Celery pipeline. Wire it up: yt-dlp download → Whisper transcription → chunk → embed.
-- [ ] **Bulk document progress endpoint** — `GET /api/documents/progress?ids=id1,id2,...` returns a
+- [x] **Bulk document progress endpoint** — `GET /api/documents/progress/active` returns a
   map of `{ document_id: { stage, done, total, active } }`. Eliminates per-document polling loop.
 
 ### Phase 3: Learning Features
@@ -136,14 +135,55 @@ JWT auth works, SSE streaming works. Everything below is what's missing or broke
 - [x] **Tier badge** — `TierBadge` rendered in `Message.tsx` when `model_used` is present.
 - [x] **API client module** — `frontend/api/client.ts` exists with `get`, `post`, `del`, `postStream`.
 
-### Priority 1: Document Progress Polling (Backend + Frontend)
+### ~~Priority 1: Document Progress Polling~~ ✓ Done
 
-- [ ] **Backend bulk progress endpoint** — `GET /api/documents/progress?ids=id1,id2,...` returns
-  `{ document_id: { stage, done, total, active } }`. Single query replaces N parallel fetches.
-- [ ] **Frontend: replace per-document poll loop** — `DocumentList.tsx:117` calls
-  `processingDocs.forEach(doc => fetch(/progress))` every 800ms. Replace with a single request
-  to the bulk endpoint, spreading results into `progressMap`. One fetch per cycle regardless of
-  how many documents are processing.
+- [x] **Backend bulk progress endpoint** — `GET /api/documents/progress/active` implemented.
+- [x] **Frontend: replace per-document poll loop** — `DocumentList.tsx` updated to single fetch.
+
+### Priority 1: Document Chat (Start chat from document)
+
+Full approach agreed: URL params for context passing, lazy conversation creation on first message.
+
+**Backend:**
+- [ ] **Accept mode + document context in `POST /api/chat`** — extend request body to include
+  `mode: "general" | "document"` and optional `document_id: str`. Store context in `conversations`
+  table alongside chat history.
+- [ ] **Scope RAG to document_id** — when `mode == "document"`, add `document_id` filter to both
+  Qdrant search and BM25 retrieval in `core/rag.py`. No chunks from other documents should appear.
+- [ ] **Conversation context persistence** — `conversations` table needs a `context` JSONB column
+  storing `{ mode, document_id }`. Load it on history fetch so returning to a conversation
+  restores its scope correctly.
+
+**Frontend:**
+- [ ] **"Chat" button in DocumentList** — button already exists in the UI. Wire it to navigate to
+  `/chat?mode=document&doc_id={document_id}&filename={filename}` using Next.js router.
+- [ ] **Chat tab reads URL params on mount** — `useSearchParams()` reads `mode`, `doc_id`,
+  `filename`. If present, initialise chat in document mode. Requires `Suspense` boundary wrapper
+  around the params-reading component.
+- [ ] **Document scope indicator in chat UI** — when in document mode, show a pill/badge above
+  the message input: "Chatting with: paper.pdf · [×]". Clicking × clears params and returns
+  to general chat mode.
+- [ ] **Pass context in chat requests** — `useSSEChat` currently sends `{ message, conversation_id,
+  knowledge_tier }`. Extend to include `mode` and `document_id` when set. On first message
+  (no `conversation_id`), backend creates conversation with context stored; returns `conversation_id`
+  in `done` event. Subsequent messages use that ID.
+- [ ] **URL updates after first message** — once `conversation_id` is returned, update URL to
+  `/chat?conversation_id={id}` so refresh restores the conversation correctly.
+
+### Pagination + Server-Side Search (Documents Tab)
+
+These two are coupled — pagination makes client-side search incorrect, so they must ship together.
+
+- [ ] **Backend: add search + pagination to `GET /api/documents`** — add optional query params:
+  `search: str = ""`, `limit: int = 20`, `offset: int = 0`. Filter with
+  `AND ($2 = '' OR filename ILIKE '%' || $2 || '%')`. Return `total` count (separate COUNT query)
+  alongside the page of results so the frontend can render page controls.
+- [ ] **Frontend: debounced search input** — remove client-side `.filter()` from `DocumentList.tsx`.
+  Pass `search` term as query param to `fetchDocuments`. Debounce input by ~300ms to avoid
+  a DB hit on every keystroke.
+- [ ] **Frontend: pagination controls** — track `offset` in state. Add prev/next (or page number)
+  controls below the document list. Reset to `offset=0` whenever search term changes or a new
+  document is uploaded.
 
 ### Chat: Stream Abort (Stop Button)
 
@@ -167,8 +207,7 @@ JWT auth works, SSE streaming works. Everything below is what's missing or broke
   The API endpoints (`POST/DELETE /api/chat/{id}/documents/{doc_id}`) exist. Add a document
   picker panel (floating or sidebar section) that calls them. Store attached doc list per
   conversation in `chat.store.ts`.
-- [ ] **Start chat from document** — Documents tab has no "Chat about this" button per document.
-  Add it: creates a new conversation, attaches the document, navigates to Chat tab.
+- [ ] **Start chat from document** — see Priority 1 section above for full implementation plan.
 - [ ] **`contextBudget` hardcoded to 4096** — `chat.store.ts` has `contextBudget: 4096`. Backend
   uses 8192. Fix to 8192 or fetch from backend `context_debug` SSE event (already emitted).
 
