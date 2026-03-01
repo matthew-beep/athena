@@ -7,6 +7,7 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None
     knowledge_tier: Literal["ephemeral", "persistent"] = "ephemeral"
+    search_all: bool = False
 
 
 class ConversationOut(BaseModel):

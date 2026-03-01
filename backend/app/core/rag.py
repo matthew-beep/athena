@@ -205,7 +205,7 @@ async def retrieve(
         else:
             # search_all — no doc_ids so skip BM25, pure vector
             vector_hits = await qdrant.search(vector, top_k=top_k, filters=search_filter)
-            ranked_ids = [h.get("payload", {}).get("chunk_id") for h in vector_hits]
+            ranked_ids = [cid for h in vector_hits if (cid := h.get("payload", {}).get("chunk_id"))]
 
         if not ranked_ids:
             return []

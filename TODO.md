@@ -15,6 +15,9 @@ JWT auth works, SSE streaming works. Everything below is what's missing or broke
 - [x] **`rag_threshold` incompatible with RRF** — removed cosine threshold filter; RRF rank position gates quality instead.
 - [x] **Missing `user_id` guard on chunk text fetch** — added `AND d.user_id = $2` to the Postgres query in `retrieve()`.
 - [x] **`reciprocal_rank_fusion` attribute error** — fixed `hit.payload["chunk_id"]` → `hit.get("payload", {}).get("chunk_id")` (Qdrant returns plain dicts from JSON, not objects).
+- [x] **`None` in `ranked_ids` for search_all path** — `rag.py` vector-only branch used a bare list
+  comprehension with no `chunk_id` guard; `None` values could enter the SQL `ANY($1)` array. Fixed
+  with walrus-operator filter: `[cid for h in vector_hits if (cid := ...)]`.
 - [ ] **Vector dimension mismatch** — `db/qdrant.py` has `VECTOR_SIZE = 768` with a comment saying
   "spec says 384, actual is 768". Verify which dimension `nomic-embed-text` actually produces via
   Ollama, update `VECTOR_SIZE` to match, and correct `CLAUDE.md`. A mismatch silently returns empty
@@ -23,8 +26,7 @@ JWT auth works, SSE streaming works. Everything below is what's missing or broke
   for all interactive queries. Update `OLLAMA_MODEL` env var and `init-ollama` container.
 - [ ] **Naive token chunking** — `ingestion.py` uses a sliding token window with no sentence awareness.
   Mid-sentence splits degrade retrieval quality. Needs sentence-boundary-aware chunking (nltk or spaCy).
-- [ ] **RAG threshold incompatible with hybrid search** — `rag_threshold` compares raw cosine scores.
-  Once RRF fusion is in place, this filter needs to be dropped or rethought (RRF rank already gates quality).
+- [x] **RAG threshold incompatible with hybrid search** — duplicate of item above; confirmed fixed.
 - [ ] **URL ingestion returns 501** — `POST /api/documents/url` is a stub. Crawl4AI not wired up yet.
 - [ ] **No deduplication in RAG** — can return near-identical chunks from the same document. Add a
   minimum chunk distance check or a per-document chunk cap before returning sources.
@@ -48,10 +50,9 @@ JWT auth works, SSE streaming works. Everything below is what's missing or broke
   RAM used/total. Frontend system footer polls this every 10s.
 - [ ] **`GET /api/system/storage`** — not implemented. Must read from Redis cache only, never compute
   on request. Celery beat job refreshes every 5 min.
-- [ ] **Conversation list endpoint** — `GET /api/chat/conversations` not implemented. Frontend sidebar
-  needs a paginated list of conversations with title, last_active, knowledge_tier.
-- [ ] **Conversation history endpoint** — `GET /api/chat/history/{conversation_id}` not implemented.
-  Frontend needs this when switching to a conversation not in memory.
+- [x] **Conversation list endpoint** — `GET /api/chat/conversations` implemented at `chat.py:272`.
+- [x] **Conversation history endpoint** — implemented at `chat.py:287` as
+  `GET /api/chat/conversations/{id}/messages`.
 
 ### Phase 2: Document Processing
 
@@ -198,15 +199,67 @@ These two are coupled — pagination makes client-side search incorrect, so they
 - [ ] **Handle abort in stream loop** — catch `AbortError` in `useSSEChat` and set `isStreaming`
   to false without showing an error message to the user.
 
-### Chat: Modes & Document Attachment
+### Chat: Search All + Document Attachment Flow
 
-- [ ] **Chat mode selector** — add "Search all knowledge base" toggle to chat UI (or sidebar).
-  Currently `knowledge_tier` is hardcoded to `'ephemeral'` in `useSSEChat`. A persistent-tier
-  conversation should trigger `search_all: true` RAG behaviour. Need UI control + store state.
-- [ ] **Document attachment panel in chat** — no way to attach/detach documents mid-conversation.
-  The API endpoints (`POST/DELETE /api/chat/{id}/documents/{doc_id}`) exist. Add a document
-  picker panel (floating or sidebar section) that calls them. Store attached doc list per
-  conversation in `chat.store.ts`.
+These two features are intentionally connected. Search all is the discovery mechanism — the user
+searches their entire knowledge base when they don't know which document is relevant. Sources returned
+in search-all mode become the attachment point: the user can pin a document to the conversation
+directly from the source citation, narrowing to scoped retrieval for subsequent messages.
+
+**Intended UX flow:**
+```
+User enables search-all toggle
+    → asks a question
+    → backend searches all ingested documents (vector, user-scoped)
+    → response returns with rag_sources showing which documents matched
+
+User sees relevant sources in the SourcesPanel
+    → clicks "Attach" on a source
+    → document is pinned to the conversation via POST /api/chat/{conv_id}/documents/{doc_id}
+    → search-all auto-disables for this conversation (scoped takes over)
+    → subsequent messages search only attached documents
+    → scope bar shows attached document chips above the input
+```
+
+**What's already in place:**
+- `retrieve()` in `core/rag.py` already accepts `search_all: bool = False`. When `True` and `doc_ids`
+  is empty, it builds a Qdrant filter scoped to `user_id` only and searches the full collection.
+- Attach/detach API endpoints already exist: `POST/DELETE /api/chat/{conv_id}/documents/{doc_id}`.
+
+**Backend:**
+- [x] **Add `search_all` to `ChatRequest`** — `models/chat.py:10` has `search_all: bool = False`.
+- [x] **Pass `search_all` through in `chat.py`** — three-branch logic in `stream_response()` at
+  `chat.py:161-168`.
+- [x] **BM25 path for search_all** — `rag.py:199` guards BM25 behind `if search_ids:`; search_all
+  path sets `search_ids = []` so BM25 is skipped, falls to vector-only.
+- [x] **Include `document_id` on every rag_source in the `done` event** — present at `chat.py:253`.
+
+**Frontend:**
+- [x] **`search_all` state in store** — `conversationSearchAll: Record<string, boolean>` + `setSearchAll`
+  in `chat.store.ts:32-53`. Also added `pendingSearchAll` + `setPendingSearchAll` for new-conversation
+  edge case (before a `conversation_id` exists, state is held in `pendingSearchAll` and migrated to
+  the real ID on the `done` event).
+- [x] **Send `search_all` in chat request** — `useSSEChat.ts:64-71` reads `pendingSearchAll` for new
+  conversations and `conversationSearchAll[convId]` for existing ones.
+- [ ] **Search all toggle in chat UI** — globe icon button near the input or scope bar. Active state
+  reflects `conversationSearchAll[activeConversationId]`. Disabled when documents are already attached
+  (scoped takes priority — no point searching everything when scope is already set).
+- [ ] **"Attach" button on source cards in `SourcesPanel`** — when a message has `rag_sources`,
+  each source card gets a small pin/attach icon. On click: call `POST /api/chat/{conv_id}/documents/{doc_id}`,
+  update `conversationDocuments` in store, set `conversationSearchAll[convId] = false`. Show a
+  brief confirmation (e.g. filename chip appears in the scope bar).
+- [ ] **Scope bar above message input** — shows the current conversation's retrieval context at a
+  glance. Three states:
+  - No documents, search_all off → nothing shown (general chat)
+  - `search_all` on → "Searching all documents" pill with globe icon and × to disable
+  - Documents attached → one chip per document with × to detach each
+  Attaching a document from a source card automatically transitions from search-all pill to document chips.
+- [ ] **`conversationDocuments` in store** — `Record<string, ConversationDocument[]>` keyed by
+  `conversation_id`. Load via `GET /api/chat/{conv_id}/documents` when switching conversations.
+  Add `setConversationDocuments`, `addConversationDocument`, `removeConversationDocument` actions.
+
+### Chat: Other Modes
+
 - [ ] **Start chat from document** — see Priority 1 section above for full implementation plan.
 - [ ] **`contextBudget` hardcoded to 4096** — `chat.store.ts` has `contextBudget: 4096`. Backend
   uses 8192. Fix to 8192 or fetch from backend `context_debug` SSE event (already emitted).

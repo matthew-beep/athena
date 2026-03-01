@@ -19,7 +19,7 @@ const WARN_TOKENS = 3000;
 export function MessageInput() {
   const [text, setText] = useState('');
   const { sendMessage } = useSSEChat();
-  const { isStreaming, activeConversationId, setMessageTokens, statusMessage, activeModel } = useChatStore(
+  const { isStreaming, activeConversationId, setMessageTokens, statusMessage, activeModel, pendingSearchAll, setPendingSearchAll, setSearchAll, conversationSearchAll } = useChatStore(
     useShallow((s) => ({
       isStreaming: s.isStreaming,
       activeConversationId: s.activeConversationId,

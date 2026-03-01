@@ -158,7 +158,16 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
         # attached to this user's conversation are ever returned.
         doc_ids = await get_conversation_document_ids(conversation_id)
 
-        if doc_ids:
+        if body.search_all:
+            rag_sources = await rag_module.retrieve(
+                body.message,
+                current_user["id"],
+                search_all=True,
+            )
+            
+            rag_context = rag_module.format_rag_context(rag_sources) if rag_sources else None
+
+        elif doc_ids:
             rag_sources = await rag_module.retrieve(
                 body.message,
                 current_user["id"],

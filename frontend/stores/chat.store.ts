@@ -28,6 +28,11 @@ interface ChatState {
   setMessageTokens: (tokens: number) => void;
   setStatusMessage: (msg: string | null) => void;
   setActiveModel: (model: string) => void;
+
+  conversationSearchAll: Record<string, boolean>;
+  setSearchAll: (convId: string, val: boolean) => void;
+  pendingSearchAll: boolean;
+  setPendingSearchAll: (val: boolean) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -41,6 +46,12 @@ export const useChatStore = create<ChatState>((set) => ({
   messageTokens: 0,
   statusMessage: null,
   activeModel: process.env.NEXT_PUBLIC_OLLAMA_MODEL ?? 'qwen2.5:7b',
+
+  conversationSearchAll: {},
+  setSearchAll: (convId, val) =>
+    set((s) => ({ conversationSearchAll: { ...s.conversationSearchAll, [convId]: val } })),
+  pendingSearchAll: false,
+  setPendingSearchAll: (val) => set({ pendingSearchAll: val }),
 
   setConversations: (convs) => set({ conversations: convs }),
 

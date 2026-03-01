@@ -19,6 +19,10 @@ export function useSSEChat() {
     setContextTokens,
     setStatusMessage,
     setActiveModel,
+    conversationSearchAll,
+    setSearchAll,
+    pendingSearchAll,
+    setPendingSearchAll,
   } = useChatStore();
 
   const sendMessage = useCallback(
@@ -61,6 +65,9 @@ export function useSSEChat() {
           message: content,
           conversation_id: convId ?? null,
           knowledge_tier: 'ephemeral',
+          search_all: isNewConversation
+            ? pendingSearchAll
+            : (conversationSearchAll[convId ?? ''] ?? false),
         });
 
         if (!response.ok) {
@@ -136,6 +143,11 @@ export function useSSEChat() {
                     assistantMsg,
                   ]);
                   setActiveConversation(realId);
+                  // Migrate pending search_all state to real conversation ID and reset
+                  if (pendingSearchAll) {
+                    setSearchAll(realId, true);
+                    setPendingSearchAll(false);
+                  }
                 } else {
                   setActiveConversation(realId);
                   addMessage(realId, assistantMsg);
@@ -170,6 +182,10 @@ export function useSSEChat() {
       setContextTokens,
       setStatusMessage,
       setActiveModel,
+      conversationSearchAll,
+      setSearchAll,
+      pendingSearchAll,
+      setPendingSearchAll,
     ]
   );
 
