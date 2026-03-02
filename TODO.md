@@ -258,6 +258,21 @@ User sees relevant sources in the SourcesPanel
   `conversation_id`. Load via `GET /api/chat/{conv_id}/documents` when switching conversations.
   Add `setConversationDocuments`, `addConversationDocument`, `removeConversationDocument` actions.
 
+### Chat: Document Suggestions (Background Similarity)
+
+- [ ] **Backend: `GET /api/documents/suggest`** — accepts `?query=...&limit=5`. Embeds query,
+  searches Qdrant with `user_id` filter only (no document scope), groups hits by `document_id`,
+  takes max chunk score per doc, filters by threshold (~0.55), returns
+  `[{ document_id, filename, score }]`. Use raw cosine scores — not RRF — so scores are
+  meaningful for thresholding. Threshold should be a backend config value.
+- [ ] **Frontend: fire suggest on first message** — after the first message in a conversation
+  (when `isNewConversation` is true), fire a parallel fetch to `/api/documents/suggest?query=...`.
+  Store results in `conversationSuggestions: Record<string, SuggestedDoc[]>` in `chat.store.ts`.
+  Re-run on subsequent messages while no documents are in scope. Stop once a document is pinned.
+- [ ] **Frontend: Suggested card in right panel** — shows when `conversationSuggestions[convId]`
+  is non-empty and no documents are in scope. Each row has filename + score + [+ Pin] button.
+  Pinning calls the attach endpoint and moves the doc to the In Scope card.
+
 ### Chat: Other Modes
 
 - [ ] **Start chat from document** — see Priority 1 section above for full implementation plan.

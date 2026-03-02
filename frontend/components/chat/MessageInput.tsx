@@ -28,6 +28,7 @@ export function MessageInput() {
       activeModel: s.activeModel,
     }))
   );
+
   const devMode = useUIStore((s) => s.devMode);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const tokenDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -75,7 +76,7 @@ export function MessageInput() {
           {statusMessage}
         </p>
       )}
-      <div className="border-2 border-border/50 rounded-2xl"> pill section</div>
+      <div className="border-2 border-border/50 rounded-2xl"> pill section </div>
       <div
         className={cn(
           'glass rounded-2xl border flex items-center justify-between gap-2 px-4 py-2 focus-within:border-border transition-colors',

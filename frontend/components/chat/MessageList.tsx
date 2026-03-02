@@ -31,7 +31,7 @@ export function MessageList({ conversationId }: MessageListProps) {
 
   if (msgs.length === 0 && !isStreaming) {
     return (
-      <div className="flex-1 flex items-center justify-center border-2 border-red-600 min-h-0">
+      <div className="flex-1 flex items-center justify-center min-h-0">
         <div className="text-center animate-fade-up">
           <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-foreground/5 border border-foreground/10 flex items-center justify-center">
             <span className="text-2xl font-bold font-display text-foreground/30">A</span>

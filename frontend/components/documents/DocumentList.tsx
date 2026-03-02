@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { FileText, FileType, Video, Loader2, CheckCircle2, AlertCircle, Trash2, MessageSquare } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { cn } from '@/utils/cn';
+import Link from 'next/link';
 
 export interface ProcessingDocDisplay {
   document_id: string;
@@ -142,6 +143,10 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
     }
   };
 
+  const handleChat = (documentId: string) => {
+    console.log(documentId);
+  };
+
   const processingIds = new Set(processingDocs.map((d) => d.document_id));
 
   // Processing documents (upload placeholders while file is still transferring)
@@ -257,10 +262,13 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
 
           {/* Date + delete */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            <button className="flex items-center gap-1 text-xs px-2 py-1 rounded-sm glass-subtle text-muted-foreground hover:text-foreground transition-all border border-border/20 hover:border-border">
+            <Link
+              href={`/chat?documentId=${doc.id}`}
+              className="flex items-center gap-1 text-xs px-2 py-1 rounded-sm glass-subtle text-muted-foreground hover:text-foreground transition-all border border-border/20 hover:border-border"
+              >
               <MessageSquare size={12} />
               <span className="text-xs">Chat</span>
-            </button>
+            </Link>
             <span className="text-xs text-muted-foreground font-mono">{doc.date}</span>
             {!doc.isLive && (
               <button
