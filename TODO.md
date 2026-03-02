@@ -143,33 +143,60 @@ JWT auth works, SSE streaming works. Everything below is what's missing or broke
 
 ### Priority 1: Document Chat (Start chat from document)
 
-Full approach agreed: URL params for context passing, lazy conversation creation on first message.
+Full approach agreed: URL params carry `doc_id`+`filename` as a one-time init hint. Document scope
+is stored in `conversation_documents` on the backend — the backend is the source of truth after the
+first message. No `mode` field anywhere.
+
+**Flow:**
+```
+Click "Chat" on document
+  → fetch GET /api/chat/conversations?document_id=X
+  → 0 results  → navigate to /chat?doc_id=X&filename=paper.pdf (no popover)
+  → 1+ results → show inline popover on the button:
+                    "summarize this paper"  · 2h ago  [navigate to /chat?conversation_id=X]
+                    "what does section 3…"  · yesterday
+                    + Start new conversation           [navigate to /chat?doc_id=X&filename=Y]
+
+Chat page mounts with doc_id param
+  → show pill immediately: "Chatting with: paper.pdf [×]"
+  → user sends first message
+  → POST /api/chat { message, document_ids: ["X"] }   ← no conversation_id yet
+  → backend: create conv → attach doc → RAG scoped to doc → stream
+  → done event returns conversation_id
+  → URL → /chat?conversation_id=conv_abc              ← drop doc_id + filename
+  → subsequent messages: { message, conversation_id } — no document_ids needed
+```
 
 **Backend:**
-- [ ] **Accept mode + document context in `POST /api/chat`** — extend request body to include
-  `mode: "general" | "document"` and optional `document_id: str`. Store context in `conversations`
-  table alongside chat history.
-- [ ] **Scope RAG to document_id** — when `mode == "document"`, add `document_id` filter to both
-  Qdrant search and BM25 retrieval in `core/rag.py`. No chunks from other documents should appear.
-- [ ] **Conversation context persistence** — `conversations` table needs a `context` JSONB column
-  storing `{ mode, document_id }`. Load it on history fetch so returning to a conversation
-  restores its scope correctly.
+- [ ] **`GET /api/chat/conversations?document_id=`** — new route returning the 3 most recent
+  conversations that have this document attached for the current user. Query:
+  `SELECT c.conversation_id, c.title, c.last_active FROM conversations c JOIN conversation_documents cd ... WHERE cd.document_id = $1 AND c.user_id = $2 ORDER BY c.last_active DESC LIMIT 3`.
+  Must be defined before the `/{conversation_id}/documents` parameterised route.
+- [ ] **Add `document_ids` to `ChatRequest`** — add `document_ids: list[str] | None = None` to
+  `models/chat.py`. In `api/chat.py`, after `_get_or_create_conversation` and before `stream_response`
+  is defined, call `await attach_documents(conversation_id, body.document_ids)` if set. This ensures
+  `get_conversation_document_ids()` inside the generator sees the attached doc on the very first message.
 
 **Frontend:**
-- [ ] **"Chat" button in DocumentList** — button already exists in the UI. Wire it to navigate to
-  `/chat?mode=document&doc_id={document_id}&filename={filename}` using Next.js router.
-- [ ] **Chat tab reads URL params on mount** — `useSearchParams()` reads `mode`, `doc_id`,
-  `filename`. If present, initialise chat in document mode. Requires `Suspense` boundary wrapper
-  around the params-reading component.
-- [ ] **Document scope indicator in chat UI** — when in document mode, show a pill/badge above
-  the message input: "Chatting with: paper.pdf · [×]". Clicking × clears params and returns
-  to general chat mode.
-- [ ] **Pass context in chat requests** — `useSSEChat` currently sends `{ message, conversation_id,
-  knowledge_tier }`. Extend to include `mode` and `document_id` when set. On first message
-  (no `conversation_id`), backend creates conversation with context stored; returns `conversation_id`
-  in `done` event. Subsequent messages use that ID.
-- [ ] **URL updates after first message** — once `conversation_id` is returned, update URL to
-  `/chat?conversation_id={id}` so refresh restores the conversation correctly.
+- [ ] **DocumentList "Chat" button — fetch + popover** — replace the current `<Link>` with a button.
+  On click: fetch `GET /api/chat/conversations?document_id={doc.id}`. If 0 results → navigate
+  immediately (`router.push('/chat?doc_id=X&filename=Y')`). If 1+ results → show a small inline
+  popover listing existing conversations (each navigates to `/chat?conversation_id=X`) plus a
+  "+ Start new conversation" option. Popover closes on outside click. Only show Chat button for
+  docs with `processing_status === 'complete'`.
+- [ ] **Chat page: Suspense + URL param reading** — wrap `chat/page.tsx` in `<Suspense>`. Create
+  inner client component that reads `doc_id`, `filename`, and `conversation_id` via `useSearchParams()`.
+  Pass `{ docId, filename }` as props to `ChatWindow` when present. Load existing conversation on
+  mount when `conversation_id` param is present.
+- [ ] **Scope pill above MessageInput** — when `docId` prop is set (pre-first-message), show pill:
+  `"Chatting with: paper.pdf [×]"`. × clears pending doc state and calls `router.replace('/chat')`.
+  When a conversation is loaded via `conversation_id` param, fetch `GET /api/chat/{id}/documents`
+  and show the same pill for attached docs; × calls `DELETE /api/chat/{id}/documents/{doc_id}` then
+  refetches.
+- [ ] **`useSSEChat` sends `document_ids` on first message** — add optional `documentIds?: string[]`
+  param to `sendMessage`. Include in POST body only when `isNewConversation` and `documentIds` is set.
+  On `done` event for a new conversation, call `router.replace('/chat?conversation_id=' + realId)`
+  to drop the `doc_id`/`filename` params. Subsequent messages send only `{ message, conversation_id }`.
 
 ### Pagination + Server-Side Search (Documents Tab)
 
@@ -258,6 +285,42 @@ User sees relevant sources in the SourcesPanel
   `conversation_id`. Load via `GET /api/chat/{conv_id}/documents` when switching conversations.
   Add `setConversationDocuments`, `addConversationDocument`, `removeConversationDocument` actions.
 
+### Chat: Document Attachment Sidebar + Palette (Existing Conversations)
+
+For managing document scope inside an open conversation. Distinct from "start chat from document"
+(Priority 1) — this is for attaching/detaching documents while already in a conversation.
+
+**API calls for this entire flow:**
+```
+On sidebar mount:   GET  /api/chat/{conv_id}/documents        ← what's currently attached
+On palette open:    GET  /api/documents                       ← full library, fetched once
+On keystroke:       nothing                                   ← client-side filter only
+On "Add to chat":   POST /api/chat/{conv_id}/documents        ← batch attach (new endpoint)
+On × remove:        DELETE /api/chat/{conv_id}/documents/{id} ← already exists
+```
+
+**Backend:**
+- [ ] **`POST /api/chat/{conversation_id}/documents` — batch attach** — new endpoint accepting
+  `{ document_ids: list[str] }`. Verifies conversation ownership, calls `attach_documents()` for
+  all IDs in one pass, returns updated `{ document_ids: list[str] }`. The existing single-doc
+  `POST /{conv_id}/documents/{doc_id}` stays as-is for the source-card pin flow.
+
+**Frontend — three components:**
+- [ ] **`DocumentSidebar` component** — collapsible right panel in `ChatWindow`. Fetches
+  `GET /api/chat/{conv_id}/documents` on mount and when `conversationId` changes. Shows attached
+  docs with × to remove each (calls `DELETE`, updates local state). Shows "+ Add documents" button
+  that opens `DocumentPalette`. When palette closes with newly added docs, appends them to local
+  state without refetching. Empty state: "No documents — general chat mode".
+- [ ] **`DocumentPalette` component** — command palette overlay. On open: fetches `GET /api/documents`
+  once, filters out already-attached IDs client-side. Auto-focuses search input. Shows up to 10
+  recent docs by default (no search typed). Filters client-side on keystroke — no API calls.
+  Multi-select with toggle. Footer shows selected count + "Add to chat" button (only when ≥1
+  selected). On confirm: single `POST /api/chat/{conv_id}/documents` with all selected IDs, then
+  calls `onClose(selectedDocs)`. Outside-click closes without adding.
+- [ ] **Wire `DocumentSidebar` into `ChatWindow`** — the existing `contextPanelOpen` toggle button
+  already collapses the sidebar. Replace the current `<DocumentBar />` (which uses mock data) with
+  `<DocumentSidebar conversationId={activeConversationId} />`.
+
 ### Chat: Document Suggestions (Background Similarity)
 
 - [ ] **Backend: `GET /api/documents/suggest`** — accepts `?query=...&limit=5`. Embeds query,
@@ -275,7 +338,7 @@ User sees relevant sources in the SourcesPanel
 
 ### Chat: Other Modes
 
-- [ ] **Start chat from document** — see Priority 1 section above for full implementation plan.
+- [ ] **Start chat from document** — see "Priority 1: Document Chat" section above.
 - [ ] **`contextBudget` hardcoded to 4096** — `chat.store.ts` has `contextBudget: 4096`. Backend
   uses 8192. Fix to 8192 or fetch from backend `context_debug` SSE event (already emitted).
 

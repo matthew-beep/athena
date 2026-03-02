@@ -290,6 +290,22 @@ async def get_document(document_id: str, current_user: dict = Depends(get_curren
         return JSONResponse(status_code=404, content={"detail": "Document not found."})
     return dict(row)
 
+@router.get("/{document_id}/conversations")
+async def get_document_conversations(
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    rows = await postgres.fetch_all(
+        """SELECT c.conversation_id, c.title, c.last_active
+            FROM conversations c
+            JOIN conversation_documents cd ON cd.conversation_id = c.conversation_id
+            WHERE cd.document_id = $1 AND c.user_id = $2
+            ORDER BY c.last_active DESC
+            LIMIT 3""",
+        document_id, current_user["id"],
+    )
+    return {"conversations": [dict(r) for r in rows]}
+
 
 @router.delete("/{document_id}")
 async def delete_document(document_id: str, current_user: dict = Depends(get_current_user)):
@@ -312,3 +328,5 @@ async def delete_document(document_id: str, current_user: dict = Depends(get_cur
     _progress.pop(document_id, None)
 
     return {"deleted": document_id}
+
+

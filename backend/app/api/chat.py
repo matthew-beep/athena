@@ -324,7 +324,6 @@ async def get_conversation_documents(
     )
     return {"documents": [dict(r) for r in rows]}
 
-
 @router.post("/{conversation_id}/documents/{document_id}")
 async def attach_document(
     conversation_id: str,

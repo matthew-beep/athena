@@ -5,6 +5,8 @@ import { FileText, FileType, Video, Loader2, CheckCircle2, AlertCircle, Trash2, 
 import { useAuthStore } from '@/stores/auth.store';
 import { cn } from '@/utils/cn';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { apiClient } from '@/api/client';
 
 export interface ProcessingDocDisplay {
   document_id: string;
@@ -77,6 +79,7 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
   const [error, setError] = useState<string | null>(null);
   const [progressMap, setProgressMap] = useState<Record<string, Progress>>({});
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
+  const router = useRouter();
 
   const fetchDocuments = () => {
     const token = useAuthStore.getState().token;
@@ -143,8 +146,19 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
     }
   };
 
-  const handleChat = (documentId: string) => {
+  const handleChat = async (documentId: string) => {
     console.log(documentId);
+    try {
+      const conversations: any = await apiClient.get(`/documents/${documentId}/conversations`);
+      console.log(conversations);
+      if (conversations.conversations?.length > 0) {
+        console.log('conversations found');
+      } else {
+        console.log('no conversations found, route to new chat');
+      }
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   const processingIds = new Set(processingDocs.map((d) => d.document_id));
@@ -262,13 +276,13 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
 
           {/* Date + delete */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Link
-              href={`/chat?documentId=${doc.id}`}
+            <button
               className="flex items-center gap-1 text-xs px-2 py-1 rounded-sm glass-subtle text-muted-foreground hover:text-foreground transition-all border border-border/20 hover:border-border"
+              onClick={() => handleChat(doc.id)}
               >
               <MessageSquare size={12} />
               <span className="text-xs">Chat</span>
-            </Link>
+            </button>
             <span className="text-xs text-muted-foreground font-mono">{doc.date}</span>
             {!doc.isLive && (
               <button
