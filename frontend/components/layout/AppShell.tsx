@@ -31,8 +31,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
-
+      {/* false && }
       <SystemFooter className="hidden md:flex" />
+      */}
       <BottomNav />
 
       {/* Developer mode overlay — fixed panel, visible on all pages */}

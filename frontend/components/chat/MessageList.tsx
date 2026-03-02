@@ -31,7 +31,7 @@ export function MessageList({ conversationId }: MessageListProps) {
 
   if (msgs.length === 0 && !isStreaming) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center border-2 border-red-600 min-h-0">
         <div className="text-center animate-fade-up">
           <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-foreground/5 border border-foreground/10 flex items-center justify-center">
             <span className="text-2xl font-bold font-display text-foreground/30">A</span>
@@ -46,7 +46,7 @@ export function MessageList({ conversationId }: MessageListProps) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
+    <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4  min-h-0 ">
       {msgs.map((msg) => (
         <div key={msg.message_id} className="animate-fade-up">
           <Message message={msg} />
