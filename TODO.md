@@ -22,14 +22,20 @@ JWT auth works, SSE streaming works. Everything below is what's missing or broke
   "spec says 384, actual is 768". Verify which dimension `nomic-embed-text` actually produces via
   Ollama, update `VECTOR_SIZE` to match, and correct `CLAUDE.md`. A mismatch silently returns empty
   search results — no error is thrown.
-- [ ] **Wrong Ollama model** — current backend uses `llama3.2:3b`. Spec requires `qwen2.5:7b` (Tier 1)
-  for all interactive queries. Update `OLLAMA_MODEL` env var and `init-ollama` container.
+- [x] **Wrong Ollama model** — updated to `qwen3.5:9b` (small/fast series). Changed `config.py`,
+  `init-ollama.sh`, `docker-compose.yml`, `.env.example`, and `chat.store.ts` fallback.
 - [ ] **Naive token chunking** — `ingestion.py` uses a sliding token window with no sentence awareness.
   Mid-sentence splits degrade retrieval quality. Needs sentence-boundary-aware chunking (nltk or spaCy).
 - [x] **RAG threshold incompatible with hybrid search** — duplicate of item above; confirmed fixed.
 - [ ] **URL ingestion returns 501** — `POST /api/documents/url` is a stub. Crawl4AI not wired up yet.
 - [ ] **No deduplication in RAG** — can return near-identical chunks from the same document. Add a
   minimum chunk distance check or a per-document chunk cap before returning sources.
+- [x] **RAG sources not persisting across page reload** — `save_message` never stored `rag_sources`;
+  `get_messages` SELECT didn't include the column; `MessageOut` had no field. Fixed: added
+  `rag_sources JSONB` column (migration 003), updated `context.py`, `models/chat.py`, `api/chat.py`.
+- [ ] **RAG scores always 0** — `rag_sources` returned in SSE `done` event have `score: 0.0` for
+  all chunks (RRF rank positions lose original cosine scores). Pass the pre-fusion vector score
+  through the payload so the UI can show meaningful relevance values.
 
 ---
 
@@ -143,60 +149,50 @@ JWT auth works, SSE streaming works. Everything below is what's missing or broke
 
 ### Priority 1: Document Chat (Start chat from document)
 
-Full approach agreed: URL params carry `doc_id`+`filename` as a one-time init hint. Document scope
-is stored in `conversation_documents` on the backend — the backend is the source of truth after the
-first message. No `mode` field anywhere.
+**Implemented** (2026-03-02) via `pendingDocuments` store pattern — not URL params as originally
+planned. The store is the staging area before a conversation exists; backend is source of truth after.
 
-**Flow:**
+**Actual flow built:**
 ```
-Click "Chat" on document
-  → fetch GET /api/chat/conversations?document_id=X
-  → 0 results  → navigate to /chat?doc_id=X&filename=paper.pdf (no popover)
-  → 1+ results → show inline popover on the button:
-                    "summarize this paper"  · 2h ago  [navigate to /chat?conversation_id=X]
-                    "what does section 3…"  · yesterday
-                    + Start new conversation           [navigate to /chat?doc_id=X&filename=Y]
+Click "Chat" on document (DocumentList)
+  → 0 existing convs  → setPendingDocuments([{ document_id, filename, file_type }])
+                         navigate to /chat (sidebar auto-opens, DocumentBar shows pending doc)
+  → 1+ existing convs → show inline modal listing existing conversations
+                         "Pick existing" → POST /api/chat/{conv_id}/documents (batch attach)
+                         "+ Start new"   → setPendingDocuments([...]) + navigate to /chat
 
-Chat page mounts with doc_id param
-  → show pill immediately: "Chatting with: paper.pdf [×]"
-  → user sends first message
+Chat page: user sends first message (useSSEChat)
+  → reads pendingDocuments from store
   → POST /api/chat { message, document_ids: ["X"] }   ← no conversation_id yet
-  → backend: create conv → attach doc → RAG scoped to doc → stream
-  → done event returns conversation_id
-  → URL → /chat?conversation_id=conv_abc              ← drop doc_id + filename
+  → backend: create conv → attach_documents(conv_id, document_ids) → RAG scoped → stream
+  → done event: clears pendingDocuments from store, sets activeConversationId
   → subsequent messages: { message, conversation_id } — no document_ids needed
 ```
 
-**Backend:**
-- [ ] **`GET /api/chat/conversations?document_id=`** — new route returning the 3 most recent
-  conversations that have this document attached for the current user. Query:
-  `SELECT c.conversation_id, c.title, c.last_active FROM conversations c JOIN conversation_documents cd ... WHERE cd.document_id = $1 AND c.user_id = $2 ORDER BY c.last_active DESC LIMIT 3`.
-  Must be defined before the `/{conversation_id}/documents` parameterised route.
-- [ ] **Add `document_ids` to `ChatRequest`** — add `document_ids: list[str] | None = None` to
-  `models/chat.py`. In `api/chat.py`, after `_get_or_create_conversation` and before `stream_response`
-  is defined, call `await attach_documents(conversation_id, body.document_ids)` if set. This ensures
-  `get_conversation_document_ids()` inside the generator sees the attached doc on the very first message.
+**Backend — status:**
+- [ ] **`GET /api/chat/conversations?document_id=`** — not yet implemented. Currently DocumentList
+  uses a client-side modal approach: fetches all conversations and shows a pick dialog. Replace with
+  this proper endpoint (3 most recent convs for this doc/user) and inline popover.
+- [x] **`document_ids` in `ChatRequest`** — `models/chat.py` has `document_ids: list[str] = []`.
+  `api/chat.py` calls `await attach_documents(conversation_id, body.document_ids)` before
+  `stream_response()`, ensuring RAG scope is set on the very first message.
 
-**Frontend:**
-- [ ] **DocumentList "Chat" button — fetch + popover** — replace the current `<Link>` with a button.
-  On click: fetch `GET /api/chat/conversations?document_id={doc.id}`. If 0 results → navigate
-  immediately (`router.push('/chat?doc_id=X&filename=Y')`). If 1+ results → show a small inline
-  popover listing existing conversations (each navigates to `/chat?conversation_id=X`) plus a
-  "+ Start new conversation" option. Popover closes on outside click. Only show Chat button for
-  docs with `processing_status === 'complete'`.
-- [ ] **Chat page: Suspense + URL param reading** — wrap `chat/page.tsx` in `<Suspense>`. Create
-  inner client component that reads `doc_id`, `filename`, and `conversation_id` via `useSearchParams()`.
-  Pass `{ docId, filename }` as props to `ChatWindow` when present. Load existing conversation on
-  mount when `conversation_id` param is present.
-- [ ] **Scope pill above MessageInput** — when `docId` prop is set (pre-first-message), show pill:
-  `"Chatting with: paper.pdf [×]"`. × clears pending doc state and calls `router.replace('/chat')`.
-  When a conversation is loaded via `conversation_id` param, fetch `GET /api/chat/{id}/documents`
-  and show the same pill for attached docs; × calls `DELETE /api/chat/{id}/documents/{doc_id}` then
-  refetches.
-- [ ] **`useSSEChat` sends `document_ids` on first message** — add optional `documentIds?: string[]`
-  param to `sendMessage`. Include in POST body only when `isNewConversation` and `documentIds` is set.
-  On `done` event for a new conversation, call `router.replace('/chat?conversation_id=' + realId)`
-  to drop the `doc_id`/`filename` params. Subsequent messages send only `{ message, conversation_id }`.
+**Frontend — status:**
+- [x] **DocumentList "Chat" button** — shows modal with existing conversations + "+ Start new chat"
+  option. All three paths (no convs, new from modal, pick existing) now correctly stage or attach docs.
+- [x] **`pendingDocuments` in store** — `PendingDocument[]` in `chat.store.ts`. Holds full objects
+  (id, filename, file_type) so DocumentBar can display them before a conversation exists.
+- [x] **`useSSEChat` sends `document_ids` on first message** — extracts IDs from `pendingDocuments`,
+  includes in POST body for new conversations only. Clears `pendingDocuments` on `done`.
+- [x] **DocumentBar shows pending docs** — when `activeConversationId` is null, `displayDocuments`
+  is derived from `pendingDocuments` store state. Remove (×) updates the store, no API call.
+- [x] **Auto-open context panel** — `ChatWindow` `useEffect` opens the right panel and collapses
+  the conversation sidebar whenever `pendingDocuments.length > 0 && !activeConversationId`.
+- [ ] **Scope pill / proper scoping UX** — DocumentBar shows working memory but there's no
+  prominent pill above `MessageInput` confirming scope. Consider adding a compact bar between
+  the message list and input showing attached doc chips with × to detach.
+- [ ] **`GET /api/chat/conversations?document_id=` popover** — replace the modal with a proper
+  inline popover on the Chat button. Requires the backend endpoint above.
 
 ### Pagination + Server-Side Search (Documents Tab)
 
@@ -295,31 +291,34 @@ For managing document scope inside an open conversation. Distinct from "start ch
 On sidebar mount:   GET  /api/chat/{conv_id}/documents        ← what's currently attached
 On palette open:    GET  /api/documents                       ← full library, fetched once
 On keystroke:       nothing                                   ← client-side filter only
-On "Add to chat":   POST /api/chat/{conv_id}/documents        ← batch attach (new endpoint)
+On "Add to chat":   POST /api/chat/{conv_id}/documents        ← batch attach
 On × remove:        DELETE /api/chat/{conv_id}/documents/{id} ← already exists
 ```
 
 **Backend:**
-- [ ] **`POST /api/chat/{conversation_id}/documents` — batch attach** — new endpoint accepting
-  `{ document_ids: list[str] }`. Verifies conversation ownership, calls `attach_documents()` for
-  all IDs in one pass, returns updated `{ document_ids: list[str] }`. The existing single-doc
-  `POST /{conv_id}/documents/{doc_id}` stays as-is for the source-card pin flow.
+- [x] **`POST /api/chat/{conversation_id}/documents` — batch attach** — implemented. Accepts
+  `{ document_ids: list[str] }`, verifies ownership, calls `attach_documents()` in one pass,
+  returns `{ conversation_id, document_ids }`.
 
-**Frontend — three components:**
-- [ ] **`DocumentSidebar` component** — collapsible right panel in `ChatWindow`. Fetches
-  `GET /api/chat/{conv_id}/documents` on mount and when `conversationId` changes. Shows attached
-  docs with × to remove each (calls `DELETE`, updates local state). Shows "+ Add documents" button
-  that opens `DocumentPalette`. When palette closes with newly added docs, appends them to local
-  state without refetching. Empty state: "No documents — general chat mode".
-- [ ] **`DocumentPalette` component** — command palette overlay. On open: fetches `GET /api/documents`
-  once, filters out already-attached IDs client-side. Auto-focuses search input. Shows up to 10
-  recent docs by default (no search typed). Filters client-side on keystroke — no API calls.
-  Multi-select with toggle. Footer shows selected count + "Add to chat" button (only when ≥1
-  selected). On confirm: single `POST /api/chat/{conv_id}/documents` with all selected IDs, then
-  calls `onClose(selectedDocs)`. Outside-click closes without adding.
-- [ ] **Wire `DocumentSidebar` into `ChatWindow`** — the existing `contextPanelOpen` toggle button
-  already collapses the sidebar. Replace the current `<DocumentBar />` (which uses mock data) with
-  `<DocumentSidebar conversationId={activeConversationId} />`.
+**Frontend — components (implemented 2026-03-02):**
+- [x] **`DocumentBar` component** — right panel in `ChatWindow`. Fetches `GET /api/chat/{conv_id}/documents`
+  on mount/conversation change. When `activeConversationId` is null, derives display from
+  `pendingDocuments` store. Shows attached docs with × to remove. "+ Add documents" button opens
+  `CommandPalette`. Empty state shows "No documents — general chat mode".
+- [x] **`CommandPalette` component** — command palette overlay at `components/chat/CommandPalette.tsx`.
+  Fetches `GET /api/documents` once on open, filters out already-attached IDs. Auto-focused search.
+  Multi-select with toggle checkboxes. "Add to chat" button batch-attaches on confirm.
+  - For existing conversations: calls `POST /api/chat/{conv_id}/documents`
+  - For new (no conversation yet): updates `pendingDocuments` in store
+- [x] **`DocumentBar` wired into `ChatWindow`** — right context panel renders `<DocumentBar />`,
+  shown/hidden by `contextPanelOpen` toggle.
+
+**Known issues / remaining work:**
+- [ ] **Muting is UI-only** — `DocumentBar` may show a mute toggle but there is no backend concept
+  of a muted document. Either wire it (add `muted` flag to `conversation_documents`) or remove the UI.
+- [ ] **`pendingDocuments` not cleared on sidebar new-chat** — if a user clicks "+ New Conversation"
+  in the sidebar while `pendingDocuments` is non-empty, the old pending docs carry over. Clear
+  `pendingDocuments` when starting a fresh conversation from the sidebar.
 
 ### Chat: Document Suggestions (Background Similarity)
 
@@ -413,8 +412,8 @@ On × remove:        DELETE /api/chat/{conv_id}/documents/{id} ← already exist
 
 ## Infrastructure
 
-- [ ] **Full Docker Compose** — current compose has 4 services (postgres, ollama, init-ollama, backend).
-  Missing: Qdrant, Redis, Celery worker, Celery beat, Nginx, frontend container.
+- [ ] **Full Docker Compose** — current compose has 5 services (postgres, ollama, init-ollama, qdrant, backend).
+  Missing: Redis, Celery worker, Celery beat, Nginx, frontend container.
 - [ ] **Nginx config** — `nginx.conf` needs SSE-specific config: `proxy_buffering off`,
   `proxy_cache off`, `chunked_transfer_encoding on` for `/api/chat`.
 - [ ] **Volume mounts** — hot storage (`/mnt/data`) and bulk storage (`/mnt/storage`) paths need to
