@@ -1,3 +1,4 @@
+import json
 import uuid
 import httpx
 import tiktoken
@@ -300,6 +301,7 @@ async def save_message(
     role: str,
     content: str,
     model: str | None = None,
+    rag_sources: list | None = None,
 ) -> str:
     """
     Save a message and keep token_count + message_count accurate on the conversation.
@@ -311,14 +313,15 @@ async def save_message(
 
     await postgres.execute(
         """
-        INSERT INTO messages (message_id, conversation_id, role, content, model_used)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO messages (message_id, conversation_id, role, content, model_used, rag_sources)
+        VALUES ($1, $2, $3, $4, $5, $6)
         """,
         msg_id,
         conversation_id,
         role,
         content,
         model,
+        json.dumps(rag_sources) if rag_sources else None,
     )
 
     await postgres.execute(

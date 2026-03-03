@@ -69,14 +69,13 @@ export function MessageInput() {
   const isOverMax = tokenEst > MAX_TOKENS;
 
   return (
-    <div className="p-4 border-2 flex-shrink-0">
+    <div className="p-4 flex-shrink-0">
       {/* Status message (e.g. "summarizing context...") */}
       {statusMessage && (
         <p className="text-center text-[10px] text-muted-foreground/60 font-mono mb-1.5 animate-pulse">
           {statusMessage}
         </p>
       )}
-      <div className="border-2 border-border/50 rounded-2xl"> pill section </div>
       <div
         className={cn(
           'glass rounded-2xl border flex items-center justify-between gap-2 px-4 py-2 focus-within:border-border transition-colors',
@@ -90,7 +89,7 @@ export function MessageInput() {
           onKeyDown={handleKeyDown}
           onInput={handleInput}
           placeholder="Message Athena… (Enter to send, Shift+Enter for new line)"
-          className="border-2 flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground min-h-[24px] max-h-[200px]"
+          className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground min-h-[24px] max-h-[200px]"
           rows={1}
           disabled={isStreaming}
         />

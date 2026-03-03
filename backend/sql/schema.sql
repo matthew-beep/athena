@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS messages (
     role VARCHAR(20) NOT NULL,
     content TEXT NOT NULL,
     model_used VARCHAR(100),
-    timestamp TIMESTAMP DEFAULT NOW()
+    timestamp TIMESTAMP DEFAULT NOW(),
+    rag_sources JSONB
 );
 
 -- DOCUMENTS TABLE

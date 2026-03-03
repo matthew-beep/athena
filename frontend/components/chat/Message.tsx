@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import { TierBadge } from './TierBadge';
+import { useChatStore } from '@/stores/chat.store';
 import type { Message as MessageType, RagSource } from '@/types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -12,6 +13,8 @@ interface MessageProps {
 }
 
 function SourcesPanel({ sources }: { sources: RagSource[] }) {
+  const setCitationShutter = useChatStore((s) => s.setCitationShutter);
+
   // Deduplicate by filename — keep highest-score chunk per file
   const deduped = useMemo(() => {
     const map = new Map<string, RagSource>();
@@ -36,32 +39,38 @@ function SourcesPanel({ sources }: { sources: RagSource[] }) {
         {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
       </button>
 
-      {/* Source list */}
+      {/* Source list — click opens Citation Shutter in Context Sidebar */}
       {open && (
         <ul className="mt-1.5 space-y-1">
           {deduped.map((src) => (
             <li
-              key={src.filename}
+              key={src.filename + (src.chunk_id ?? src.chunk_index)}
               className="rounded-sm bg-muted/20 border border-border/20 overflow-hidden"
             >
-              {/* Header row */}
-              <div className="flex items-center gap-2 px-2 py-1">
-                <FileText size={10} className="text-muted-foreground/50 flex-shrink-0" />
-                <span className="text-[10px] text-muted-foreground truncate flex-1 font-mono">
-                  {src.filename}
-                </span>
-                {src.score > 0 && (
-                  <span className="text-[10px] font-mono text-muted-foreground/50 flex-shrink-0">
-                    {Math.round(src.score * 100)}%
+              <button
+                type="button"
+                onClick={() => setCitationShutter(src)}
+                className="w-full text-left hover:bg-muted/30 transition-colors"
+              >
+                {/* Header row */}
+                <div className="flex items-center gap-2 px-2 py-1">
+                  <FileText size={10} className="text-muted-foreground/50 flex-shrink-0" />
+                  <span className="text-[10px] text-muted-foreground truncate flex-1 font-mono">
+                    {src.filename}
                   </span>
+                  {src.score > 0 && (
+                    <span className="text-[10px] font-mono text-muted-foreground/50 flex-shrink-0">
+                      {Math.round(src.score * 100)}%
+                    </span>
+                  )}
+                </div>
+                {/* Snippet */}
+                {src.text && (
+                  <p className="px-2 pb-2 text-[10px] text-muted-foreground/60 font-mono leading-relaxed line-clamp-3 border-t border-border/10 pt-1">
+                    {src.text}
+                  </p>
                 )}
-              </div>
-              {/* Snippet */}
-              {src.text && (
-                <p className="px-2 pb-2 text-[10px] text-muted-foreground/60 font-mono leading-relaxed line-clamp-3 border-t border-border/10 pt-1">
-                  {src.text}
-                </p>
-              )}
+              </button>
             </li>
           ))}
         </ul>

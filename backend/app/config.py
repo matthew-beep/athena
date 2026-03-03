@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # Ollama
     ollama_host: str = "localhost"
     ollama_port: int = 11434
-    ollama_model: str = "qwen2.5:7b"
+    ollama_model: str = "qwen3.5:9b"
     ollama_embed_model: str = "nomic-embed-text"
 
     # Qdrant

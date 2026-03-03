@@ -41,6 +41,7 @@ services:
     entrypoint: ["/bin/sh", "/init-ollama.sh"]
     environment:
       - OLLAMA_HOST=ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3.5:9b}
     depends_on:
       ollama:
         condition: service_healthy
@@ -74,6 +75,7 @@ services:
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-athena}
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
     depends_on:
       postgres:
         condition: service_healthy

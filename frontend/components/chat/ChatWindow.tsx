@@ -1,22 +1,33 @@
 'use client';
 
+import { useRef, useState, useEffect } from 'react';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
 import { useChatStore } from '@/stores/chat.store';
 import { useUIStore } from '@/stores/ui.store';
 import { DocumentBar } from './DocumentBar';
+import { CommandPalette } from './CommandPalette';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react';
-import { useState } from 'react';
 
 export function ChatWindow() {
   const { sidebarCollapsed, setSidebarCollapsed } = useUIStore();
-  const { activeConversationId, conversations } = useChatStore();
+  const { activeConversationId, conversations, commandPaletteOpen, setCommandPaletteOpen, pendingDocuments } =
+    useChatStore();
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
+  const refetchDocsRef = useRef<() => void>(() => {});
+
+  // Auto-open the context panel when arriving on a new chat with staged documents
+  useEffect(() => {
+    if (pendingDocuments.length > 0 && !activeConversationId) {
+      setContextPanelOpen(true);
+      setSidebarCollapsed(true);
+    }
+  }, [pendingDocuments.length, activeConversationId, setSidebarCollapsed]);
+
   const title = conversations.find((conversation) => conversation.conversation_id === activeConversationId)?.title || 'New Conversation';
 
-
   return (
-    <div className='w-full h-full flex flex-col min-h-0 p-3 gap-3'>
+    <div className='w-full h-full flex flex-col min-h-0 p-3 gap-3 relative'>
       <div className="flex-shrink-0 flex justify-between items-center">
         <h1>{title}</h1>
         <button 
@@ -36,14 +47,19 @@ export function ChatWindow() {
         </button>
       </div>
       <div className="flex-1 min-h-0 w-full flex gap-5">
-        <div className="flex-1 min-h-0 flex flex-col glass-strong shadow-glass animate-scale-in rounded-lg">
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col glass-strong shadow-glass animate-scale-in rounded-lg">
           <MessageList conversationId={activeConversationId} />
           <MessageInput />
         </div>
         {contextPanelOpen && (
-          <DocumentBar />
+          <DocumentBar onRefetchReady={(fn) => { refetchDocsRef.current = fn; }} />
         )}
       </div>
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        onAttachComplete={() => refetchDocsRef.current()}
+      />
     </div>
   );
 }

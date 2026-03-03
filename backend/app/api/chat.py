@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-from app.models.chat import ChatRequest, ConversationOut, MessageOut
+from app.models.chat import BatchAttachRequest, ChatRequest, ConversationOut, MessageOut
 from app.core.security import get_current_user
 from app.core.context import build_messages, count_tokens_text, MAX_MESSAGE_TOKENS, save_message
 from app.core import rag as rag_module
@@ -150,6 +150,11 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
     if conv and conv.get("title") == "New Conversation":
         await _update_title(conversation_id, body.message)
 
+    # Attach any document_ids sent with the request before streaming starts,
+    # so get_conversation_document_ids() below sees them on the very first message.
+    if body.document_ids:
+        await attach_documents(conversation_id, body.document_ids)
+
     async def stream_response():
         model = settings.ollama_model
 
@@ -236,7 +241,7 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
         complete_response = "".join(full_response)
         if complete_response:
             await save_message(conversation_id, "user", body.message)
-            await save_message(conversation_id, "assistant", complete_response, model)
+            await save_message(conversation_id, "assistant", complete_response, model, rag_sources)
 
         latency_ms = int((time.monotonic() - start_time) * 1000)
         done_event = {
@@ -247,6 +252,7 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
             "latency_ms": latency_ms,
             "rag_sources": [
                 {
+                    "chunk_id": s.get("chunk_id"),
                     "filename": s["filename"],
                     "score": s["score"],
                     "chunk_index": s["chunk_index"],
@@ -298,11 +304,26 @@ async def get_messages(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     rows = await postgres.fetch_all(
-        """SELECT message_id, conversation_id, role, content, model_used, timestamp
+        """SELECT message_id, conversation_id, role, content, model_used, timestamp, rag_sources
            FROM messages WHERE conversation_id = $1 ORDER BY timestamp ASC""",
         conversation_id,
     )
     return [MessageOut(**dict(r)) for r in rows]
+
+
+@router.post("/{conversation_id}/documents")
+async def attach_documents_batch(
+    conversation_id: str,
+    body: BatchAttachRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Attach multiple documents to a conversation in one request."""
+    conv = await get_conversation(conversation_id, current_user["id"])
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    await attach_documents(conversation_id, body.document_ids)
+    doc_ids = await get_conversation_document_ids(conversation_id)
+    return {"conversation_id": conversation_id, "document_ids": doc_ids}
 
 
 @router.get("/{conversation_id}/documents")

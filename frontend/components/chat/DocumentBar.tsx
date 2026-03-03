@@ -1,311 +1,358 @@
 'use client';
 
-import { useState } from 'react';
-import { FileText, X, Plus, Search, Zap, Lightbulb } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  FileText,
+  X,
+  Sparkles,
+  ExternalLink,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
 import { useChatStore } from '@/stores/chat.store';
+import type { PendingDocument } from '@/stores/chat.store';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/utils/cn';
+import { apiClient } from '@/api/client';
 
-// ── Mock data — replace with store/API when wired up ───────────────────────
-const MOCK_SCOPED = [
-  { document_id: 'doc_1', filename: 'transformer-paper.pdf' },
-];
+// ── Types ───────────────────────────────────────────────────────────────────
 
-const MOCK_SUGGESTED = [
-  { document_id: 'doc_2', filename: 'attention-mechanism.pdf', score: 0.84 },
-  { document_id: 'doc_3', filename: 'lecture-notes.md', score: 0.71 },
-  { document_id: 'doc_4', filename: 'system-design.md', score: 0.63 },
-];
-
-const MOCK_ALL = [
-  { document_id: 'doc_1', filename: 'transformer-paper.pdf' },
-  { document_id: 'doc_2', filename: 'attention-mechanism.pdf' },
-  { document_id: 'doc_3', filename: 'lecture-notes.md' },
-  { document_id: 'doc_4', filename: 'system-design.md' },
-  { document_id: 'doc_5', filename: 'algorithms.pdf' },
-  { document_id: 'doc_6', filename: 'notes.txt' },
-  { document_id: 'doc_7', filename: 'research-synthesis.md' },
-];
-// ──────────────────────────────────────────────────────────────────────────
-
-type Doc = { document_id: string; filename: string };
-
-// ── Context ────────────────────────────────────────────────────────────────
-
-function ContextSection({
-  tokens,
-  budget,
-  model,
-}: {
-  tokens: number;
-  budget: number;
-  model: string | null;
-}) {
-  const pct = budget > 0 ? Math.min(tokens / budget, 1) : 0;
-  const barColor =
-    pct > 0.8
-      ? 'bg-red-400/60'
-      : pct > 0.6
-      ? 'bg-yellow-400/60'
-      : 'bg-foreground/25';
-
-  return (
-    <div className="px-4 py-3 border-b border-border/20">
-      <div className="flex items-center gap-2 mb-2.5">
-        <Zap size={11} className="text-muted-foreground/40" />
-        <span className="text-[10px] font-mono text-muted-foreground/50 uppercase tracking-wider">
-          Context
-        </span>
-      </div>
-
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground/40">
-          <span>
-            {tokens.toLocaleString()} / {budget.toLocaleString()} tok
-          </span>
-          <span>{Math.round(pct * 100)}%</span>
-        </div>
-        <div className="h-1 rounded-full bg-foreground/5 overflow-hidden">
-          <div
-            className={cn('h-full rounded-full transition-all duration-500', barColor)}
-            style={{ width: `${pct * 100}%` }}
-          />
-        </div>
-        <p className="text-[10px] font-mono text-muted-foreground/35">
-          {model ?? '—'} · Tier 1
-        </p>
-      </div>
-    </div>
-  );
+interface ConversationDocument {
+  document_id: string;
+  filename: string;
+  file_type?: string;
+  word_count?: number;
+  added_at?: string;
 }
 
-// ── In Scope ───────────────────────────────────────────────────────────────
+function isSyntheticDoc(filename: string): boolean {
+  const lower = filename.toLowerCase();
+  return lower.includes('synthesis') || lower.includes('research-report') || lower.includes('-report.');
+}
 
-function ScopeSection({
-  scoped,
+// ── Working Memory Card (Pinned Sources) ─────────────────────────────────────
+
+function WorkingMemoryCard({
+  documents,
+  mutedIds,
+  onMuteToggle,
   onRemove,
-  onAdd,
+  onAddClick,
 }: {
-  scoped: Doc[];
+  documents: ConversationDocument[];
+  mutedIds: Set<string>;
+  onMuteToggle: (id: string) => void;
   onRemove: (id: string) => void;
-  onAdd: (doc: Doc) => void;
+  onAddClick: () => void;
 }) {
-  const [showPicker, setShowPicker] = useState(false);
-  const [search, setSearch] = useState('');
-
-  const scopedIds = new Set(scoped.map((d) => d.document_id));
-  const pickerResults = MOCK_ALL.filter(
-    (d) =>
-      !scopedIds.has(d.document_id) &&
-      d.filename.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const handleAdd = (doc: Doc) => {
-    onAdd(doc);
-    setShowPicker(false);
-    setSearch('');
-  };
-
   return (
-    <div className="px-4 py-3 border-b border-border/20">
+    <div className="px-3 py-2.5 border-b border-border/20">
       <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <FileText size={11} className="text-muted-foreground/40" />
-          <span className="text-[10px] font-mono text-muted-foreground/50 uppercase tracking-wider">
-            In Scope
+        <div className="flex items-center gap-1.5">
+          <FileText size={10} className="text-muted-foreground/50" />
+          <span className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-wider">
+            Working Memory
           </span>
-          {scoped.length > 0 && (
-            <span className="text-[10px] font-mono text-muted-foreground/30">
-              ({scoped.length})
-            </span>
-          )}
         </div>
         <button
-          onClick={() => {
-            setShowPicker((v) => !v);
-            setSearch('');
-          }}
-          className="p-1 rounded text-muted-foreground/30 hover:text-foreground transition-colors"
-          title="Add document"
+          type="button"
+          onClick={onAddClick}
+          className="text-[10px] font-mono text-muted-foreground/40 hover:text-foreground transition-colors"
         >
-          <Plus size={11} />
+          + Add
         </button>
       </div>
 
-      {/* Attached docs */}
-      {scoped.length === 0 && !showPicker && (
-        <p className="text-[10px] font-mono text-muted-foreground/25 py-1">
-          No documents in scope
+      {documents.length === 0 ? (
+        <p className="text-[10px] font-mono text-muted-foreground/40 py-2 leading-relaxed">
+          General Chat Mode — No documents in scope.
         </p>
-      )}
-      <div className="space-y-1">
-        {scoped.map((doc) => (
-          <div
-            key={doc.document_id}
-            className="flex items-center gap-2 px-2 py-1 rounded-md bg-foreground/5 border border-border/20 group"
-          >
-            <FileText size={10} className="text-muted-foreground/35 flex-shrink-0" />
-            <span className="text-[10px] font-mono text-foreground/65 truncate flex-1">
-              {doc.filename}
-            </span>
-            <button
-              onClick={() => onRemove(doc.document_id)}
-              className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/35 hover:text-foreground flex-shrink-0"
-            >
-              <X size={10} />
-            </button>
-          </div>
-        ))}
-      </div>
-
-      {/* Inline search picker */}
-      {showPicker && (
-        <div className="mt-2 space-y-1.5">
-          <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-foreground/5 border border-border/25">
-            <Search size={10} className="text-muted-foreground/35 flex-shrink-0" />
-            <input
-              autoFocus
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="search documents..."
-              className="bg-transparent text-[10px] font-mono text-foreground placeholder:text-muted-foreground/30 outline-none flex-1"
-            />
-          </div>
-          <div className="space-y-0.5 max-h-40 overflow-y-auto">
-            {pickerResults.length === 0 && (
-              <p className="text-[10px] font-mono text-muted-foreground/25 px-1 py-1">
-                No results
-              </p>
-            )}
-            {pickerResults.map((doc) => (
-              <button
+      ) : (
+        <ul className="space-y-1">
+          {documents.map((doc) => {
+            const isSynthetic = isSyntheticDoc(doc.filename ?? '');
+            const muted = mutedIds.has(doc.document_id);
+            return (
+              <li
                 key={doc.document_id}
-                onClick={() => handleAdd(doc)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-left hover:bg-foreground/5 transition-colors group"
+                className={cn(
+                  'group flex items-center gap-2 px-2 py-1.5 rounded-md border transition-colors',
+                  isSynthetic
+                    ? 'bg-primary/5 border-primary/20'
+                    : 'bg-foreground/[0.03] border-border/20'
+                )}
+                title={doc.filename}
               >
-                <FileText size={10} className="text-muted-foreground/25 flex-shrink-0" />
-                <span className="text-[10px] font-mono text-muted-foreground/50 group-hover:text-foreground truncate transition-colors">
-                  {doc.filename}
+                {isSynthetic ? (
+                  <Sparkles
+                    size={10}
+                    className="text-primary/80 shrink-0"
+                    aria-hidden
+                  />
+                ) : (
+                  <FileText
+                    size={10}
+                    className="text-muted-foreground/45 shrink-0"
+                    aria-hidden
+                  />
+                )}
+                <span
+                  className={cn(
+                    'text-[10px] font-mono truncate flex-1 min-w-0',
+                    muted ? 'text-muted-foreground/50 line-through' : 'text-foreground/80'
+                  )}
+                >
+                  {doc.filename ?? doc.document_id}
                 </span>
-              </button>
-            ))}
-          </div>
-        </div>
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => onMuteToggle(doc.document_id)}
+                    className="p-1 rounded text-muted-foreground/50 hover:text-foreground transition-colors"
+                    title={muted ? 'Unmute (include in RAG)' : 'Mute (temporarily ignore)'}
+                    aria-label={muted ? 'Unmute' : 'Mute'}
+                  >
+                    {muted ? (
+                      <VolumeX size={10} />
+                    ) : (
+                      <Volume2 size={10} />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRemove(doc.document_id)}
+                    className="p-1 rounded text-muted-foreground/50 hover:text-red-400 transition-colors"
+                    title="Remove from scope"
+                    aria-label="Remove"
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );
 }
 
-// ── Suggested ──────────────────────────────────────────────────────────────
+// ── Citation Shutter (drill-down drawer) ─────────────────────────────────────
 
-type SuggestedDoc = Doc & { score: number };
-
-function SuggestedSection({
-  suggestions,
-  scopedIds,
-  onPin,
+function CitationShutter({
+  source,
+  onClose,
 }: {
-  suggestions: SuggestedDoc[];
-  scopedIds: Set<string>;
-  onPin: (doc: Doc) => void;
+  source: { filename: string; text: string; chunk_index: number; document_id: string; chunk_id?: string };
+  onClose: () => void;
 }) {
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
-
-  const visible = suggestions.filter(
-    (s) => !dismissed.has(s.document_id) && !scopedIds.has(s.document_id)
-  );
-
-  if (visible.length === 0) return null;
-
   return (
-    <div className="px-4 py-3">
-      <div className="flex items-center gap-2 mb-2">
-        <Lightbulb size={11} className="text-muted-foreground/40" />
-        <span className="text-[10px] font-mono text-muted-foreground/50 uppercase tracking-wider">
-          Suggested
+    <div className="absolute inset-0 z-10 flex flex-col bg-background/95 border-l border-border/40 rounded-l-lg overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border/30 flex-shrink-0">
+        <span className="text-[10px] font-mono text-muted-foreground/70 truncate">
+          Citation
         </span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="p-1 rounded text-muted-foreground/50 hover:text-foreground transition-colors"
+          aria-label="Close"
+        >
+          <X size={12} />
+        </button>
       </div>
-      <div className="space-y-1">
-        {visible.map((doc) => (
-          <div
-            key={doc.document_id}
-            className="flex items-center gap-2 px-2 py-1 rounded-md border border-border/15 hover:border-border/25 group transition-colors"
-          >
-            <FileText size={10} className="text-muted-foreground/25 flex-shrink-0" />
-            <span className="text-[10px] font-mono text-muted-foreground/45 truncate flex-1">
-              {doc.filename}
-            </span>
-
-            {/* Default: show score */}
-            <span className="text-[10px] font-mono text-muted-foreground/25 flex-shrink-0 group-hover:hidden">
-              {Math.round(doc.score * 100)}%
-            </span>
-
-            {/* Hover: show actions */}
-            <div className="hidden group-hover:flex items-center gap-1 flex-shrink-0">
-              <button
-                onClick={() => onPin({ document_id: doc.document_id, filename: doc.filename })}
-                className="text-[10px] font-mono text-foreground/50 hover:text-foreground px-1.5 py-0.5 rounded border border-border/25 hover:border-border/50 transition-colors"
-              >
-                + pin
-              </button>
-              <button
-                onClick={() =>
-                  setDismissed((s) => new Set([...s, doc.document_id]))
-                }
-                className="text-muted-foreground/25 hover:text-muted-foreground transition-colors"
-              >
-                <X size={9} />
-              </button>
-            </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        <div>
+          <p className="text-[9px] font-mono text-muted-foreground/50 uppercase tracking-wider mb-1">
+            Source
+          </p>
+          <p className="text-[10px] font-mono text-foreground/90 truncate">
+            {source.filename}
+          </p>
+        </div>
+        {source.chunk_id != null && (
+          <div>
+            <p className="text-[9px] font-mono text-muted-foreground/50 uppercase tracking-wider mb-1">
+              Chunk ID
+            </p>
+            <p className="text-[10px] font-mono text-muted-foreground/70 break-all">
+              {source.chunk_id}
+            </p>
           </div>
-        ))}
+        )}
+        <div>
+          <p className="text-[9px] font-mono text-muted-foreground/50 uppercase tracking-wider mb-1">
+            Chunk index
+          </p>
+          <p className="text-[10px] font-mono text-muted-foreground/70">
+            {source.chunk_index}
+          </p>
+        </div>
+        <div>
+          <p className="text-[9px] font-mono text-muted-foreground/50 uppercase tracking-wider mb-1">
+            Excerpt
+          </p>
+          <p className="text-[10px] font-mono text-foreground/80 leading-relaxed whitespace-pre-wrap">
+            {source.text || '—'}
+          </p>
+        </div>
+        <a
+          href={`/documents`}
+          className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-md border border-border/40 text-[10px] font-mono text-muted-foreground/70 hover:text-foreground hover:border-border transition-colors"
+        >
+          <ExternalLink size={10} />
+          Jump to Source
+        </a>
       </div>
     </div>
   );
 }
 
-// ── DocumentBar ────────────────────────────────────────────────────────────
+// ── Context Sidebar (main export) ────────────────────────────────────────────
 
-export function DocumentBar() {
-  const { activeConversationId, contextTokens, contextBudget, activeModel } =
-    useChatStore(
-      useShallow((s) => ({
-        activeConversationId: s.activeConversationId,
-        contextTokens: s.contextTokens,
-        contextBudget: s.contextBudget,
-        activeModel: s.activeModel,
-      }))
-    );
+interface DocumentBarProps {
+  /** Called when mounted so parent can trigger a refetch after e.g. attaching docs from command palette */
+  onRefetchReady?: (refetch: () => void) => void;
+}
+
+export function DocumentBar({ onRefetchReady }: DocumentBarProps) {
+  const {
+    activeConversationId,
+    contextTokens,
+    contextBudget,
+    activeModel,
+    citationShutter,
+    setCitationShutter,
+    setCommandPaletteOpen,
+    pendingDocuments,
+    setPendingDocuments,
+  } = useChatStore(
+    useShallow((s) => ({
+      activeConversationId: s.activeConversationId,
+      contextTokens: s.contextTokens,
+      contextBudget: s.contextBudget,
+      activeModel: s.activeModel,
+      citationShutter: s.citationShutter,
+      setCitationShutter: s.setCitationShutter,
+      setCommandPaletteOpen: s.setCommandPaletteOpen,
+      pendingDocuments: s.pendingDocuments,
+      setPendingDocuments: s.setPendingDocuments,
+    }))
+  );
+
+  const [documents, setDocuments] = useState<ConversationDocument[]>([]);
+  const [mutedIds, setMutedIds] = useState<Set<string>>(new Set());
+  const [loadingDocs, setLoadingDocs] = useState(false);
+
+  // When there's no active conversation, show pending docs staged from document list
+  const displayDocuments: ConversationDocument[] = activeConversationId
+    ? documents
+    : pendingDocuments.map((d) => ({ document_id: d.document_id, filename: d.filename, file_type: d.file_type }));
 
   const tokens = activeConversationId
     ? (contextTokens[activeConversationId] ?? 0)
     : 0;
+  const pct = contextBudget > 0 ? Math.min(tokens / contextBudget, 1) : 0;
 
-  // Local state — will live in chat.store once wired
-  const [scoped, setScoped] = useState<Doc[]>(MOCK_SCOPED);
+  const refetch = useCallback(() => {
+    if (!activeConversationId) return;
+    setLoadingDocs(true);
+    apiClient
+      .get<{ documents: ConversationDocument[] }>(`/chat/${activeConversationId}/documents`)
+      .then((res) => setDocuments(Array.isArray(res?.documents) ? res.documents : []))
+      .catch(() => setDocuments([]))
+      .finally(() => setLoadingDocs(false));
+  }, [activeConversationId]);
 
-  const scopedIds = new Set(scoped.map((d) => d.document_id));
-
-  const handleAdd = (doc: Doc) => {
-    if (!scopedIds.has(doc.document_id)) {
-      setScoped((s) => [...s, doc]);
+  useEffect(() => {
+    if (!activeConversationId) {
+      setDocuments([]);
+      return;
     }
+    refetch();
+  }, [activeConversationId, refetch]);
+
+  useEffect(() => {
+    onRefetchReady?.(refetch);
+  }, [onRefetchReady, refetch]);
+
+  const handleRemoveDoc = (documentId: string) => {
+    if (!activeConversationId) {
+      // Remove from pending — no API call needed yet
+      setPendingDocuments(pendingDocuments.filter((d) => d.document_id !== documentId));
+      return;
+    }
+    apiClient
+      .delete(`/chat/${activeConversationId}/documents/${documentId}`)
+      .then(() => setDocuments((d) => d.filter((x) => x.document_id !== documentId)))
+      .catch(console.error);
   };
 
-  const handleRemove = (id: string) => {
-    setScoped((s) => s.filter((d) => d.document_id !== id));
+  const handleMuteToggle = (id: string) => {
+    setMutedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
+
+  const shutterOpen = citationShutter != null;
 
   return (
-    <div className="flex flex-col glass-strong shadow-glass h-full rounded-lg overflow-hidden">
-      <ContextSection tokens={tokens} budget={contextBudget} model={activeModel} />
-      <ScopeSection scoped={scoped} onRemove={handleRemove} onAdd={handleAdd} />
-      <SuggestedSection
-        suggestions={MOCK_SUGGESTED}
-        scopedIds={scopedIds}
-        onPin={handleAdd}
-      />
+    <div
+      className={cn(
+        'flex flex-col h-full rounded-lg overflow-hidden border border-border/30 relative',
+        shutterOpen && 'bg-foreground/[0.02]'
+      )}
+    >
+      {shutterOpen && (
+        <div
+          className="absolute inset-0 z-0 opacity-60 pointer-events-none bg-background/50"
+          aria-hidden
+        />
+      )}
+
+      {/* Context usage (compact) */}
+      <div className="px-3 py-2 border-b border-border/20 flex-shrink-0 relative z-[1]">
+        <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground/50 mb-1">
+          <span>Context</span>
+          <span>
+            {tokens.toLocaleString()} / {contextBudget.toLocaleString()}
+          </span>
+        </div>
+        <div className="h-0.5 rounded-full bg-foreground/5 overflow-hidden">
+          <div
+            className={cn(
+              'h-full rounded-full transition-all duration-300',
+              pct > 0.8 ? 'bg-red-400/50' : pct > 0.6 ? 'bg-amber-400/50' : 'bg-foreground/20'
+            )}
+            style={{ width: `${pct * 100}%` }}
+          />
+        </div>
+        <p className="text-[9px] font-mono text-muted-foreground/40 mt-0.5">
+          {activeModel ?? '—'} · Tier 1
+        </p>
+      </div>
+
+      {/* Working Memory */}
+      <div className="flex-1 min-h-0 overflow-y-auto relative z-[1]">
+        <WorkingMemoryCard
+          documents={loadingDocs ? [] : displayDocuments}
+          mutedIds={mutedIds}
+          onMuteToggle={handleMuteToggle}
+          onRemove={handleRemoveDoc}
+          onAddClick={() => setCommandPaletteOpen(true)}
+        />
+      </div>
+
+      {/* Citation Shutter (slides out over content when a source is focused) */}
+      {shutterOpen && citationShutter && (
+        <CitationShutter
+          source={citationShutter}
+          onClose={() => setCitationShutter(null)}
+        />
+      )}
     </div>
   );
 }

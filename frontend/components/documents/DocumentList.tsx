@@ -1,12 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { FileText, FileType, Video, Loader2, CheckCircle2, AlertCircle, Trash2, MessageSquare } from 'lucide-react';
+import { FileText, FileType, Video, Loader2, CheckCircle2, AlertCircle, Trash2, MessageSquare, Plus } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
+import { useChatStore } from '@/stores/chat.store';
 import { cn } from '@/utils/cn';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/api/client';
+import { Modal } from '@/components/ui/Modal';
+import type { Message } from '@/types';
 
 export interface ProcessingDocDisplay {
   document_id: string;
@@ -67,6 +70,12 @@ function formatDate(iso?: string) {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+interface DocumentConversation {
+  conversation_id: string;
+  title: string | null;
+  last_active: string;
+}
+
 interface DocumentListProps {
   refreshKey?: number;
   processingDocs?: ProcessingDocDisplay[];
@@ -79,7 +88,13 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
   const [error, setError] = useState<string | null>(null);
   const [progressMap, setProgressMap] = useState<Record<string, Progress>>({});
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
+  const [conversationsModal, setConversationsModal] = useState<{
+    open: boolean;
+    documentId: string | null;
+    conversations: DocumentConversation[];
+  }>({ open: false, documentId: null, conversations: [] });
   const router = useRouter();
+  const { setActiveConversation, setMessages, addConversation, setPendingDocuments } = useChatStore();
 
   const fetchDocuments = () => {
     const token = useAuthStore.getState().token;
@@ -147,18 +162,65 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
   };
 
   const handleChat = async (documentId: string) => {
-    console.log(documentId);
     try {
-      const conversations: any = await apiClient.get(`/documents/${documentId}/conversations`);
-      console.log(conversations);
-      if (conversations.conversations?.length > 0) {
-        console.log('conversations found');
+      const res = await apiClient.get<{ conversations: DocumentConversation[] }>(
+        `/documents/${documentId}/conversations`
+      );
+      const list = res.conversations ?? [];
+      if (list.length > 0) {
+        setConversationsModal({ open: true, documentId, conversations: list });
       } else {
-        console.log('no conversations found, route to new chat');
+        // No existing conversations — queue doc to attach after first message creates the conv
+        const doc = documents.find((d) => d.document_id === documentId);
+        setPendingDocuments(doc ? [{ document_id: doc.document_id, filename: doc.filename ?? documentId, file_type: doc.file_type }] : []);
+        setActiveConversation(null);
+        router.push('/chat');
       }
-    } catch (error) {
-      console.error(error);
+    } catch (err) {
+      console.error(err);
     }
+  };
+
+  const handlePickConversation = async (conv: DocumentConversation) => {
+    const { documentId } = conversationsModal;
+    setActiveConversation(conv.conversation_id);
+    addConversation({
+      conversation_id: conv.conversation_id,
+      title: conv.title ?? 'New Conversation',
+      knowledge_tier: 'ephemeral',
+      started_at: conv.last_active,
+      last_active: conv.last_active,
+    });
+    try {
+      const msgs = await apiClient.get<Message[]>(
+        `/chat/conversations/${conv.conversation_id}/messages`
+      );
+      setMessages(conv.conversation_id, msgs);
+    } catch (e) {
+      console.error(e);
+    }
+    // Attach the document to this existing conversation if it isn't already
+    if (documentId) {
+      try {
+        await apiClient.post(`/chat/${conv.conversation_id}/documents`, { document_ids: [documentId] });
+      } catch (e) {
+        console.error('Failed to attach document to conversation:', e);
+      }
+    }
+    setConversationsModal((m) => ({ ...m, open: false }));
+    router.push('/chat');
+  };
+
+  const handleNewChatFromModal = () => {
+    const { documentId } = conversationsModal;
+    // Queue doc to attach after the first message creates the new conversation
+    if (documentId) {
+      const doc = documents.find((d) => d.document_id === documentId);
+      setPendingDocuments(doc ? [{ document_id: doc.document_id, filename: doc.filename ?? documentId, file_type: doc.file_type }] : []);
+    }
+    setActiveConversation(null);
+    setConversationsModal((m) => ({ ...m, open: false }));
+    router.push('/chat');
   };
 
   const processingIds = new Set(processingDocs.map((d) => d.document_id));
@@ -338,6 +400,7 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
   };
 
   return (
+    <>
     <div className="space-y-4">
       {/* Processing Documents Section */}
       {processingItems.length > 0 && (
@@ -361,5 +424,42 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
         </div>
       )}
     </div>
+
+    {/* Conversations modal — pick existing or start new */}
+    <Modal
+      open={conversationsModal.open}
+      onClose={() => setConversationsModal((m) => ({ ...m, open: false }))}
+      title="Chats for this document"
+      footer={
+        <button
+          type="button"
+          onClick={handleNewChatFromModal}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-foreground bg-muted/50 hover:bg-muted border border-border/50 transition-colors"
+        >
+          <Plus size={14} />
+          Start new chat
+        </button>
+      }
+    >
+      <ul className="max-h-64 overflow-y-auto p-2">
+        {conversationsModal.conversations.map((conv) => (
+          <li key={conv.conversation_id}>
+            <button
+              type="button"
+              onClick={() => handlePickConversation(conv)}
+              className="w-full text-left px-3 py-2.5 rounded-lg text-sm text-foreground hover:bg-muted/50 transition-colors flex flex-col gap-0.5"
+            >
+              <span className="font-medium truncate">
+                {conv.title || 'New Conversation'}
+              </span>
+              <span className="text-xs text-muted-foreground font-mono">
+                {formatDate(conv.last_active) ?? conv.last_active}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Modal>
+    </>
   );
 }

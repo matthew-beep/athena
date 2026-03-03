@@ -1,5 +1,5 @@
 # Athena — Codebase Status
-## 2026-02-26
+## 2026-03-02
 
 ---
 
@@ -7,20 +7,20 @@
 
 | Metric | Value |
 |---|---|
-| Backend Python LOC | ~2,125 |
-| Frontend TypeScript/TSX LOC | ~3,120 |
-| Total Code LOC | ~5,245 |
+| Backend Python LOC | ~2,250 |
+| Frontend TypeScript/TSX LOC | ~3,400 |
+| Total Code LOC | ~5,650 |
 | Backend Python files | 24 |
-| Frontend TS/TSX files | 48 |
-| API endpoints | 25 |
+| Frontend TS/TSX files | 50 |
+| API endpoints | 27 |
 | Database tables | 7 |
-| SQL migrations | 3 |
+| SQL migrations | 4 |
 
 ### Backend File Breakdown
 
 | File | Lines | Notes |
 |---|---|---|
-| `api/chat.py` | 346 | SSE streaming, conv management, doc attach/detach |
+| `api/chat.py` | 390 | SSE streaming, conv management, doc attach/detach/batch |
 | `api/documents.py` | 296 | Upload, ingestion, progress, delete |
 | `api/system.py` | 85 | Health, resources, models |
 | `api/auth.py` | 29 | Login, /me |
@@ -36,9 +36,53 @@
 | `db/postgres.py` | 60 | asyncpg pool + query helpers |
 | `main.py` | 94 | FastAPI app, lifespan, admin seed |
 | `config.py` | 58 | Pydantic settings |
-| `models/chat.py` | 26 | ChatRequest, ConversationOut, MessageOut |
+| `models/chat.py` | 50 | ChatRequest (+ document_ids), BatchAttachRequest, ConversationOut, MessageOut (+ rag_sources) |
 | `models/auth.py` | 18 | Token, UserOut |
 | `models/system.py` | 21 | ResourceStats, HealthResponse |
+
+---
+
+## What Was Worked On This Session (2026-03-02)
+
+### RAG Sources Persistence
+- **`core/context.py`** — `save_message()` now accepts `rag_sources: list | None` and writes it to `messages.rag_sources` (JSONB). Import `json` added.
+- **`api/chat.py`** — passes `rag_sources` list to `save_message()` for assistant messages.
+- **`models/chat.py`** — `MessageOut` gains `rag_sources: list[Any] | None` with a `model_validator` that handles asyncpg returning JSONB as either a Python object or raw string.
+- **`api/chat.py`** — `get_messages` SELECT now includes `rag_sources` column.
+- **`sql/migrations/003_messages_rag_sources.sql`** — `ALTER TABLE messages ADD COLUMN IF NOT EXISTS rag_sources JSONB`.
+- **`sql/schema.sql`** — `rag_sources JSONB` added to `messages` table definition.
+- **Result**: RAG source citations now persist across page reloads and conversation switches.
+
+### Document–Conversation Scoping — Full Rework
+#### Batch attach endpoint
+- **`models/chat.py`** — added `BatchAttachRequest(document_ids: list[str])`.
+- **`api/chat.py`** — added `POST /{conversation_id}/documents` batch attach endpoint (defined before the single-doc route to avoid path conflicts). Replaces serial for-loop with one DB call.
+
+#### First-message document scoping
+- **`models/chat.py`** — re-added `document_ids: list[str] = []` to `ChatRequest`.
+- **`api/chat.py`** — before `stream_response()` starts, calls `attach_documents(conversation_id, body.document_ids)` if any provided. This means the first message both attaches the docs AND searches them in the same request — the backend's `get_conversation_document_ids()` sees them immediately.
+
+#### PendingDocument store state
+- **`stores/chat.store.ts`** — replaced `pendingDocumentIds: string[]` with `pendingDocuments: PendingDocument[]` (full objects: `document_id`, `filename`, `file_type`). This lets the DocumentBar display them before any conversation exists.
+- **`hooks/useSSEChat.ts`** — reads `pendingDocuments` from store, sends `document_ids` in the request body for new conversations, clears `pendingDocuments` on `done`.
+- **`components/chat/CommandPalette.tsx`** — when no active conversation, builds full `PendingDocument` objects from `allDocs` and calls `setPendingDocuments`. Uses batch endpoint when conversation exists. Fixed `useShallow` selector and `useCallback` deps.
+- **`components/documents/DocumentList.tsx`** — all three "Chat" click paths fixed:
+  - No existing conversations → `setPendingDocuments([{ doc }])` then navigate
+  - "Start new chat" from modal → same
+  - Pick existing conversation → immediately calls batch attach API
+
+#### DocumentBar pending state display
+- **`components/chat/DocumentBar.tsx`** — reads `pendingDocuments` + `setPendingDocuments` from store. `displayDocuments` computed: when `activeConversationId` is null, uses `pendingDocuments`; otherwise uses DB-fetched `documents`. `handleRemoveDoc` removes from pending list (no API call) when no conversation exists yet.
+
+#### Auto-open context panel
+- **`components/chat/ChatWindow.tsx`** — `useEffect` watches `pendingDocuments.length`: when > 0 and no active conversation, automatically opens the context panel and collapses the sidebar so the user sees staged documents immediately.
+
+### Model Update: qwen3.5:9b
+- **`backend/app/config.py`** — default `ollama_model` → `qwen3.5:9b`
+- **`init-ollama.sh`** — default `MODEL` → `qwen3.5:9b`
+- **`.env.example`** — both `OLLAMA_MODEL` and `NEXT_PUBLIC_OLLAMA_MODEL` → `qwen3.5:9b`
+- **`docker-compose.yml`** — `OLLAMA_MODEL` passed explicitly to `init-ollama` and `backend` services
+- **`stores/chat.store.ts`** — fallback model name → `qwen3.5:9b`
 
 ---
 
@@ -77,6 +121,7 @@ POST /api/chat
     ├─ token check (reject if > 5500 tokens)
     ├─ _get_or_create_conversation() → str (conversation_id)
     ├─ _update_title() if still "New Conversation"
+    ├─ attach_documents(conversation_id, body.document_ids)  ← if any provided (first-message flow)
     │
     └─ stream_response() [generator]
            │
@@ -146,7 +191,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 |---|---|
 | `users` | Auth — username, hashed_password |
 | `conversations` | Chat sessions — tier, title, token_count, summary, summarized_up_to_id |
-| `messages` | Individual messages — role, content, model_used, timestamp |
+| `messages` | Individual messages — role, content, model_used, timestamp, rag_sources JSONB |
 | `documents` | Uploaded documents — status, chunk_count, user_id, error_message |
 | `document_chunks` | Chunks — text, token_count, qdrant_point_id, user_id |
 | `conversation_documents` | Junction table — scopes documents to conversations |
@@ -164,7 +209,8 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | GET | `/api/chat/conversations` | ✅ |
 | GET | `/api/chat/conversations/{id}/messages` | ✅ |
 | GET | `/api/chat/{id}/documents` | ✅ |
-| POST | `/api/chat/{id}/documents/{doc_id}` | ✅ |
+| POST | `/api/chat/{id}/documents` | ✅ batch attach |
+| POST | `/api/chat/{id}/documents/{doc_id}` | ✅ single attach |
 | DELETE | `/api/chat/{id}/documents/{doc_id}` | ✅ |
 | GET | `/api/documents` | ✅ |
 | POST | `/api/documents/upload` | ✅ |
@@ -189,7 +235,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 | # | Severity | Description | File |
 |---|---|---|---|
-| 1 | High | Wrong LLM — `llama3.2:3b` in use, spec requires `qwen2.5:7b` (Tier 1). Update `OLLAMA_MODEL` env var and `init-ollama` | `config.py`, `docker-compose.yml` |
+| 1 | ~~High~~ ✅ | ~~Wrong LLM~~ — Updated to `qwen3.5:9b` across all config files | `config.py`, `docker-compose.yml`, `.env.example`, `init-ollama.sh` |
 | 2 | High | Vector dimension unverified — `VECTOR_SIZE = 768` but spec says 384. Run `curl` check below to confirm | `db/qdrant.py` |
 | 3 | Medium | Per-document progress polling — `DocumentList.tsx:117` fires N fetches/cycle. Need `GET /api/documents/progress?ids=...` bulk endpoint | `api/documents.py`, `DocumentList.tsx` |
 | 4 | Medium | Naive chunking — no sentence-boundary awareness; splits mid-sentence | `core/ingestion.py` |
@@ -197,6 +243,9 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | 6 | Medium | No Celery/Redis — background processing uses FastAPI `BackgroundTasks`; no retries, no persistence | `api/documents.py` |
 | 7 | Low | `contextBudget` wrong in frontend store — hardcoded 4096, backend uses 8192 | `stores/chat.store.ts` |
 | 8 | Low | No stream abort — `Square` icon shown in `MessageInput` but no `AbortController` wired | `hooks/useSSEChat.ts`, `api/client.ts` |
+| 9 | Low | Muting docs is UI-only — `mutedIds` tracked in `DocumentBar` state but never sent to backend; all attached docs are always searched | `DocumentBar.tsx`, `api/chat.py` |
+| 10 | Low | `pendingDocuments` not cleared when clicking "New Chat" in sidebar — stale pending docs from a previous document-list navigation persist | `stores/chat.store.ts`, `Sidebar.tsx` |
+| 11 | Low | RAG scores always 0.0 — RRF produces ranks not similarity scores; citation panel shows 0% for all sources | `core/rag.py`, `components/chat/Message.tsx` |
 
 ---
 
@@ -206,7 +255,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 |---|---|---|
 | postgres | ✅ Running | ✅ |
 | ollama | ✅ Running | ✅ |
-| init-ollama | ✅ (pulls llama3.2:3b) | Update to pull qwen2.5:7b |
+| init-ollama | ✅ (pulls qwen3.5:9b + nomic-embed-text) | ✅ |
 | qdrant | ✅ Running (named volume `qdrant_data`) | ✅ |
 | backend | ✅ Running | ✅ |
 | redis | ❌ Missing | Add to compose |
@@ -221,7 +270,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 | Phase | Status | Blocker |
 |---|---|---|
-| Phase 1: Foundation | ~80% | Missing: Celery, Redis, sentence-aware chunking, correct model, bulk progress endpoint |
+| Phase 1: Foundation | ~90% | Missing: Celery, Redis, sentence-aware chunking, bulk progress endpoint |
 | Phase 2: Document Processing | ~10% | Crawl4AI, video/Whisper, Celery all missing |
 | Phase 3: Learning Features | 0% | |
 | Phase 4: Two-Tier Knowledge | 0% | |
@@ -250,8 +299,8 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | Token flush throttle (50ms buffer) | ❌ |
 | Auto-scroll at-bottom detection | ❌ |
 | Suggestion/recommendation pills | ❌ |
-| Document attachment UI in chat | ❌ |
-| "Chat about this" button in Documents tab | ❌ |
+| Document attachment UI in chat (CommandPalette + DocumentBar working memory) | ✅ |
+| "Chat about this" from Documents tab (all paths: new/existing/modal) | ✅ |
 | Chat mode selector (ephemeral / search-all) | ❌ |
 | URL ingestion input | ❌ |
 | Delete confirmation | ❌ |
@@ -265,4 +314,4 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 ---
 
-*Athena · Codebase Status · 2026-02-26*
+*Athena · Codebase Status · 2026-03-02*

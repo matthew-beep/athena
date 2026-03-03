@@ -23,6 +23,7 @@ export interface RagSource {
   chunk_index: number;
   document_id: string;
   text: string;
+  chunk_id?: string;
 }
 
 export interface Message {

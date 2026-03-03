@@ -1,7 +1,13 @@
 'use client';
 
 import { create } from 'zustand';
-import type { Conversation, Message } from '@/types';
+import type { Conversation, Message, RagSource } from '@/types';
+
+export interface PendingDocument {
+  document_id: string;
+  filename: string;
+  file_type?: string;
+}
 
 interface ChatState {
   conversations: Conversation[];
@@ -33,6 +39,18 @@ interface ChatState {
   setSearchAll: (convId: string, val: boolean) => void;
   pendingSearchAll: boolean;
   setPendingSearchAll: (val: boolean) => void;
+
+  /** Docs staged to attach once the first message creates the conversation */
+  pendingDocuments: PendingDocument[];
+  setPendingDocuments: (docs: PendingDocument[]) => void;
+
+  /** Citation Shutter: when set, Context Sidebar shows the source chunk in a drill-down drawer */
+  citationShutter: RagSource | null;
+  setCitationShutter: (source: RagSource | null) => void;
+
+  /** Command palette (document picker) open state — only relevant when on chat page */
+  commandPaletteOpen: boolean;
+  setCommandPaletteOpen: (open: boolean) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -45,13 +63,22 @@ export const useChatStore = create<ChatState>((set) => ({
   contextBudget: 4096,
   messageTokens: 0,
   statusMessage: null,
-  activeModel: process.env.NEXT_PUBLIC_OLLAMA_MODEL ?? 'qwen2.5:7b',
+  activeModel: process.env.NEXT_PUBLIC_OLLAMA_MODEL ?? 'qwen3.5:9b',
 
   conversationSearchAll: {},
   setSearchAll: (convId, val) =>
     set((s) => ({ conversationSearchAll: { ...s.conversationSearchAll, [convId]: val } })),
   pendingSearchAll: false,
   setPendingSearchAll: (val) => set({ pendingSearchAll: val }),
+
+  pendingDocuments: [],
+  setPendingDocuments: (docs) => set({ pendingDocuments: docs }),
+
+  citationShutter: null,
+  setCitationShutter: (source) => set({ citationShutter: source }),
+
+  commandPaletteOpen: false,
+  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
 
   setConversations: (convs) => set({ conversations: convs }),
 

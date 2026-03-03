@@ -61,6 +61,7 @@ export function useSSEChat() {
       addMessage(tempConvId, tempUserMsg);
 
       try {
+        const pendingDocs = useChatStore.getState().pendingDocuments;
         const response = await apiClient.postStream('/chat', {
           message: content,
           conversation_id: convId ?? null,
@@ -68,6 +69,7 @@ export function useSSEChat() {
           search_all: isNewConversation
             ? pendingSearchAll
             : (conversationSearchAll[convId ?? ''] ?? false),
+          document_ids: isNewConversation ? pendingDocs.map((d) => d.document_id) : [],
         });
 
         if (!response.ok) {
@@ -112,6 +114,11 @@ export function useSSEChat() {
                 const realId = event.conversation_id;
                 setContextTokens(realId, pendingContextTokens);
                 setActiveModel(event.model);
+
+                // Clear pending docs — backend already attached them at request time.
+                if (isNewConversation) {
+                  useChatStore.getState().setPendingDocuments([]);
+                }
 
                 const newConv: Conversation = {
                   conversation_id: realId,
