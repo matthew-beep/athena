@@ -1,5 +1,9 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from pathlib import Path
+
+# Always resolve .env relative to the repo root, regardless of working directory
+_ROOT_ENV = Path(__file__).parent.parent.parent / ".env"
 
 
 class Settings(BaseSettings):
@@ -13,7 +17,7 @@ class Settings(BaseSettings):
     # Ollama
     ollama_host: str = "localhost"
     ollama_port: int = 11434
-    ollama_model: str = "qwen3.5:9b"
+    ollama_model: str = "qwen3.5:4b"
     ollama_embed_model: str = "nomic-embed-text"
 
     # Qdrant
@@ -49,7 +53,7 @@ class Settings(BaseSettings):
         return f"http://{self.qdrant_host}:{self.qdrant_port}"
 
     class Config:
-        env_file = ".env"
+        env_file = str(_ROOT_ENV)
         extra = "ignore"
 
 

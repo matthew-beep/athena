@@ -77,7 +77,7 @@ export function SettingsPanel() {
             </div>
             <div className="flex items-center justify-between py-2">
               <span className="text-sm text-muted-foreground">LLM Backend</span>
-              <span className="text-sm font-mono">Ollama · qwen2.5:7b</span>
+              <span className="text-sm font-mono">Ollama · qwen3.5:4b</span>
             </div>
           </div>
         </GlassCard>

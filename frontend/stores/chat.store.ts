@@ -63,7 +63,7 @@ export const useChatStore = create<ChatState>((set) => ({
   contextBudget: 4096,
   messageTokens: 0,
   statusMessage: null,
-  activeModel: process.env.NEXT_PUBLIC_OLLAMA_MODEL ?? 'qwen3.5:9b',
+  activeModel: process.env.NEXT_PUBLIC_OLLAMA_MODEL ?? 'qwen2.5:7b',
 
   conversationSearchAll: {},
   setSearchAll: (convId, val) =>
