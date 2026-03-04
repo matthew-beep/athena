@@ -87,3 +87,11 @@ export interface HealthResponse {
   status: string;
   version: string;
 }
+
+export interface ModelStats {
+  active: boolean
+  name?: string
+  size_gb?: number
+  gpu_pct?: number
+  ram_pct?: number
+}

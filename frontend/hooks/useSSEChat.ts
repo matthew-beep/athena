@@ -1,11 +1,17 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useChatStore } from '@/stores/chat.store';
+import { useSystemStore } from '@/stores/system.store';
 import { apiClient } from '@/api/client';
 import type { StreamEvent, Message, Conversation } from '@/types';
 
 export function useSSEChat() {
+  const requestStartTime = useRef(0);
+  const firstTokenTime = useRef(0);
+  const tokenCount = useRef(0);
+  const ttftMsRef = useRef(0);
+
   const {
     appendStreamToken,
     setIsStreaming,
@@ -61,6 +67,12 @@ export function useSSEChat() {
       addMessage(tempConvId, tempUserMsg);
 
       try {
+        requestStartTime.current = performance.now();
+        firstTokenTime.current = 0;
+        tokenCount.current = 0;
+        ttftMsRef.current = 0;
+        useChatStore.getState().setRequestStartedAt(Date.now());
+
         const pendingDocs = useChatStore.getState().pendingDocuments;
         const response = await apiClient.postStream('/chat', {
           message: content,
@@ -99,6 +111,13 @@ export function useSSEChat() {
               const event = JSON.parse(raw) as StreamEvent;
 
               if (event.type === 'token') {
+                if (firstTokenTime.current === 0) {
+                  firstTokenTime.current = performance.now();
+                  ttftMsRef.current = Math.round(firstTokenTime.current - requestStartTime.current);
+                  useChatStore.getState().setFirstTokenReachedMs(ttftMsRef.current);
+                  useChatStore.getState().setRequestStartedAt(null);
+                }
+                tokenCount.current += 1;
                 appendStreamToken(event.content);
                 // Clear status message once tokens start arriving
                 setStatusMessage(null);
@@ -111,6 +130,20 @@ export function useSSEChat() {
                 pendingContextTokens = event.tokens;
 
               } else if (event.type === 'done') {
+                const genTimeSec =
+                  firstTokenTime.current > 0
+                    ? (performance.now() - firstTokenTime.current) / 1000
+                    : 0;
+                const tokensPerSec =
+                  tokenCount.current > 0 && genTimeSec > 0
+                    ? tokenCount.current / genTimeSec
+                    : 0;
+                useSystemStore.getState().setLastInferenceStats({
+                  ttftMs: ttftMsRef.current,
+                  tokensPerSec: Math.round(tokensPerSec),
+                });
+                useChatStore.getState().setFirstTokenReachedMs(null);
+
                 const realId = event.conversation_id;
                 setContextTokens(realId, pendingContextTokens);
                 setActiveModel(event.model);
@@ -172,6 +205,8 @@ export function useSSEChat() {
       } catch (err) {
         console.error('Chat error:', err);
       } finally {
+        useChatStore.getState().setRequestStartedAt(null);
+        useChatStore.getState().setFirstTokenReachedMs(null);
         setIsStreaming(false);
         setStatusMessage(null);
       }

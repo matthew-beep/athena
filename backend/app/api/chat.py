@@ -157,6 +157,7 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
 
     async def stream_response():
         model = settings.ollama_model
+        t0 = time.monotonic()
 
         # DB is the source of truth for which documents are in scope.
         # Ownership is enforced by the conversation_documents join — only docs
@@ -169,7 +170,6 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
                 current_user["id"],
                 search_all=True,
             )
-            
             rag_context = rag_module.format_rag_context(rag_sources) if rag_sources else None
 
         elif doc_ids:
@@ -183,6 +183,9 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
             rag_sources = []
             rag_context = None
 
+        t1 = time.monotonic()
+        logger.debug("[timing] rag={}ms", int((t1 - t0) * 1000))
+
         try:
             chat_messages, will_summarize, total_tokens = await build_messages(
                 conversation_id=conversation_id,
@@ -193,25 +196,38 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
             yield f"data: {json.dumps({'type': 'error', 'content': exc.detail.get('message', 'Request error')})}\n\n"
             return
 
+        t2 = time.monotonic()
+        logger.debug("[timing] build_messages={}ms total_tokens={}", int((t2 - t1) * 1000), total_tokens)
+
         if will_summarize:
             yield f"data: {json.dumps({'type': 'status', 'content': 'summarizing context...'})}\n\n"
 
         yield f"data: {json.dumps({'type': 'context_debug', 'tokens': total_tokens, 'budget': 8192})}\n\n"
 
         full_response: list[str] = []
+        first_token_logged = False
 
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 async with client.stream(
                     "POST",
                     f"{settings.ollama_base_url}/api/chat",
-                    json={"model": model, "messages": chat_messages, "stream": True},
+                    json={
+                        "model": model,
+                        "messages": chat_messages,
+                        "stream": True,
+                        "keep_alive": -1,
+                        "think": False,
+                    },
                 ) as resp:
                     if resp.status_code != 200:
                         error_body = await resp.aread()
                         logger.error("Ollama error {}: {}", resp.status_code, error_body)
                         yield f"data: {json.dumps({'type': 'error', 'content': 'Model unavailable'})}\n\n"
                         return
+
+                    t3 = time.monotonic()
+                    logger.debug("[timing] ollama_connect={}ms", int((t3 - t2) * 1000))
 
                     async for line in resp.aiter_lines():
                         if not line.strip():
@@ -223,6 +239,17 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
 
                         token = chunk.get("message", {}).get("content", "")
                         if token:
+                            if not first_token_logged:
+                                t4 = time.monotonic()
+                                logger.info(
+                                    "[timing] TTFT={}ms (rag={}ms build={}ms connect={}ms prefill={}ms)",
+                                    int((t4 - t0) * 1000),
+                                    int((t1 - t0) * 1000),
+                                    int((t2 - t1) * 1000),
+                                    int((t3 - t2) * 1000),
+                                    int((t4 - t3) * 1000),
+                                )
+                                first_token_logged = True
                             full_response.append(token)
                             yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
 

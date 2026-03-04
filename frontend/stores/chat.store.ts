@@ -51,6 +51,14 @@ interface ChatState {
   /** Command palette (document picker) open state — only relevant when on chat page */
   commandPaletteOpen: boolean;
   setCommandPaletteOpen: (open: boolean) => void;
+
+  /** When set (timestamp), UI can show live "waiting for first token" count-up until first token or done */
+  requestStartedAt: number | null;
+  setRequestStartedAt: (t: number | null) => void;
+
+  /** TTFT in ms when first token arrived; shown until 'done' updates lastInferenceStats (avoids flash of old value) */
+  firstTokenReachedMs: number | null;
+  setFirstTokenReachedMs: (ms: number | null) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -79,6 +87,12 @@ export const useChatStore = create<ChatState>((set) => ({
 
   commandPaletteOpen: false,
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
+
+  requestStartedAt: null,
+  setRequestStartedAt: (t) => set({ requestStartedAt: t }),
+
+  firstTokenReachedMs: null,
+  setFirstTokenReachedMs: (ms) => set({ firstTokenReachedMs: ms }),
 
   setConversations: (convs) => set({ conversations: convs }),
 

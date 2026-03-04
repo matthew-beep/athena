@@ -19,3 +19,10 @@ class ResourceStats(BaseModel):
     gpu_total_gb: float
     nvme_used_pct: float
     hdd_used_pct: float
+
+class ModelStats(BaseModel):
+    active: bool
+    name: str
+    size_gb: float
+    gpu_pct: float
+    ram_pct: float

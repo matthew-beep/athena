@@ -58,6 +58,22 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Qdrant not available at startup (will retry on first use): {}", e)
 
+        # Warm up model
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            await client.post(
+                f"{settings.ollama_base_url}/api/chat",
+                json={
+                    "model": settings.ollama_model,
+                    "messages": [],
+                    "keep_alive": -1,
+                }
+            )
+        logger.info(f"Model {settings.ollama_model} warmed up")
+    except Exception as e:
+        logger.warning(f"Model warmup failed (will load on first request): {e}")
+        
+
     logger.info("Athena backend ready")
     yield
 
