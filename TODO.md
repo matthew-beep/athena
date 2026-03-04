@@ -1,7 +1,14 @@
 # Athena — TODO
 
 Current phase: **Phase 1 / Phase 2 boundary** — basic RAG chat works, document ingestion works,
-JWT auth works, SSE streaming works. Everything below is what's missing or broken.
+JWT auth works, SSE streaming works, stop button works. Everything below is what's missing or broken.
+
+**Next up (in order):**
+1. Search all toggle in `MessageInput` (globe button, store already wired, just needs UI)
+2. Scope bar above input (document chips + search-all pill, needs `conversationDocuments` in store)
+3. Sentence-aware chunking (retrieval quality improvement)
+4. Pagination + search on documents tab
+5. Clear `pendingDocuments` when starting a new conversation from sidebar
 
 ---
 
@@ -18,12 +25,13 @@ JWT auth works, SSE streaming works. Everything below is what's missing or broke
 - [x] **`None` in `ranked_ids` for search_all path** — `rag.py` vector-only branch used a bare list
   comprehension with no `chunk_id` guard; `None` values could enter the SQL `ANY($1)` array. Fixed
   with walrus-operator filter: `[cid for h in vector_hits if (cid := ...)]`.
-- [ ] **Vector dimension mismatch** — `db/qdrant.py` has `VECTOR_SIZE = 768` with a comment saying
-  "spec says 384, actual is 768". Verify which dimension `nomic-embed-text` actually produces via
-  Ollama, update `VECTOR_SIZE` to match, and correct `CLAUDE.md`. A mismatch silently returns empty
-  search results — no error is thrown.
-- [x] **Wrong Ollama model** — updated to `qwen3.5:9b` (small/fast series). Changed `config.py`,
-  `init-ollama.sh`, `docker-compose.yml`, `.env.example`, and `chat.store.ts` fallback.
+- [x] **Vector dimension mismatch** — verified via Ollama embed API: `nomic-embed-text` produces
+  768-dimensional vectors. `VECTOR_SIZE = 768` in `db/qdrant.py` is correct. `CLAUDE.md` updated
+  from 384 → 768.
+- [x] **Wrong Ollama model** — MacBook uses `qwen2.5:7b` (Docker Desktop memory limit). Desktop
+  (RTX 5060 Ti) will use `qwen3.5:4b` via `docker-compose.gpu.yml`. Root `.env` is now the single
+  source of truth — `config.py` resolves it via `Path(__file__)`, `next.config.mjs` reads it at
+  build time. See `DEPLOYMENT.md` for per-machine instructions.
 - [ ] **Naive token chunking** — `ingestion.py` uses a sliding token window with no sentence awareness.
   Mid-sentence splits degrade retrieval quality. Needs sentence-boundary-aware chunking (nltk or spaCy).
 - [x] **RAG threshold incompatible with hybrid search** — duplicate of item above; confirmed fixed.
@@ -209,18 +217,12 @@ These two are coupled — pagination makes client-side search incorrect, so they
   controls below the document list. Reset to `offset=0` whenever search term changes or a new
   document is uploaded.
 
-### Chat: Stream Abort (Stop Button)
+### Chat: Stream Abort (Stop Button) ✓ Done
 
-- [ ] **`AbortController` in `useSSEChat`** — add `abortRef = useRef<AbortController | null>(null)`.
-  Create a new controller before each `fetch`, store it in ref, pass `signal` to `postStream`.
-  On `done`/`error` events, set ref to null.
-- [ ] **`postStream` signal parameter** — `api/client.ts:postStream` doesn't accept `AbortSignal`.
-  Add optional `signal?: AbortSignal` param and pass it to `fetch`.
-- [ ] **Wire Square button in `MessageInput`** — `Square` icon is imported and shown during
-  streaming but `handleSend` is disabled — no stop action exists. Add `onStop` prop, call
-  `abortRef.current?.abort()` from the hook, expose it via `useSSEChat` return value.
-- [ ] **Handle abort in stream loop** — catch `AbortError` in `useSSEChat` and set `isStreaming`
-  to false without showing an error message to the user.
+- [x] **`AbortController` in `useSSEChat`** — `abortRef` created per-request, nulled in `finally`.
+- [x] **`postStream` signal parameter** — `api/client.ts:postStream` accepts optional `AbortSignal`.
+- [x] **Wire Square button in `MessageInput`** — button splits into stop/send; stop calls `abortRef.current?.abort()` via `stopStreaming` returned from hook.
+- [x] **Handle abort in stream loop** — `AbortError` caught silently, `isStreaming` cleared in `finally`.
 
 ### Chat: Search All + Document Attachment Flow
 

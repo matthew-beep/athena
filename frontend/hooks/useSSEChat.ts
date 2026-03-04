@@ -11,6 +11,7 @@ export function useSSEChat() {
   const firstTokenTime = useRef(0);
   const tokenCount = useRef(0);
   const ttftMsRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const {
     appendStreamToken,
@@ -73,6 +74,8 @@ export function useSSEChat() {
         ttftMsRef.current = 0;
         useChatStore.getState().setRequestStartedAt(Date.now());
 
+        abortRef.current = new AbortController();
+
         const pendingDocs = useChatStore.getState().pendingDocuments;
         const response = await apiClient.postStream('/chat', {
           message: content,
@@ -82,7 +85,7 @@ export function useSSEChat() {
             ? pendingSearchAll
             : (conversationSearchAll[convId ?? ''] ?? false),
           document_ids: isNewConversation ? pendingDocs.map((d) => d.document_id) : [],
-        });
+        }, abortRef.current.signal);
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
@@ -116,6 +119,8 @@ export function useSSEChat() {
                   ttftMsRef.current = Math.round(firstTokenTime.current - requestStartTime.current);
                   useChatStore.getState().setFirstTokenReachedMs(ttftMsRef.current);
                   useChatStore.getState().setRequestStartedAt(null);
+                  useSystemStore.getState().updateTtftAvg(ttftMsRef.current);
+
                 }
                 tokenCount.current += 1;
                 appendStreamToken(event.content);
@@ -203,8 +208,13 @@ export function useSSEChat() {
           }
         }
       } catch (err) {
-        console.error('Chat error:', err);
+        if (err instanceof Error && err.name === 'AbortError') {
+          // User stopped the stream — not an error
+        } else {
+          console.error('Chat error:', err);
+        }
       } finally {
+        abortRef.current = null;
         useChatStore.getState().setRequestStartedAt(null);
         useChatStore.getState().setFirstTokenReachedMs(null);
         setIsStreaming(false);
@@ -231,5 +241,9 @@ export function useSSEChat() {
     ]
   );
 
-  return { sendMessage };
+  const stopStreaming = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  return { sendMessage, stopStreaming };
 }

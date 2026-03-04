@@ -54,7 +54,7 @@ export const apiClient = {
     }).then((r) => handleResponse<T>(r));
   },
 
-  postStream(path: string, body: unknown): Promise<Response> {
+  postStream(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
     const token = useAuthStore.getState().token;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -65,6 +65,7 @@ export const apiClient = {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
+      signal,
     });
   },
 };

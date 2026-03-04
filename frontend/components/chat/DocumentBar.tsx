@@ -251,7 +251,7 @@ export function DocumentBar({ onRefetchReady }: DocumentBarProps) {
   const lastInferenceStats = useSystemStore((s) => s.lastInferenceStats);
   const ttftSum = useSystemStore((s) => s.ttftSum);
   const ttftCount = useSystemStore((s) => s.ttftCount);
-  const averageTtftMs = ttftCount > 0 ? Math.round(ttftSum / ttftCount) : null;
+  const averageTtftMs = ttftCount > 0 ? Math.round(ttftSum / ttftCount) : 0;
 
   const [waitingElapsedMs, setWaitingElapsedMs] = useState(0);
   useEffect(() => {
@@ -376,62 +376,51 @@ export function DocumentBar({ onRefetchReady }: DocumentBarProps) {
         />
       )}
 
-      {modelStats?.active ? (
-        <div className="border-t border-white/10 p-3 mt-3 w-full">
-          <p className="text-xs text-white/30 uppercase tracking-widest mb-2">Inference</p>
-
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs text-white/70 font-medium">{modelStats.name}</span>
-            <span className="text-xs text-white/40">{modelStats.size_gb} GB</span>
-          </div>
-
-          <div className="flex flex-col">
-            <div className="flex text-xs text-white/30 gap-2 mb-2">
+      {modelStats?.active && (
+          <div className="border-t border-white/5 px-3 py-3 mt-auto space-y-2">                                                                    
+            {/* Model + live indicator */}
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono text-white/40 truncate">{modelStats.name}</span>
               <div className="flex items-center gap-1.5">
-                <span className="inline-block w-2 h-2 rounded-full bg-blue-500/60 shrink-0" aria-hidden />
-                <span>GPU <span className="text-white/70 font-medium">{modelStats.gpu_pct}%</span></span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="inline-block w-2 h-2 rounded-full bg-amber-500/40 shrink-0" aria-hidden />
-                <span>RAM <span className="text-white/70 font-medium">{modelStats.ram_pct}%</span></span>
+                <span className="text-[10px] font-mono text-white/25">{modelStats.size_gb}GB</span>
+                <div className="h-1 w-1 rounded-full bg-emerald-500/40 animate-pulse" />
               </div>
             </div>
-            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden flex">
-              <div className="h-full bg-blue-500/60 transition-all duration-500"
-                style={{ width: `${modelStats.gpu_pct}%` }} />
-              <div className="h-full bg-amber-500/40 transition-all duration-500"
-                style={{ width: `${modelStats.ram_pct}%` }} />
+
+            {/* GPU utilization bar */}
+            <div className="h-[2px] w-full bg-white/5 overflow-hidden rounded-full">
+              <div className="h-full bg-white/30 transition-all duration-700" style={{ width: `${modelStats.gpu_pct}%` }} />
+            </div>
+            {/* RAM utilization bar */}
+            <div className="h-[2px] w-full bg-white/5 overflow-hidden rounded-full">
+              <div className="h-full bg-cyan-500/50 transition-all duration-700" style={{ width: `${modelStats.ram_pct ?? 0}%` }} />
+            </div>
+            {/* Legend */}
+            <div className="flex items-center gap-2 text-[9px] font-mono text-white/30">
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-1 w-1.5 rounded-sm bg-cyan-500/60" aria-hidden />
+                RAM
+              </span>
+              <span className="text-white/20">/</span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-1 w-1.5 rounded-sm bg-white/40" aria-hidden />
+                GPU
+              </span>
+            </div>
+
+            {/* Stats row */}
+            <div className="flex justify-between text-[9px] font-mono text-white/25 tabular-nums">
+              <span>
+                {requestStartedAt != null ? `${(waitingElapsedMs / 1000).toFixed(2)}s`
+                  : firstTokenReachedMs != null ? `${(firstTokenReachedMs / 1000).toFixed(2)}s`
+                  : lastInferenceStats ? `${(lastInferenceStats.ttftMs / 1000).toFixed(2)}s`
+                  : '—'} ttft
+              </span>
+              <span>{lastInferenceStats?.tokensPerSec ?? 0} tok/s</span>
+              <span>avg {averageTtftMs}ms</span>
             </div>
           </div>
-
-          {requestStartedAt != null ? (
-            <div className="flex justify-between mt-3 text-xs text-white/30">
-              <span>First token: {(waitingElapsedMs / 1000).toFixed(1)} s</span>
-              <span>—</span>
-            </div>
-          ) : firstTokenReachedMs != null ? (
-            <div className="flex justify-between mt-3 text-xs text-white/30">
-              <span>{firstTokenReachedMs} ms first token</span>
-              <span>…</span>
-            </div>
-          ) : lastInferenceStats != null ? (
-            <div className="flex flex-col gap-1 mt-3 text-xs text-white/30">
-              <div className="flex justify-between">
-                <span>{(lastInferenceStats.ttftMs / 1000).toFixed(1)} s first token</span>
-                <span>{lastInferenceStats.tokensPerSec} tok/s</span>
-              </div>
-              {averageTtftMs != null && (
-                <div className="text-white/25">avg TTFT: {averageTtftMs} ms ({ttftCount} responses)</div>
-              )}
-            </div>
-          ) : (
-            <div className="flex justify-between mt-3 text-xs text-white/30">
-              <span>—</span>
-              <span>—</span>
-            </div>
-          )}
-        </div>
-      ) : null}
+        )}
 
     </div>
   );

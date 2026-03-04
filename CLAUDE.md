@@ -363,7 +363,7 @@ CREATE TABLE topic_engagement (
 One collection: `athena_knowledge`
 
 ```python
-VectorParams(size=384, distance=Distance.COSINE)
+VectorParams(size=768, distance=Distance.COSINE)
 
 # Point payload structure
 {
@@ -383,7 +383,7 @@ VectorParams(size=384, distance=Distance.COSINE)
 }
 ```
 
-Embedding model: `nomic-embed-text` via Ollama (384 dimensions)
+Embedding model: `nomic-embed-text` via Ollama (768 dimensions)
 
 ---
 

@@ -18,7 +18,7 @@ const WARN_TOKENS = 3000;
 
 export function MessageInput() {
   const [text, setText] = useState('');
-  const { sendMessage } = useSSEChat();
+  const { sendMessage, stopStreaming } = useSSEChat();
   const { isStreaming, activeConversationId, setMessageTokens, statusMessage, activeModel, pendingSearchAll, setPendingSearchAll, setSearchAll, conversationSearchAll } = useChatStore(
     useShallow((s) => ({
       isStreaming: s.isStreaming,
@@ -93,18 +93,27 @@ export function MessageInput() {
           rows={1}
           disabled={isStreaming}
         />
-        <button
-          onClick={handleSend}
-          disabled={!text.trim() || isStreaming || isOverMax}
-          className={cn(
-            'px-3 py-3 rounded-lg text-xs font-semibold transition-all flex-grow-0 flex items-center gap-1.5',
-            text.trim() && !isStreaming && !isOverMax
-              ? 'bg-foreground text-background hover:bg-foreground/90'
-              : 'text-muted-foreground cursor-not-allowed bg-foreground'
-          )}
-        >
-          {isStreaming ? <Square size={12} /> : <Send size={12} />}
-        </button>
+        {isStreaming ? (
+          <button
+            onClick={stopStreaming}
+            className="px-3 py-3 rounded-lg text-xs font-semibold transition-all flex-grow-0 flex items-center gap-1.5 bg-foreground text-background hover:bg-foreground/90"
+          >
+            <Square size={12} />
+          </button>
+        ) : (
+          <button
+            onClick={handleSend}
+            disabled={!text.trim() || isOverMax}
+            className={cn(
+              'px-3 py-3 rounded-lg text-xs font-semibold transition-all flex-grow-0 flex items-center gap-1.5',
+              text.trim() && !isOverMax
+                ? 'bg-foreground text-background hover:bg-foreground/90'
+                : 'text-muted-foreground cursor-not-allowed bg-foreground'
+            )}
+          >
+            <Send size={12} />
+          </button>
+        )}
       </div>
 
       <div className="flex items-center justify-between mt-1.5 px-1 border-2 border-border/50 rounded-2xl">
