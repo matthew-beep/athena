@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   FileText,
   X,
@@ -11,22 +11,13 @@ import {
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chat.store';
 import type { PendingDocument } from '@/stores/chat.store';
+import type { ConversationDocument } from '@/types';
 import { useSystemStore } from '@/stores/system.store';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/utils/cn';
 import { apiClient } from '@/api/client';
 import { useModelStats } from '@/hooks/useSystemStats'
 
-
-// ── Types ───────────────────────────────────────────────────────────────────
-
-interface ConversationDocument {
-  document_id: string;
-  filename: string;
-  file_type?: string;
-  word_count?: number;
-  added_at?: string;
-}
 
 function isSyntheticDoc(filename: string): boolean {
   const lower = filename.toLowerCase();
@@ -41,12 +32,14 @@ function WorkingMemoryCard({
   onMuteToggle,
   onRemove,
   onAddClick,
+  isSearchAll,
 }: {
   documents: ConversationDocument[];
   mutedIds: Set<string>;
   onMuteToggle: (id: string) => void;
   onRemove: (id: string) => void;
   onAddClick: () => void;
+  isSearchAll: boolean;
 }) {
   return (
     <div className="px-3 py-2.5 border-b border-border/20">
@@ -65,8 +58,11 @@ function WorkingMemoryCard({
           + Add
         </button>
       </div>
-
-      {documents.length === 0 ? (
+      {isSearchAll ? (
+        <p className="text-[10px] font-mono text-muted-foreground/40 py-2 leading-relaxed">
+          Global Chat Mode — Searching all documents.
+        </p>
+      ) : documents.length === 0 ? (
         <p className="text-[10px] font-mono text-muted-foreground/40 py-2 leading-relaxed">
           General Chat Mode — No documents in scope.
         </p>
@@ -213,12 +209,7 @@ function CitationShutter({
 
 // ── Context Sidebar (main export) ────────────────────────────────────────────
 
-interface DocumentBarProps {
-  /** Called when mounted so parent can trigger a refetch after e.g. attaching docs from command palette */
-  onRefetchReady?: (refetch: () => void) => void;
-}
-
-export function DocumentBar({ onRefetchReady }: DocumentBarProps) {
+export function DocumentBar() {
   const {
     activeConversationId,
     contextTokens,
@@ -229,8 +220,12 @@ export function DocumentBar({ onRefetchReady }: DocumentBarProps) {
     setCommandPaletteOpen,
     pendingDocuments,
     setPendingDocuments,
-      requestStartedAt,
-      firstTokenReachedMs,
+    conversationDocuments,
+    removeConversationDocument,
+    requestStartedAt,
+    firstTokenReachedMs,
+    conversationSearchAll,
+    pendingSearchAll,
   } = useChatStore(
     useShallow((s) => ({
       activeConversationId: s.activeConversationId,
@@ -242,8 +237,12 @@ export function DocumentBar({ onRefetchReady }: DocumentBarProps) {
       setCommandPaletteOpen: s.setCommandPaletteOpen,
       pendingDocuments: s.pendingDocuments,
       setPendingDocuments: s.setPendingDocuments,
+      conversationDocuments: s.conversationDocuments,
+      removeConversationDocument: s.removeConversationDocument,
       requestStartedAt: s.requestStartedAt,
       firstTokenReachedMs: s.firstTokenReachedMs,
+      conversationSearchAll: s.conversationSearchAll,
+      pendingSearchAll: s.pendingSearchAll,
     }))
   );
 
@@ -252,6 +251,10 @@ export function DocumentBar({ onRefetchReady }: DocumentBarProps) {
   const ttftSum = useSystemStore((s) => s.ttftSum);
   const ttftCount = useSystemStore((s) => s.ttftCount);
   const averageTtftMs = ttftCount > 0 ? Math.round(ttftSum / ttftCount) : 0;
+
+  const isSearchAll = activeConversationId
+  ? (conversationSearchAll[activeConversationId] ?? false)
+  : pendingSearchAll;
 
   const [waitingElapsedMs, setWaitingElapsedMs] = useState(0);
   useEffect(() => {
@@ -262,13 +265,11 @@ export function DocumentBar({ onRefetchReady }: DocumentBarProps) {
     return () => clearInterval(interval);
   }, [requestStartedAt]);
 
-  const [documents, setDocuments] = useState<ConversationDocument[]>([]);
   const [mutedIds, setMutedIds] = useState<Set<string>>(new Set());
-  const [loadingDocs, setLoadingDocs] = useState(false);
 
-  // When there's no active conversation, show pending docs staged from document list
+  const storeDocuments = activeConversationId ? (conversationDocuments[activeConversationId] ?? []) : [];
   const displayDocuments: ConversationDocument[] = activeConversationId
-    ? documents
+    ? storeDocuments
     : pendingDocuments.map((d) => ({ document_id: d.document_id, filename: d.filename, file_type: d.file_type }));
 
   const tokens = activeConversationId
@@ -276,37 +277,14 @@ export function DocumentBar({ onRefetchReady }: DocumentBarProps) {
     : 0;
   const pct = contextBudget > 0 ? Math.min(tokens / contextBudget, 1) : 0;
 
-  const refetch = useCallback(() => {
-    if (!activeConversationId) return;
-    setLoadingDocs(true);
-    apiClient
-      .get<{ documents: ConversationDocument[] }>(`/chat/${activeConversationId}/documents`)
-      .then((res) => setDocuments(Array.isArray(res?.documents) ? res.documents : []))
-      .catch(() => setDocuments([]))
-      .finally(() => setLoadingDocs(false));
-  }, [activeConversationId]);
-
-  useEffect(() => {
-    if (!activeConversationId) {
-      setDocuments([]);
-      return;
-    }
-    refetch();
-  }, [activeConversationId, refetch]);
-
-  useEffect(() => {
-    onRefetchReady?.(refetch);
-  }, [onRefetchReady, refetch]);
-
   const handleRemoveDoc = (documentId: string) => {
     if (!activeConversationId) {
-      // Remove from pending — no API call needed yet
       setPendingDocuments(pendingDocuments.filter((d) => d.document_id !== documentId));
       return;
     }
     apiClient
       .delete(`/chat/${activeConversationId}/documents/${documentId}`)
-      .then(() => setDocuments((d) => d.filter((x) => x.document_id !== documentId)))
+      .then(() => removeConversationDocument(activeConversationId, documentId))
       .catch(console.error);
   };
 
@@ -360,11 +338,12 @@ export function DocumentBar({ onRefetchReady }: DocumentBarProps) {
       {/* Working Memory */}
       <div className="flex-1 min-h-0 overflow-y-auto relative z-[1]">
         <WorkingMemoryCard
-          documents={loadingDocs ? [] : displayDocuments}
+          documents={displayDocuments}
           mutedIds={mutedIds}
           onMuteToggle={handleMuteToggle}
           onRemove={handleRemoveDoc}
           onAddClick={() => setCommandPaletteOpen(true)}
+          isSearchAll={isSearchAll}
         />
       </div>
 
@@ -376,24 +355,24 @@ export function DocumentBar({ onRefetchReady }: DocumentBarProps) {
         />
       )}
 
-      {modelStats?.active && (
+      
           <div className="border-t border-white/5 px-3 py-3 mt-auto space-y-2">                                                                    
             {/* Model + live indicator */}
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono text-white/40 truncate">{modelStats.name}</span>
+              <span className="text-[10px] font-mono text-white/40 truncate">{modelStats ? modelStats.name : '—'}</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-mono text-white/25">{modelStats.size_gb}GB</span>
+                <span className="text-[10px] font-mono text-white/25">{modelStats ? modelStats.size_gb : '—'}GB</span>
                 <div className="h-1 w-1 rounded-full bg-emerald-500/40 animate-pulse" />
               </div>
             </div>
 
             {/* GPU utilization bar */}
             <div className="h-[2px] w-full bg-white/5 overflow-hidden rounded-full">
-              <div className="h-full bg-white/30 transition-all duration-700" style={{ width: `${modelStats.gpu_pct}%` }} />
+              <div className="h-full bg-white/30 transition-all duration-700" style={{ width: `${modelStats ? modelStats.gpu_pct : 0}%` }} />
             </div>
             {/* RAM utilization bar */}
             <div className="h-[2px] w-full bg-white/5 overflow-hidden rounded-full">
-              <div className="h-full bg-cyan-500/50 transition-all duration-700" style={{ width: `${modelStats.ram_pct ?? 0}%` }} />
+              <div className="h-full bg-cyan-500/50 transition-all duration-700" style={{ width: `${modelStats ? modelStats.ram_pct : 0}%` }} />
             </div>
             {/* Legend */}
             <div className="flex items-center gap-2 text-[9px] font-mono text-white/30">
@@ -420,7 +399,7 @@ export function DocumentBar({ onRefetchReady }: DocumentBarProps) {
               <span>avg {averageTtftMs}ms</span>
             </div>
           </div>
-        )}
+        
 
     </div>
   );

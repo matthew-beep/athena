@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type KeyboardEvent, useRef } from 'react';
-import { Send, Square } from 'lucide-react';
+import { Send, Square, Globe } from 'lucide-react';
 import { useSSEChat } from '@/hooks/useSSEChat';
 import { useChatStore } from '@/stores/chat.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -26,6 +26,10 @@ export function MessageInput() {
       setMessageTokens: s.setMessageTokens,
       statusMessage: s.statusMessage,
       activeModel: s.activeModel,
+      pendingSearchAll: s.pendingSearchAll,
+      setPendingSearchAll: s.setPendingSearchAll,
+      setSearchAll: s.setSearchAll,
+      conversationSearchAll: s.conversationSearchAll,
     }))
   );
 
@@ -64,6 +68,18 @@ export function MessageInput() {
     tokenDebounceRef.current = setTimeout(() => setMessageTokens(estimateTokens(val)), 150);
   };
 
+  const isSearchAll = activeConversationId
+    ? conversationSearchAll[activeConversationId] ?? false
+    : pendingSearchAll;
+
+  const handleSearchAllToggle = () => {
+    if (activeConversationId) {
+      setSearchAll(activeConversationId, !isSearchAll);
+    } else {
+      setPendingSearchAll(!pendingSearchAll);
+    }
+  };
+
   const tokenEst = estimateTokens(text);
   const isOverWarn = devMode && tokenEst > WARN_TOKENS;
   const isOverMax = tokenEst > MAX_TOKENS;
@@ -82,6 +98,18 @@ export function MessageInput() {
           isOverWarn ? 'border-yellow-500/40' : 'border-border/50'
         )}
       >
+        <button
+          onClick={handleSearchAllToggle}
+          title={isSearchAll ? 'Searching all documents — click to disable' : 'Search all documents'}
+          className={cn(
+            'p-1.5 rounded-lg transition-all flex-shrink-0',
+            isSearchAll
+              ? 'text-foreground bg-white/10'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <Globe size={14} />
+        </button>
         <textarea
           ref={textareaRef}
           value={text}
@@ -116,28 +144,10 @@ export function MessageInput() {
         )}
       </div>
 
-      <div className="flex items-center justify-between mt-1.5 px-1 border-2 border-border/50 rounded-2xl">
+      <div className="flex items-center justify-between mt-1.5 px-1">
         <p className="text-[10px] text-muted-foreground/40 font-mono">
           {activeModel ?? '—'} · Tier 1
         </p>
-        {devMode && text.length > 0 && (
-          <p
-            className={cn(
-              'text-[10px] font-mono tabular-nums',
-              isOverMax
-                ? 'text-red-400'
-                : isOverWarn
-                ? 'text-yellow-400'
-                : 'text-muted-foreground/40'
-            )}
-          >
-            {isOverMax
-              ? `~${tokenEst} tok — too long, split message`
-              : isOverWarn
-              ? `~${tokenEst} tok — getting long`
-              : `~${tokenEst} tok`}
-          </p>
-        )}
       </div>
     </div>
   );

@@ -49,6 +49,7 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
     activeConversationId,
     setActiveConversation,
     setMessages,
+    setPendingDocuments,
   } = useChatStore();
 
   useEffect(() => {
@@ -73,6 +74,7 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
 
   const handleNewChat = () => {
     setActiveConversation(null);
+    setPendingDocuments([]);
     if (onClose) onClose();
   };
 

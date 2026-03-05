@@ -1,9 +1,11 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, Pin } from 'lucide-react';
 import { TierBadge } from './TierBadge';
 import { useChatStore } from '@/stores/chat.store';
+import { apiClient } from '@/api/client';
+import { useShallow } from 'zustand/react/shallow';
 import type { Message as MessageType, RagSource } from '@/types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -13,7 +15,30 @@ interface MessageProps {
 }
 
 function SourcesPanel({ sources }: { sources: RagSource[] }) {
-  const setCitationShutter = useChatStore((s) => s.setCitationShutter);
+  const { setCitationShutter, activeConversationId, conversationDocuments, addConversationDocument, setSearchAll } = useChatStore(
+    useShallow((s) => ({
+      setCitationShutter: s.setCitationShutter,
+      activeConversationId: s.activeConversationId,
+      conversationDocuments: s.conversationDocuments,
+      addConversationDocument: s.addConversationDocument,
+      setSearchAll: s.setSearchAll,
+    }))
+  );
+
+  const attachedIds = activeConversationId
+    ? new Set((conversationDocuments[activeConversationId] ?? []).map((d) => d.document_id))
+    : new Set<string>();
+
+  const handleAttach = (src: RagSource) => {
+    if (!activeConversationId || attachedIds.has(src.document_id)) return;
+    apiClient
+      .post(`/chat/${activeConversationId}/documents`, { document_ids: [src.document_id] })
+      .then(() => {
+        addConversationDocument(activeConversationId, { document_id: src.document_id, filename: src.filename });
+        setSearchAll(activeConversationId, false);
+      })
+      .catch(console.error);
+  };
 
   // Deduplicate by filename — keep highest-score chunk per file
   const deduped = useMemo(() => {
@@ -47,13 +72,12 @@ function SourcesPanel({ sources }: { sources: RagSource[] }) {
               key={src.filename + (src.chunk_id ?? src.chunk_index)}
               className="rounded-sm bg-muted/20 border border-border/20 overflow-hidden"
             >
-              <button
-                type="button"
-                onClick={() => setCitationShutter(src)}
-                className="w-full text-left hover:bg-muted/30 transition-colors"
-              >
-                {/* Header row */}
-                <div className="flex items-center gap-2 px-2 py-1">
+              <div className="flex items-center gap-2 px-2 py-1">
+                <button
+                  type="button"
+                  onClick={() => setCitationShutter(src)}
+                  className="flex items-center gap-2 flex-1 min-w-0 text-left hover:opacity-80 transition-opacity"
+                >
                   <FileText size={10} className="text-muted-foreground/50 flex-shrink-0" />
                   <span className="text-[10px] text-muted-foreground truncate flex-1 font-mono">
                     {src.filename}
@@ -63,14 +87,31 @@ function SourcesPanel({ sources }: { sources: RagSource[] }) {
                       {Math.round(src.score * 100)}%
                     </span>
                   )}
-                </div>
-                {/* Snippet */}
-                {src.text && (
+                </button>
+                {activeConversationId && (
+                  <button
+                    type="button"
+                    onClick={() => handleAttach(src)}
+                    disabled={attachedIds.has(src.document_id)}
+                    title={attachedIds.has(src.document_id) ? 'Already in scope' : 'Pin to conversation'}
+                    className="flex-shrink-0 p-0.5 rounded text-muted-foreground/30 hover:text-foreground disabled:opacity-20 disabled:cursor-default transition-colors"
+                  >
+                    <Pin size={9} />
+                  </button>
+                )}
+              </div>
+              {/* Snippet — click opens citation shutter */}
+              {src.text && (
+                <button
+                  type="button"
+                  onClick={() => setCitationShutter(src)}
+                  className="w-full text-left hover:bg-muted/30 transition-colors"
+                >
                   <p className="px-2 pb-2 text-[10px] text-muted-foreground/60 font-mono leading-relaxed line-clamp-3 border-t border-border/10 pt-1">
                     {src.text}
                   </p>
-                )}
-              </button>
+                </button>
+              )}
             </li>
           ))}
         </ul>

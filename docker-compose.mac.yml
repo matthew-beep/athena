@@ -1,3 +1,6 @@
+# MacBook / CPU-only — no NVIDIA GPU config.
+# Usage: docker compose -f docker-compose.mac.yml up
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -18,13 +21,6 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     volumes:
       - ollama_models:/root/.ollama
     ports:
@@ -46,7 +42,7 @@ services:
     entrypoint: ["/bin/sh", "/init-ollama.sh"]
     environment:
       - OLLAMA_HOST=ollama:11434
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3.5:9b}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
     depends_on:
       ollama:
         condition: service_healthy
@@ -78,7 +74,7 @@ services:
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-athena}
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
     depends_on:
       postgres:
         condition: service_healthy

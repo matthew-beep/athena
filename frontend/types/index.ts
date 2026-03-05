@@ -17,6 +17,14 @@ export interface Conversation {
   last_active: string;
 }
 
+export interface ConversationDocument {
+  document_id: string;
+  filename: string;
+  file_type?: string;
+  word_count?: number;
+  added_at?: string;
+}
+
 export interface RagSource {
   filename: string;
   score: number;

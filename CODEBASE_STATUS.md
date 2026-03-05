@@ -1,5 +1,5 @@
 # Athena — Codebase Status
-## 2026-03-02
+## 2026-03-04
 
 ---
 
@@ -39,6 +39,62 @@
 | `models/chat.py` | 50 | ChatRequest (+ document_ids), BatchAttachRequest, ConversationOut, MessageOut (+ rag_sources) |
 | `models/auth.py` | 18 | Token, UserOut |
 | `models/system.py` | 21 | ResourceStats, HealthResponse |
+
+---
+
+## What Was Worked On This Session (2026-03-04)
+
+### Sentence-Aware Chunking
+- **`core/ingestion.py`** — replaced naive 512-token sliding window with sentence-boundary-aware chunker.
+  Uses `nltk.sent_tokenize`, 500-token target chunks, ~50-token sentence-level overlap. PDF hyphenated
+  line breaks (`word-\nword`) normalized before tokenizing. Oversized single sentences emitted as their
+  own chunk (no mid-sentence splits ever). Token counts pre-computed once per sentence via `tiktoken`.
+- **`requirements.txt`** — added `nltk>=3.9`.
+- **Impact**: all RAG results will now be coherent, readable excerpts. Previously could split mid-word.
+  Existing documents should be re-ingested to benefit.
+
+### Search-All Globe Toggle
+- **`components/chat/MessageInput.tsx`** — added `Globe` icon button left of the textarea. Reads
+  `conversationSearchAll[activeConversationId]` for existing conversations, `pendingSearchAll` for
+  new ones. Toggle calls `setSearchAll` or `setPendingSearchAll` accordingly.
+
+### Scope Bar
+- **`components/chat/ScopeBar.tsx`** (new file) — compact bar between `MessageList` and `MessageInput`.
+  Three states: hidden (no docs, search_all off), "Searching all documents" pill with × (search_all on),
+  document chips with × to detach (docs attached). Handles pending state (store) and existing
+  conversation state (API) transparently.
+- **`components/chat/ChatWindow.tsx`** — `refetchDocs` callback (wrapped in `useCallback`) now runs on
+  every `activeConversationId` change, not just on `DocumentBar` mount. This means `ScopeBar` has data
+  even when the right panel is closed. `<ScopeBar />` inserted between `<MessageList />` and
+  `<MessageInput />`. `CommandPalette` receives `refetchDocs` directly instead of via a ref antipattern.
+
+### ConversationDocuments Store
+- **`stores/chat.store.ts`** — added `conversationDocuments: Record<string, ConversationDocument[]>`
+  with three actions: `setConversationDocuments`, `addConversationDocument`, `removeConversationDocument`.
+- **`types/index.ts`** — added `ConversationDocument` interface (`document_id`, `filename`, `file_type?`,
+  `word_count?`, `added_at?`).
+
+### Pin / Attach Button on Source Cards
+- **`components/chat/Message.tsx`** — `SourcesPanel` now reads `activeConversationId`,
+  `conversationDocuments`, `addConversationDocument`, `setSearchAll` from store via `useShallow`.
+  Each source card has a `Pin` icon button: POSTs to batch attach endpoint, updates store,
+  disables search_all. Disabled/dimmed when document already in scope.
+
+### Clear Pending Docs on New Chat
+- **`components/layout/Sidebar.tsx`** — `handleNewChat` now calls `setPendingDocuments([])` so stale
+  staged documents don't carry over when starting a fresh conversation.
+
+### Documents → Conversations Endpoint
+- **`api/documents.py`** — added `GET /api/documents/{document_id}/conversations`. Returns the 3 most
+  recent conversations that have this document attached (via `conversation_documents` join). Used by
+  `DocumentList` chat modal to skip the "fetch all conversations" approach.
+
+### Docker Compose Fixes
+- **`docker-compose.yml`** — removed deprecated `version: "3.9"`, changed GPU `count: 1` → `count: all`,
+  removed stray `qdrant: service_started` from `init-ollama` depends_on.
+- **`docker-compose.mac.yml`** (new) — standalone CPU-only compose for MacBook. No `deploy` block on
+  ollama. Default model `qwen2.5:7b`. Usage instructions in file header.
+- Deleted `docker-compose.gpu.yml` and `docker-compose.override.yml.example` (redundant/conflicting).
 
 ---
 
@@ -159,7 +215,7 @@ POST /api/documents/upload (multipart)
     └─ BackgroundTask: _process_document(document_id, user_id, filename, filepath)
            │
            ├─ extract text (pypdf for PDF, plain read for txt/md)
-           ├─ chunk_text() — sliding 512-token window, 64-token overlap (no sentence awareness yet)
+           ├─ chunk_text() — sentence-aware, 500-token chunks, ~50-token sentence-level overlap (nltk)
            ├─ build BM25 index → INSERT bm25_indexes (chunk_ids, corpus)
            ├─ embed all chunks → nomic-embed-text via Ollama
            ├─ qdrant.upsert_points() — payload: document_id, chunk_id, user_id, filename, etc.
@@ -199,7 +255,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 ---
 
-## API Endpoints (25 total)
+## API Endpoints (27 total)
 
 | Method | Path | Status |
 |---|---|---|
@@ -216,7 +272,9 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | POST | `/api/documents/upload` | ✅ |
 | POST | `/api/documents/url` | ❌ 501 stub |
 | GET | `/api/documents/{id}` | ✅ |
-| GET | `/api/documents/{id}/progress` | ✅ (per-doc only, bulk TBD) |
+| GET | `/api/documents/{id}/progress` | ✅ per-doc |
+| GET | `/api/documents/progress/active` | ✅ bulk active |
+| GET | `/api/documents/{id}/conversations` | ✅ |
 | DELETE | `/api/documents/{id}` | ✅ |
 | GET | `/api/system/health` | ✅ |
 | GET | `/api/system/resources` | ✅ |
@@ -236,16 +294,16 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | # | Severity | Description | File |
 |---|---|---|---|
 | 1 | ~~High~~ ✅ | ~~Wrong LLM~~ — Updated to `qwen3.5:9b` across all config files | `config.py`, `docker-compose.yml`, `.env.example`, `init-ollama.sh` |
-| 2 | High | Vector dimension unverified — `VECTOR_SIZE = 768` but spec says 384. Run `curl` check below to confirm | `db/qdrant.py` |
-| 3 | Medium | Per-document progress polling — `DocumentList.tsx:117` fires N fetches/cycle. Need `GET /api/documents/progress?ids=...` bulk endpoint | `api/documents.py`, `DocumentList.tsx` |
-| 4 | Medium | Naive chunking — no sentence-boundary awareness; splits mid-sentence | `core/ingestion.py` |
+| 2 | ~~High~~ ✅ | ~~Vector dimension unverified~~ — confirmed `nomic-embed-text` = 768-dim; `VECTOR_SIZE = 768` is correct | `db/qdrant.py` |
+| 3 | ~~Medium~~ ✅ | ~~Per-document progress polling~~ — `GET /api/documents/progress/active` bulk endpoint implemented | `api/documents.py`, `DocumentList.tsx` |
+| 4 | ~~Medium~~ ✅ | ~~Naive chunking~~ — replaced with sentence-aware chunking via nltk in `core/ingestion.py` | `core/ingestion.py` |
 | 5 | Medium | Summarization in hot path — `_generate_and_cache_summary()` blocks the next user request | `core/context.py` |
 | 6 | Medium | No Celery/Redis — background processing uses FastAPI `BackgroundTasks`; no retries, no persistence | `api/documents.py` |
 | 7 | Low | `contextBudget` wrong in frontend store — hardcoded 4096, backend uses 8192 | `stores/chat.store.ts` |
-| 8 | Low | No stream abort — `Square` icon shown in `MessageInput` but no `AbortController` wired | `hooks/useSSEChat.ts`, `api/client.ts` |
-| 9 | Low | Muting docs is UI-only — `mutedIds` tracked in `DocumentBar` state but never sent to backend; all attached docs are always searched | `DocumentBar.tsx`, `api/chat.py` |
-| 10 | Low | `pendingDocuments` not cleared when clicking "New Chat" in sidebar — stale pending docs from a previous document-list navigation persist | `stores/chat.store.ts`, `Sidebar.tsx` |
-| 11 | Low | RAG scores always 0.0 — RRF produces ranks not similarity scores; citation panel shows 0% for all sources | `core/rag.py`, `components/chat/Message.tsx` |
+| 8 | ~~Low~~ ✅ | ~~No stream abort~~ — `AbortController` wired in `useSSEChat`, Square button in `MessageInput` calls abort | `hooks/useSSEChat.ts`, `api/client.ts` |
+| 9 | Low | Muting docs is UI-only — `mutedIds` in `DocumentBar` never sent to backend; all attached docs searched | `DocumentBar.tsx`, `api/chat.py` |
+| 10 | ~~Low~~ ✅ | ~~`pendingDocuments` not cleared on new chat~~ — `Sidebar.tsx` `handleNewChat` calls `setPendingDocuments([])` | `Sidebar.tsx` |
+| 11 | Low | RAG scores always 0.0 — RRF produces ranks not similarity scores; citation panel shows 0% | `core/rag.py`, `Message.tsx` |
 
 ---
 
@@ -270,8 +328,8 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 | Phase | Status | Blocker |
 |---|---|---|
-| Phase 1: Foundation | ~90% | Missing: Celery, Redis, sentence-aware chunking, bulk progress endpoint |
-| Phase 2: Document Processing | ~10% | Crawl4AI, video/Whisper, Celery all missing |
+| Phase 1: Foundation | ~95% | Missing: Celery, Redis |
+| Phase 2: Document Processing | ~15% | Crawl4AI (501 stub), video/Whisper, Celery all missing |
 | Phase 3: Learning Features | 0% | |
 | Phase 4: Two-Tier Knowledge | 0% | |
 | Phase 5: Research Pipeline | 0% | |
@@ -295,14 +353,16 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | Documents tab (upload, staging, progress, delete) | ✅ |
 | System footer (live polling) | ✅ |
 | Typed API client (`api/client.ts`) | ✅ |
-| Stream abort / stop button | ❌ |
+| Stream abort / stop button | ✅ |
 | Token flush throttle (50ms buffer) | ❌ |
 | Auto-scroll at-bottom detection | ❌ |
 | Suggestion/recommendation pills | ❌ |
 | Document attachment UI in chat (CommandPalette + DocumentBar working memory) | ✅ |
 | "Chat about this" from Documents tab (all paths: new/existing/modal) | ✅ |
-| Chat mode selector (ephemeral / search-all) | ❌ |
-| URL ingestion input | ❌ |
+| Search-all globe toggle in MessageInput | ✅ |
+| Scope bar (document chips + search-all pill above input) | ✅ |
+| Pin/attach button on RAG source cards | ✅ |
+| URL ingestion input | ❌ (blocked on Crawl4AI backend) |
 | Delete confirmation | ❌ |
 | Bulk document progress (frontend) | ❌ |
 | PromotionCard + StreamDone.promotion_suggestion | ❌ |
@@ -314,4 +374,4 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 ---
 
-*Athena · Codebase Status · 2026-03-02*
+*Athena · Codebase Status · 2026-03-04*

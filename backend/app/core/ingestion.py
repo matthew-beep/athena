@@ -8,11 +8,15 @@ from loguru import logger
 from typing import IO
 import json
 from rank_bm25 import BM25Okapi
+import re
+import nltk
+from nltk.tokenize import sent_tokenize
 
 enc = tiktoken.get_encoding("cl100k_base")
+nltk.download('punkt_tab', quiet=True)
 
-CHUNK_SIZE = 512
-CHUNK_OVERLAP = 64
+CHUNK_SIZE = 500
+CHUNK_OVERLAP = 50
 DEFAULT_PROJECT_ID = "default"
 
 VIDEO_MIME_TYPES = {
@@ -73,29 +77,73 @@ _EXT_MIME: dict[str, str] = {
 
 def chunk_text(text: str) -> list[dict]:
     """
-    Split text into overlapping token windows.
-    Returns list of { text, token_count, chunk_index }.
+    Split text into sentence-aware overlapping chunks.
+    Never splits mid-sentence. Overlap carries back whole sentences (~50 tokens).
     """
-    tokens = enc.encode(text)
-    if not tokens:
+    # Normalize whitespace — rejoin hyphenated line breaks common in PDFs
+    text = re.sub(r'-\n(\w)', r'\1', text)
+
+    sentences = sent_tokenize(text)
+    if not sentences:
         return []
 
+    # Pre-compute token counts once per sentence
+    sentence_tokens = [(s, len(enc.encode(s))) for s in sentences]
+
     chunks = []
-    start = 0
-    while start < len(tokens):
-        end = min(start + CHUNK_SIZE, len(tokens))
-        chunk_tokens = tokens[start:end]
+    current: list[tuple[str, int]] = []  # (sentence, token_count)
+    current_tokens = 0
+
+    for sentence, token_count in sentence_tokens:
+        # Oversized single sentence — flush current, emit it alone
+        if token_count >= CHUNK_SIZE:
+            if current:
+                chunks.append({
+                    "text": " ".join(s for s, _ in current),
+                    "token_count": current_tokens,
+                    "chunk_index": len(chunks),
+                })
+                current = []
+                current_tokens = 0
+            chunks.append({
+                "text": sentence,
+                "token_count": token_count,
+                "chunk_index": len(chunks),
+            })
+            continue
+
+        # Adding this sentence would exceed the limit — flush and build overlap
+        if current_tokens + token_count > CHUNK_SIZE and current:
+            chunks.append({
+                "text": " ".join(s for s, _ in current),
+                "token_count": current_tokens,
+                "chunk_index": len(chunks),
+            })
+
+            # Carry back sentences until we have ~CHUNK_OVERLAP tokens
+            overlap: list[tuple[str, int]] = []
+            overlap_tokens = 0
+            for s, t in reversed(current):
+                if overlap_tokens + t > CHUNK_OVERLAP:
+                    break
+                overlap.insert(0, (s, t))
+                overlap_tokens += t
+
+            current = overlap
+            current_tokens = overlap_tokens
+
+        current.append((sentence, token_count))
+        current_tokens += token_count
+
+    # Flush remainder
+    if current:
         chunks.append({
-            "text": enc.decode(chunk_tokens),
-            "token_count": len(chunk_tokens),
+            "text": " ".join(s for s, _ in current),
+            "token_count": current_tokens,
             "chunk_index": len(chunks),
         })
-        if end >= len(tokens):
-            break
-        start += CHUNK_SIZE - CHUNK_OVERLAP
 
     return chunks
-
 
 def _resolve_mime(mime_type: str, filename: str) -> str:
     """Use file extension to resolve ambiguous or missing MIME types."""

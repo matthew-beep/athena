@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import type { Conversation, Message, RagSource } from '@/types';
+import type { Conversation, Message, RagSource, ConversationDocument } from '@/types';
 
 export interface PendingDocument {
   document_id: string;
@@ -44,6 +44,12 @@ interface ChatState {
   pendingDocuments: PendingDocument[];
   setPendingDocuments: (docs: PendingDocument[]) => void;
 
+  /** Documents currently attached to each conversation — source of truth for scope bar + attach buttons */
+  conversationDocuments: Record<string, ConversationDocument[]>;
+  setConversationDocuments: (convId: string, docs: ConversationDocument[]) => void;
+  addConversationDocument: (convId: string, doc: ConversationDocument) => void;
+  removeConversationDocument: (convId: string, docId: string) => void;
+
   /** Citation Shutter: when set, Context Sidebar shows the source chunk in a drill-down drawer */
   citationShutter: RagSource | null;
   setCitationShutter: (source: RagSource | null) => void;
@@ -81,6 +87,23 @@ export const useChatStore = create<ChatState>((set) => ({
 
   pendingDocuments: [],
   setPendingDocuments: (docs) => set({ pendingDocuments: docs }),
+
+  conversationDocuments: {},
+  setConversationDocuments: (convId, docs) =>
+    set((s) => ({ conversationDocuments: { ...s.conversationDocuments, [convId]: docs } })),
+  addConversationDocument: (convId, doc) =>
+    set((s) => {
+      const existing = s.conversationDocuments[convId] ?? [];
+      if (existing.some((d) => d.document_id === doc.document_id)) return s;
+      return { conversationDocuments: { ...s.conversationDocuments, [convId]: [...existing, doc] } };
+    }),
+  removeConversationDocument: (convId, docId) =>
+    set((s) => ({
+      conversationDocuments: {
+        ...s.conversationDocuments,
+        [convId]: (s.conversationDocuments[convId] ?? []).filter((d) => d.document_id !== docId),
+      },
+    })),
 
   citationShutter: null,
   setCitationShutter: (source) => set({ citationShutter: source }),

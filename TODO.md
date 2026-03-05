@@ -1,14 +1,15 @@
 # Athena — TODO
 
-Current phase: **Phase 1 / Phase 2 boundary** — basic RAG chat works, document ingestion works,
-JWT auth works, SSE streaming works, stop button works. Everything below is what's missing or broken.
+Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scoped retrieval, sentence-aware
+chunking, and scope bar all working. URL ingestion (Crawl4AI) is the next major unblock — it's a 501 stub
+and is required before Celery migration and the research pipeline (Phase 5 Stage 1).
 
 **Next up (in order):**
-1. Search all toggle in `MessageInput` (globe button, store already wired, just needs UI)
-2. Scope bar above input (document chips + search-all pill, needs `conversationDocuments` in store)
-3. Sentence-aware chunking (retrieval quality improvement)
-4. Pagination + search on documents tab
-5. Clear `pendingDocuments` when starting a new conversation from sidebar
+1. Wire Crawl4AI into `POST /api/documents/url` — same BackgroundTask pattern as PDF upload (~2-3 hrs)
+2. URL ingestion UI — tab or section in `UploadZone.tsx` that POSTs to the above
+3. Redis + Celery — once both ingestion paths work, migrate to proper task queue with retries
+4. Fix RAG scores always 0 — pass pre-fusion vector score through RRF payload
+5. Pagination + server-side search on documents tab
 
 ---
 
@@ -32,8 +33,8 @@ JWT auth works, SSE streaming works, stop button works. Everything below is what
   (RTX 5060 Ti) will use `qwen3.5:4b` via `docker-compose.gpu.yml`. Root `.env` is now the single
   source of truth — `config.py` resolves it via `Path(__file__)`, `next.config.mjs` reads it at
   build time. See `DEPLOYMENT.md` for per-machine instructions.
-- [ ] **Naive token chunking** — `ingestion.py` uses a sliding token window with no sentence awareness.
-  Mid-sentence splits degrade retrieval quality. Needs sentence-boundary-aware chunking (nltk or spaCy).
+- [x] **Naive token chunking** — replaced with sentence-aware chunking in `ingestion.py`. Uses nltk
+  `sent_tokenize`, 500-token chunks, 50-token sentence-level overlap. PDF hyphenated line breaks normalized.
 - [x] **RAG threshold incompatible with hybrid search** — duplicate of item above; confirmed fixed.
 - [ ] **URL ingestion returns 501** — `POST /api/documents/url` is a stub. Crawl4AI not wired up yet.
 - [ ] **No deduplication in RAG** — can return near-identical chunks from the same document. Add a
@@ -51,8 +52,8 @@ JWT auth works, SSE streaming works, stop button works. Everything below is what
 
 ### Phase 1 Completion
 
-- [ ] **Sentence-aware chunking** — replace naive `chunk_text()` with sentence-boundary-aware splitting.
-  Target: 500 tokens per chunk, 50-token overlap, never split mid-sentence.
+- [x] **Sentence-aware chunking** — `chunk_text()` in `ingestion.py` uses nltk `sent_tokenize`.
+  500-token chunks, 50-token sentence-level overlap, PDF hyphen normalization. `nltk>=3.9` in requirements.
 - [ ] **Migrate document processing to Celery** — currently using FastAPI `BackgroundTasks`. Move
   `_process_document` into a Celery task in `tasks/ingestion.py`. API returns task ID immediately.
   Requires Redis broker and Celery worker added to Docker Compose.
@@ -70,8 +71,10 @@ JWT auth works, SSE streaming works, stop button works. Everything below is what
 
 ### Phase 2: Document Processing
 
-- [ ] **Web URL scraping** — wire Crawl4AI into `POST /api/documents/url`. Background Celery task.
-  Returns document_id immediately, processing happens async.
+- [ ] **Web URL scraping** — wire Crawl4AI into `POST /api/documents/url`. Currently returns 501.
+  Use FastAPI `BackgroundTasks` (same as PDF upload) for now — no Celery needed yet. Crawl4AI fetches
+  URL → returns markdown → same chunk → embed → Qdrant pipeline as file upload. Returns `document_id`
+  immediately. **This is the #1 priority** — unblocks URL UI and research pipeline Stage 1.
 - [ ] **Video/audio ingestion** — Faster-Whisper transcription already stubbed in `ingestion.py` but
   not connected to the Celery pipeline. Wire it up: yt-dlp download → Whisper transcription → chunk → embed.
 - [x] **Bulk document progress endpoint** — `GET /api/documents/progress/active` returns a
@@ -178,9 +181,8 @@ Chat page: user sends first message (useSSEChat)
 ```
 
 **Backend — status:**
-- [ ] **`GET /api/chat/conversations?document_id=`** — not yet implemented. Currently DocumentList
-  uses a client-side modal approach: fetches all conversations and shows a pick dialog. Replace with
-  this proper endpoint (3 most recent convs for this doc/user) and inline popover.
+- [x] **`GET /api/documents/{document_id}/conversations`** — implemented in `documents.py`. Returns
+  3 most recent conversations that have this document attached. Used by `DocumentList` chat modal.
 - [x] **`document_ids` in `ChatRequest`** — `models/chat.py` has `document_ids: list[str] = []`.
   `api/chat.py` calls `await attach_documents(conversation_id, body.document_ids)` before
   `stream_response()`, ensuring RAG scope is set on the very first message.
@@ -266,22 +268,17 @@ User sees relevant sources in the SourcesPanel
   the real ID on the `done` event).
 - [x] **Send `search_all` in chat request** — `useSSEChat.ts:64-71` reads `pendingSearchAll` for new
   conversations and `conversationSearchAll[convId]` for existing ones.
-- [ ] **Search all toggle in chat UI** — globe icon button near the input or scope bar. Active state
-  reflects `conversationSearchAll[activeConversationId]`. Disabled when documents are already attached
-  (scoped takes priority — no point searching everything when scope is already set).
-- [ ] **"Attach" button on source cards in `SourcesPanel`** — when a message has `rag_sources`,
-  each source card gets a small pin/attach icon. On click: call `POST /api/chat/{conv_id}/documents/{doc_id}`,
-  update `conversationDocuments` in store, set `conversationSearchAll[convId] = false`. Show a
-  brief confirmation (e.g. filename chip appears in the scope bar).
-- [ ] **Scope bar above message input** — shows the current conversation's retrieval context at a
-  glance. Three states:
-  - No documents, search_all off → nothing shown (general chat)
-  - `search_all` on → "Searching all documents" pill with globe icon and × to disable
-  - Documents attached → one chip per document with × to detach each
-  Attaching a document from a source card automatically transitions from search-all pill to document chips.
-- [ ] **`conversationDocuments` in store** — `Record<string, ConversationDocument[]>` keyed by
-  `conversation_id`. Load via `GET /api/chat/{conv_id}/documents` when switching conversations.
-  Add `setConversationDocuments`, `addConversationDocument`, `removeConversationDocument` actions.
+- [x] **Search all toggle in chat UI** — globe icon button in `MessageInput.tsx`. Reflects
+  `conversationSearchAll[activeConversationId]` or `pendingSearchAll` for new conversations.
+- [x] **"Attach" button on source cards in `SourcesPanel`** — pin icon in `Message.tsx`. POSTs to
+  batch attach endpoint, updates `conversationDocuments` store, disables search_all. Disabled when
+  doc already attached.
+- [x] **Scope bar above message input** — `ScopeBar.tsx` sits between `MessageList` and `MessageInput`
+  in `ChatWindow`. Shows "Searching all documents" pill or document chips with × to detach. Hidden
+  when no docs and search_all off.
+- [x] **`conversationDocuments` in store** — `Record<string, ConversationDocument[]>` in `chat.store.ts`.
+  Fetched in `ChatWindow` on every `activeConversationId` change (not just when panel opens). Actions:
+  `setConversationDocuments`, `addConversationDocument`, `removeConversationDocument`.
 
 ### Chat: Document Attachment Sidebar + Palette (Existing Conversations)
 
@@ -316,11 +313,10 @@ On × remove:        DELETE /api/chat/{conv_id}/documents/{id} ← already exist
   shown/hidden by `contextPanelOpen` toggle.
 
 **Known issues / remaining work:**
-- [ ] **Muting is UI-only** — `DocumentBar` may show a mute toggle but there is no backend concept
+- [ ] **Muting is UI-only** — `DocumentBar` shows a mute toggle but there is no backend concept
   of a muted document. Either wire it (add `muted` flag to `conversation_documents`) or remove the UI.
-- [ ] **`pendingDocuments` not cleared on sidebar new-chat** — if a user clicks "+ New Conversation"
-  in the sidebar while `pendingDocuments` is non-empty, the old pending docs carry over. Clear
-  `pendingDocuments` when starting a fresh conversation from the sidebar.
+- [x] **`pendingDocuments` cleared on sidebar new-chat** — `handleNewChat` in `Sidebar.tsx` calls
+  `setPendingDocuments([])` before navigating to clear stale staged docs.
 
 ### Chat: Document Suggestions (Background Similarity)
 
@@ -365,8 +361,7 @@ On × remove:        DELETE /api/chat/{conv_id}/documents/{id} ← already exist
 
 - [ ] **URL ingestion UI** — `UploadZone.tsx` only handles file upload. Add a URL input field
   (tab or second section) that POSTs to `POST /api/documents/url`. Show the submitted URL as a
-  processing item with the same progress tracking as file uploads. Blocked on backend Crawl4AI
-  wiring.
+  processing item with the same progress tracking as file uploads. **Blocked on Crawl4AI backend.**
 - [ ] **Video file support in UploadZone** — `accept=".pdf,.txt,.md,.docx"` excludes video.
   Add video MIME types once Faster-Whisper pipeline is wired backend-side.
 - [ ] **Delete confirmation** — delete in `DocumentList.tsx:133` fires immediately on click with
@@ -378,9 +373,9 @@ On × remove:        DELETE /api/chat/{conv_id}/documents/{id} ← already exist
 
 ### Web Scraping Integration
 
-- [ ] **Backend: wire Crawl4AI into `POST /api/documents/url`** — currently returns 501. Implement
-  async URL fetch via Crawl4AI, extract markdown, pass through the normal chunk→embed→Qdrant
-  pipeline as a background task. Return `document_id` immediately.
+- [ ] **Backend: wire Crawl4AI into `POST /api/documents/url`** — currently returns 501. **#1 priority.**
+  `AsyncWebCrawler(url).arun()` → markdown → same `_process_document` pipeline as file upload.
+  Use `BackgroundTasks` for now (Celery later). Store URL as filename in documents table.
 - [ ] **Backend: SearXNG client** — for research pipeline Stage 1, add SearXNG as an alternative
   to SerpAPI (self-hosted, no API key required). Read `SEARXNG_URL` from env; fall back to
   SerpAPI if set, skip web search if neither is configured.
