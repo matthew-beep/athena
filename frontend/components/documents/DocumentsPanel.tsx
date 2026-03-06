@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { UploadZone, type UploadedDocument } from './UploadZone';
 import { DocumentList } from './DocumentList';
 import { GlassCard } from '@/components/ui/GlassCard';
+import { apiClient } from '@/api/client';
 
 export type ProcessingDoc = {
   document_id: string;
@@ -28,6 +29,7 @@ export function DocumentsPanel() {
   const [processingDocs, setProcessingDocs] = useState<ProcessingDoc[]>([]);
   const startedAt = useRef<Map<string, number>>(new Map());
   const [search, setSearch] = useState('');
+  const [mode, setMode] = useState<'upload' | 'url'>('upload');
 
   const onUploadStart = useCallback((payload: { file: File; tempId: string }) => {
     setProcessingDocs((prev) => [
@@ -55,6 +57,8 @@ export function DocumentsPanel() {
     setProcessingDocs((prev) => prev.filter((d) => d.document_id !== payload.tempId));
     startedAt.current.delete(payload.tempId);
   }, []);
+
+
 
   useEffect(() => {
     if (processingDocs.length === 0) return;
@@ -122,6 +126,7 @@ export function DocumentsPanel() {
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="max-w-2xl mx-auto space-y-5 animate-fade-up">
+        
         <div>
           <h2 className="text-base font-display font-semibold tracking-tight">Documents</h2>
           <p className="text-sm text-muted-foreground mt-1">

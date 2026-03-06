@@ -4,6 +4,8 @@ import { useState, useRef, type DragEvent } from 'react';
 import { Upload, X, FileText } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/auth.store';
+import { apiClient } from '@/api/client';
+import ReactMarkdown from 'react-markdown';
 
 export interface UploadedDocument {
   document_id: string;
@@ -28,6 +30,27 @@ interface StagedFile {
   id: string;
 }
 
+function normalizeUrlInput(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
+function isValidHttpUrl(raw: string): { ok: true; url: string } | { ok: false; error: string } {
+  const normalized = normalizeUrlInput(raw);
+  if (!normalized) return { ok: false, error: 'Please enter a URL.' };
+  try {
+    const u = new URL(normalized);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      return { ok: false, error: 'URL must start with http:// or https://.' };
+    }
+    return { ok: true, url: u.toString() };
+  } catch {
+    return { ok: false, error: 'That doesn’t look like a valid URL.' };
+  }
+}
+
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -39,6 +62,13 @@ export function UploadZone({ onUploadStart, onUploadComplete, onUploadFailed }: 
   const [uploading, setUploading] = useState(false);
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [uploadResults, setUploadResults] = useState<{ name: string; ok: boolean }[]>([]);
+  const [uploadMode, setUploadMode] = useState<'file' | 'url'>('file');
+  const [url, setUrl] = useState('');
+  const [inputKey, setInputKey] = useState(0);
+  
+  const [urlIngestionResult, setUrlIngestionResult] = useState<string>('');
+  const [urlIngestionError, setUrlIngestionError] = useState<string>('');
+  const [urlIngestionLoading, setUrlIngestionLoading] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -103,43 +133,109 @@ export function UploadZone({ onUploadStart, onUploadComplete, onUploadFailed }: 
     setUploading(false);
   };
 
+  const handleUploadMode = (mode: 'file' | 'url') => {
+    setUploadMode(mode);
+  };
+
+
+
+  const onUrlIngestion = async (url: string) => {
+    try {
+      setUrlIngestionLoading(true);
+      const result = isValidHttpUrl(url);
+      if (!result.ok) {
+        setUrlIngestionResult(result.error);
+        return;
+      }
+
+      const response: { detail: string } = await apiClient.post('/documents/url', {
+        url: result.url,
+      });
+      setUrlIngestionResult(response.detail);
+    } catch (error) {
+      console.error(error);
+      setUrlIngestionError('An error occurred while ingesting the URL.');
+    } finally {
+      setUrlIngestionLoading(false);
+    }
+  };
+
   const succeeded = uploadResults.filter((r) => r.ok);
   const failed = uploadResults.filter((r) => !r.ok);
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Drop zone */}
-      <div
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={handleDrop}
-        onClick={() => inputRef.current?.click()}
-        className={cn(
-          'glass rounded-sm border border-dashed p-8 text-center cursor-pointer transition-all select-none',
-          isDragging
-            ? 'border-foreground/30 bg-white/5'
-            : 'border-border/40 hover:border-border/70 hover:bg-white/[0.02]'
-        )}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          className="hidden"
-          accept=".pdf,.txt,.md,.docx"
-          multiple
-          onChange={(e) => {
-            stageFiles(Array.from(e.target.files || []));
-            e.target.value = '';
-          }}
-        />
-        <div className="flex flex-col items-center gap-2">
-          <div className="w-9 h-9 rounded-sm bg-foreground/5 border border-foreground/10 flex items-center justify-center">
-            <Upload size={15} className="text-muted-foreground" />
-          </div>
-          <p className="text-sm font-medium">Drop files here or click to browse</p>
-          <p className="text-xs text-muted-foreground font-mono">PDF · TXT · Markdown</p>
+      <div className="glass rounded-sm overflow-hidden">
+        <div className="flex border-b border-border">
+          {(["file", "url"] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => handleUploadMode(mode)}
+              className={`flex-1 py-2.5 text-xs font-bold uppercase tracking-widest transition-colors ${
+                uploadMode === mode
+                  ? "text-foreground border-b-2 border-foreground -mb-px"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {mode === "file" ? "File" : "URL"}
+            </button>
+          ))}
         </div>
       </div>
+      {/* Drop zone */}
+      {uploadMode === 'file' ? (
+        <div
+          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={handleDrop}
+          onClick={() => inputRef.current?.click()}
+          className={cn(
+            'glass rounded-sm border border-dashed p-8 text-center cursor-pointer transition-all select-none',
+            isDragging
+              ? 'border-foreground/30 bg-white/5'
+              : 'border-border/40 hover:border-border/70 hover:bg-white/[0.02]'
+          )}
+        >
+          <input
+            key={inputKey}
+            ref={inputRef}
+            type="file"
+            className="hidden"
+            accept=".pdf,.txt,.md,.docx"
+            multiple
+            onChange={(e) => {
+              stageFiles(Array.from(e.target.files || []));
+              setInputKey((k) => k + 1);
+            }}
+          />
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-9 h-9 rounded-sm bg-foreground/5 border border-foreground/10 flex items-center justify-center">
+              <Upload size={15} className="text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium">Drop files here or click to browse</p>
+            <p className="text-xs text-muted-foreground font-mono">PDF · TXT · Markdown</p>
+          </div>
+        </div>
+      ) : (
+        <div className="glass rounded-sm border border-dashed p-8 text-center cursor-pointer transition-all select-none">
+          <input value={url} onChange={(e) => setUrl(e.target.value)} type="text" placeholder="Enter URL" className="w-full bg-transparent outline-none p-2" />
+          {url && (
+            <button onClick={() => onUrlIngestion(url)} className="w-full h-8 rounded-sm bg-foreground text-background text-sm font-medium flex items-center justify-center gap-2 hover:bg-foreground/90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity">
+              Ingest URL
+            </button>
+          )}
+          {urlIngestionLoading && (
+            <div className="w-[14px] h-[14px] shrink-0 flex items-center justify-center">
+              <div className="w-3.5 h-3.5 border-2 border-muted-foreground/40 border-t-muted-foreground rounded-full animate-spin" />
+            </div>
+          )}
+          {urlIngestionResult && !urlIngestionLoading && (
+            <ReactMarkdown>
+              {urlIngestionResult}
+            </ReactMarkdown>
+          )}
+        </div>
+      )}
 
       {/* Staged file queue */}
       {staged.length > 0 && (
