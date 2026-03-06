@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333
 
+    # Crawl4AI
+    crawl4ai_host: str = "crawl4ai"
+    crawl4ai_port: int = 11235
+
     # Auth
     jwt_secret_key: str = "supersecretkey-change-in-production"
     jwt_algorithm: str = "HS256"

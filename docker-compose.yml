@@ -58,6 +58,12 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  crawl4ai:
+    image: unclecode/crawl4ai:latest
+    ports:
+      - "11235:11235"
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -78,6 +84,8 @@ services:
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-athena}
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
+      CRAWL4AI_HOST: crawl4ai
+      CRAWL4AI_PORT: 11235
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
     depends_on:
       postgres:

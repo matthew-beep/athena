@@ -144,8 +144,8 @@ def reciprocal_rank_fusion(
         scores[chunk_id] = scores.get(chunk_id, 0) + 1 / (k + rank + 1)
 
     return [
-        chunk_id
-        for chunk_id, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        (chunk_id, round(score / MAX_RRF_SCORE, 3))
+        for chunk_id, score in sorted(scores.items(), key=lambda x: x[1], reverse=True)
     ]
 
 
@@ -201,12 +201,25 @@ async def retrieve(
                 qdrant.search(vector, top_k=top_k * 3, filters=search_filter),
                 _bm_25_search(query, search_ids, top_k=top_k * 3),
             )
-            ranked_ids = reciprocal_rank_fusion(vector_hits, bm25_hits)[:top_k]
+            vector_scores = {
+                h.get("payload", {}).get("chunk_id"): h.get("score", 0.0)
+                for h in vector_hits
+                if h.get("payload", {}).get("chunk_id")
+            }
+            ranked_pairs = reciprocal_rank_fusion(vector_hits, bm25_hits)[:top_k]
+            ranked_ids = [chunk_id for chunk_id, _ in ranked_pairs]
+            rrf_scores = {chunk_id: score for chunk_id, score in ranked_pairs}
+
         else:
             # search_all — no doc_ids so skip BM25, pure vector
             vector_hits = await qdrant.search(vector, top_k=top_k, filters=search_filter)
+            vector_scores = {
+                h.get("payload", {}).get("chunk_id"): h.get("score", 0.0)
+                for h in vector_hits
+                if h.get("payload", {}).get("chunk_id")
+            }
             ranked_ids = [cid for h in vector_hits if (cid := h.get("payload", {}).get("chunk_id"))]
-
+            rrf_scores = {}
         if not ranked_ids:
             return []
 
@@ -233,7 +246,8 @@ async def retrieve(
                 "filename": row["filename"],
                 "chunk_index": row["chunk_index"],
                 "document_id": row["document_id"],
-                "score": 0.0,  # RRF doesn't produce a meaningful score to show
+                "score": rrf_scores.get(chunk_id) if rrf_scores else round(vector_scores.get(chunk_id, 0.0), 3),
+                "score_type": "hybrid" if rrf_scores else "vector",
             })
 
         logger.debug("[rag] retrieved {} chunks for query: {!r}", len(sources), query[:60])

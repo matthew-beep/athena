@@ -1,15 +1,16 @@
 # Athena — TODO
 
 Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scoped retrieval, sentence-aware
-chunking, and scope bar all working. URL ingestion (Crawl4AI) is the next major unblock — it's a 501 stub
-and is required before Celery migration and the research pipeline (Phase 5 Stage 1).
+chunking, scope bar, and basic URL ingestion (Crawl4AI wired via Docker sidecar) all working.
 
 **Next up (in order):**
-1. Wire Crawl4AI into `POST /api/documents/url` — same BackgroundTask pattern as PDF upload (~2-3 hrs)
-2. URL ingestion UI — tab or section in `UploadZone.tsx` that POSTs to the above
-3. Redis + Celery — once both ingestion paths work, migrate to proper task queue with retries
-4. Fix RAG scores always 0 — pass pre-fusion vector score through RRF payload
-5. Pagination + server-side search on documents tab
+1. Complete URL ingestion backend — add BackgroundTask + DB record creation to `POST /api/documents/url` so it matches the file upload pattern (returns document_id immediately, processes async, appears in list)
+2. Extract `scrape_url()` into `core/crawler.py` — shared utility for both URL ingestion and research pipeline Stage 1
+3. Frontend URL ingestion UX polish — loading state, error feedback, clear input on success, integrate with `onUploadStart`/`onUploadComplete` callbacks so URL docs appear in the processing list
+4. Add SearXNG to Docker Compose — self-hosted search, same sidecar pattern as Crawl4AI
+5. Redis + Celery — once both ingestion paths work, migrate to proper task queue with retries
+6. ~~Fix RAG scores always 0~~ ✓ Done
+7. Pagination + server-side search on documents tab
 
 ---
 
@@ -42,9 +43,7 @@ and is required before Celery migration and the research pipeline (Phase 5 Stage
 - [x] **RAG sources not persisting across page reload** — `save_message` never stored `rag_sources`;
   `get_messages` SELECT didn't include the column; `MessageOut` had no field. Fixed: added
   `rag_sources JSONB` column (migration 003), updated `context.py`, `models/chat.py`, `api/chat.py`.
-- [ ] **RAG scores always 0** — `rag_sources` returned in SSE `done` event have `score: 0.0` for
-  all chunks (RRF rank positions lose original cosine scores). Pass the pre-fusion vector score
-  through the payload so the UI can show meaningful relevance values.
+- [x] **RAG scores always 0** — fixed. `vector_scores` map built from Qdrant hits before RRF. Pre-fusion cosine score passed through to each source's `score` field.
 
 ---
 
@@ -373,12 +372,12 @@ On × remove:        DELETE /api/chat/{conv_id}/documents/{id} ← already exist
 
 ### Web Scraping Integration
 
-- [ ] **Backend: wire Crawl4AI into `POST /api/documents/url`** — currently returns 501. **#1 priority.**
-  `AsyncWebCrawler(url).arun()` → markdown → same `_process_document` pipeline as file upload.
-  Use `BackgroundTasks` for now (Celery later). Store URL as filename in documents table.
-- [ ] **Backend: SearXNG client** — for research pipeline Stage 1, add SearXNG as an alternative
-  to SerpAPI (self-hosted, no API key required). Read `SEARXNG_URL` from env; fall back to
-  SerpAPI if set, skip web search if neither is configured.
+- [x] **Crawl4AI Docker sidecar** — `unclecode/crawl4ai:latest` added to `docker-compose.yml`. Backend calls `http://crawl4ai:11235/md` via httpx. No Python package needed.
+- [x] **Basic `POST /api/documents/url`** — validates URL, calls crawl4ai `/md`, returns markdown. Hardcoded URL bug fixed.
+- [ ] **Complete URL ingestion backend** — add `BackgroundTasks` + DB INSERT before returning, same pattern as file upload. Extract crawl logic into `core/crawler.py` as `scrape_url(url) -> str`.
+- [ ] **Frontend: URL ingestion UX** — loading state on "Ingest URL" button, error feedback card (matches file failed style), clear input on success, integrate `onUploadStart`/`onUploadComplete` so URL docs appear in the processing list with the same progress bar treatment. Add Enter key submit. Remove `urlIngestionResult` debug display.
+- [ ] **Frontend: URL zone design** — merge tab strip + content into a single glass card (tabs as header, content below). Remove `cursor-pointer` from outer div. URL icon (Globe) in document list for web-sourced docs.
+- [ ] **Backend: SearXNG Docker sidecar + client** — add SearXNG to `docker-compose.yml` (same pattern as Crawl4AI). Add `search(query) -> [urls]` to `core/crawler.py`. Read `SEARXNG_URL` from env; fall back to SerpAPI if set, skip if neither configured.
 - [ ] **Frontend: research tab URL/topic input** — Research tab is a stub. Add topic text input +
   "Research" button that POSTs to `POST /api/research`. Show progress via WebSocket
   (`WS /ws/research/{id}`). Display synthesis on completion.
@@ -427,6 +426,9 @@ On × remove:        DELETE /api/chat/{conv_id}/documents/{id} ← already exist
   values in `config.py`. Add a startup warning in `main.py` lifespan if either matches the default.
 - [ ] **CORS too permissive** — `allow_methods=["*"]` and `allow_headers=["*"]` in `main.py`.
   Fine for local dev; tighten to specific methods/headers before any non-localhost exposure.
+- [ ] **`contextBudget` hardcoded to 4096 in store** — `chat.store.ts:77` has `contextBudget: 4096` but backend uses 8192. The `context_debug` SSE event sends `budget: 8192` but nothing in the store reads it. Fix: read `budget` from the `context_debug` event in `useSSEChat` and call `setContextBudget` (needs adding to store).
+- [ ] **`token_count` drift** — `save_message` counts only raw content tokens but `count_tokens()` adds 4 tokens overhead per message. Cached `token_count` drifts low over time, causing the fast path to load all history when it may be over budget. Fix: add the 4-token overhead in `save_message`.
+- [ ] **`score_type` not forwarded in done event** — `chat.py` builds `rag_sources` for the SSE `done` event but omits `score_type`. Add it so the frontend can label hybrid vs vector scores differently.
 - [ ] **Summarization blocks the next message** — `_generate_and_cache_summary()` in `context.py`
   runs in the hot path of the user's next request. Fire it as a background task after the previous
   assistant response completes instead.

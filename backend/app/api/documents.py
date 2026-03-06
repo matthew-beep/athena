@@ -242,7 +242,24 @@ async def upload_document(
 
 @router.post("/url")
 async def ingest_url(body: dict, current_user: dict = Depends(get_current_user)):
-    return JSONResponse(status_code=501, content={"detail": "URL ingestion not yet implemented."})
+
+    settings = get_settings()
+    crawl4ai_base_url = f"http://{settings.crawl4ai_host}:{settings.crawl4ai_port}"
+    url = body.get("url")
+    if not url:
+        return JSONResponse(status_code=400, content={"detail": "URL is required."})
+
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+      resp = await client.post(
+          f"{crawl4ai_base_url}/md",
+          json={"url": url}
+      )
+      markdown = resp.json()["markdown"]
+
+        #print(result.markdown[:300])  # Print first 300 chars
+
+    return JSONResponse(status_code=200, content={"detail": markdown})
 
 
 @router.get("/{document_id}/progress")
