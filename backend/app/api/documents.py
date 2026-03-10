@@ -242,24 +242,37 @@ async def upload_document(
 
 @router.post("/url")
 async def ingest_url(body: dict, current_user: dict = Depends(get_current_user)):
-
     settings = get_settings()
     crawl4ai_base_url = f"http://{settings.crawl4ai_host}:{settings.crawl4ai_port}"
     url = body.get("url")
     if not url:
         return JSONResponse(status_code=400, content={"detail": "URL is required."})
 
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-      resp = await client.post(
-          f"{crawl4ai_base_url}/md",
-          json={"url": url}
-      )
-      markdown = resp.json()["markdown"]
-
-        #print(result.markdown[:300])  # Print first 300 chars
-
-    return JSONResponse(status_code=200, content={"detail": markdown})
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{crawl4ai_base_url}/crawl",
+                json={"urls": [url]},
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        # Crawl4AI may return top-level markdown or results[0].markdown
+        if not data.get("markdown") and data.get("results"):
+            first = data["results"][0] if data["results"] else {}
+            data = {**data, "markdown": first.get("markdown")}
+        return JSONResponse(status_code=200, content=data)
+    except httpx.HTTPStatusError as e:
+        logger.warning("Crawl4AI HTTP error for {}: {}", url, e.response.status_code)
+        return JSONResponse(
+            status_code=502,
+            content={"detail": f"Crawl failed: {e.response.status_code}"},
+        )
+    except Exception as e:
+        logger.exception("URL ingest failed for {}: {}", url, e)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "URL ingestion failed."},
+        )
 
 
 @router.get("/{document_id}/progress")

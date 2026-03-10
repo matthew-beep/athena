@@ -31,6 +31,8 @@ interface ChatState {
   clearStream: () => void;
   updateConversationTitle: (id: string, title: string) => void;
   setContextTokens: (conversationId: string, tokens: number) => void;
+  bulkSetContextTokens: (map: Record<string, number>) => void;
+  setContextBudget: (budget: number) => void;
   setMessageTokens: (tokens: number) => void;
   setStatusMessage: (msg: string | null) => void;
   setActiveModel: (model: string) => void;
@@ -158,6 +160,11 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setContextTokens: (conversationId, tokens) =>
     set((s) => ({ contextTokens: { ...s.contextTokens, [conversationId]: tokens } })),
+
+  bulkSetContextTokens: (map) =>
+    set((s) => ({ contextTokens: { ...s.contextTokens, ...map } })),
+
+  setContextBudget: (budget) => set({ contextBudget: budget }),
 
   setMessageTokens: (tokens) => set({ messageTokens: tokens }),
 

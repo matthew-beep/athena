@@ -1,5 +1,5 @@
 # Athena — Codebase Status
-## 2026-03-04
+## 2026-03-09
 
 ---
 
@@ -39,6 +39,23 @@
 | `models/chat.py` | 50 | ChatRequest (+ document_ids), BatchAttachRequest, ConversationOut, MessageOut (+ rag_sources) |
 | `models/auth.py` | 18 | Token, UserOut |
 | `models/system.py` | 21 | ResourceStats, HealthResponse |
+
+---
+
+## What Was Investigated This Session (2026-03-09)
+
+### URL Ingestion — Identified as Non-Functional
+- **`api/documents.py`** — `POST /api/documents/url` calls Crawl4AI and returns the raw response payload. No document record is created, no chunking/embedding occurs, nothing enters Qdrant. The endpoint is a scraper preview, not ingestion.
+- **`components/documents/UploadZone.tsx`** — `onUrlIngestion` treats the response as a Crawl4AI payload for markdown preview display. It never calls `onUploadStart`/`onUploadComplete`, so URL "ingestions" never appear in the document list.
+- **Crawl4AI response shape unverified** — the `markdown` field may be a string or an object (`{ raw_markdown, markdown_with_citations }`). The backend only handles the string case. Need to validate against real URLs before writing extraction logic.
+- **Decision**: validate response shape first (debug endpoint or logging), then rewrite the ingestion endpoint properly.
+
+### Context Window Display — Three Bugs Identified
+- **`chat.store.ts:77`** — `contextBudget` hardcoded to `4096`. Backend sends `budget: 8192` in `context_debug` SSE event. `useSSEChat` reads `event.tokens` but never `event.budget`. Store has no `setContextBudget` action.
+- **`hooks/useSSEChat.ts:133-135`** — `context_debug` tokens stored in `pendingContextTokens` and only committed to store via `setContextTokens` when `done` fires. Context fill only updates after full generation completes, not immediately when the request starts.
+- **`conversations.token_count`** — maintained in DB by `save_message()` but never returned by `GET /api/chat/conversations`. `ConversationOut` model excludes it. Context fill cannot be shown before the first message is sent in a session, or when switching conversations, because the frontend has no access to the stored count.
+- **`DevModeOverlay.tsx:80`** — `total sent` row has hardcoded `'— / 4096'` fallback string.
+- **Plan**: expose `token_count` in `ConversationOut` → pre-populate store on conversation load; apply `context_debug` immediately (not at done); add `setContextBudget` + read `event.budget`; fix fallback string.
 
 ---
 
@@ -270,7 +287,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | DELETE | `/api/chat/{id}/documents/{doc_id}` | ✅ |
 | GET | `/api/documents` | ✅ |
 | POST | `/api/documents/upload` | ✅ |
-| POST | `/api/documents/url` | ❌ 501 stub |
+| POST | `/api/documents/url` | ⚠️ scraper preview only — no DB record, no ingestion |
 | GET | `/api/documents/{id}` | ✅ |
 | GET | `/api/documents/{id}/progress` | ✅ per-doc |
 | GET | `/api/documents/progress/active` | ✅ bulk active |
@@ -299,11 +316,12 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | 4 | ~~Medium~~ ✅ | ~~Naive chunking~~ — replaced with sentence-aware chunking via nltk in `core/ingestion.py` | `core/ingestion.py` |
 | 5 | Medium | Summarization in hot path — `_generate_and_cache_summary()` blocks the next user request | `core/context.py` |
 | 6 | Medium | No Celery/Redis — background processing uses FastAPI `BackgroundTasks`; no retries, no persistence | `api/documents.py` |
-| 7 | Low | `contextBudget` wrong in frontend store — hardcoded 4096, backend uses 8192 | `stores/chat.store.ts` |
-| 8 | ~~Low~~ ✅ | ~~No stream abort~~ — `AbortController` wired in `useSSEChat`, Square button in `MessageInput` calls abort | `hooks/useSSEChat.ts`, `api/client.ts` |
-| 9 | Low | Muting docs is UI-only — `mutedIds` in `DocumentBar` never sent to backend; all attached docs searched | `DocumentBar.tsx`, `api/chat.py` |
-| 10 | ~~Low~~ ✅ | ~~`pendingDocuments` not cleared on new chat~~ — `Sidebar.tsx` `handleNewChat` calls `setPendingDocuments([])` | `Sidebar.tsx` |
-| 11 | Low | RAG scores always 0.0 — RRF produces ranks not similarity scores; citation panel shows 0% | `core/rag.py`, `Message.tsx` |
+| 7 | Medium | Context window display broken — three separate issues: (a) `contextBudget` hardcoded 4096 in store, `event.budget` never read from `context_debug` SSE; (b) `context_debug` tokens held until `done`, not applied immediately; (c) `conversations.token_count` never returned by conversations API so fill can't show pre-send | `chat.store.ts`, `useSSEChat.ts`, `api/chat.py`, `DevModeOverlay.tsx` |
+| 8 | Medium | URL ingestion non-functional — `POST /api/documents/url` returns Crawl4AI raw payload, creates no DB record, nothing enters Qdrant. Frontend renders a markdown preview. Response shape unverified (`markdown` may be string or object). | `api/documents.py`, `UploadZone.tsx` |
+| 9 | ~~Low~~ ✅ | ~~No stream abort~~ — `AbortController` wired in `useSSEChat`, Square button in `MessageInput` calls abort | `hooks/useSSEChat.ts`, `api/client.ts` |
+| 10 | Low | Muting docs is UI-only — `mutedIds` in `DocumentBar` never sent to backend; all attached docs searched | `DocumentBar.tsx`, `api/chat.py` |
+| 11 | ~~Low~~ ✅ | ~~`pendingDocuments` not cleared on new chat~~ — `Sidebar.tsx` `handleNewChat` calls `setPendingDocuments([])` | `Sidebar.tsx` |
+| 12 | Low | RAG scores always 0.0 — RRF produces ranks not similarity scores; citation panel shows 0% | `core/rag.py`, `Message.tsx` |
 
 ---
 
@@ -329,7 +347,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | Phase | Status | Blocker |
 |---|---|---|
 | Phase 1: Foundation | ~95% | Missing: Celery, Redis |
-| Phase 2: Document Processing | ~15% | Crawl4AI (501 stub), video/Whisper, Celery all missing |
+| Phase 2: Document Processing | ~15% | URL ingestion wired to Crawl4AI but doesn't ingest; response shape unverified; video/Whisper and Celery missing |
 | Phase 3: Learning Features | 0% | |
 | Phase 4: Two-Tier Knowledge | 0% | |
 | Phase 5: Research Pipeline | 0% | |
@@ -362,7 +380,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | Search-all globe toggle in MessageInput | ✅ |
 | Scope bar (document chips + search-all pill above input) | ✅ |
 | Pin/attach button on RAG source cards | ✅ |
-| URL ingestion input | ❌ (blocked on Crawl4AI backend) |
+| URL ingestion input | ⚠️ UI exists, Crawl4AI wired, but shows markdown preview only — not real ingestion |
 | Delete confirmation | ❌ |
 | Bulk document progress (frontend) | ❌ |
 | PromotionCard + StreamDone.promotion_suggestion | ❌ |
@@ -374,4 +392,4 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 ---
 
-*Athena · Codebase Status · 2026-03-04*
+*Athena · Codebase Status · 2026-03-09*

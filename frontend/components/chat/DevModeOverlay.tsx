@@ -77,7 +77,7 @@ export function DevModeOverlay() {
           }
         />
         <Row label="history budget" value={`${historyBudget} tok`} />
-        <Row label="total sent" value={convTokens > 0 ? `${convTokens} / ${contextBudget}` : '— / 4096'} />
+        <Row label="total sent" value={convTokens > 0 ? `${convTokens} / ${contextBudget}` : `— / ${contextBudget}`} />
         <MiniBar value={convTokens} max={contextBudget} color={ctxPct > 85 ? 'hsl(0 72% 51%)' : ctxPct > 60 ? 'hsl(43 96% 56%)' : 'hsl(142 71% 45%)'} />
       </div>
 

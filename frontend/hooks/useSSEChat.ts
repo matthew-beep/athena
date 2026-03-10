@@ -24,6 +24,7 @@ export function useSSEChat() {
     setMessages,
     activeConversationId,
     setContextTokens,
+    setContextBudget,
     setStatusMessage,
     setActiveModel,
     conversationSearchAll,
@@ -131,8 +132,10 @@ export function useSSEChat() {
                 setStatusMessage(event.content);
 
               } else if (event.type === 'context_debug') {
-                // Hold until 'done' so we know the real conversation_id
                 pendingContextTokens = event.tokens;
+                // Apply immediately — use real convId if we have it, temp ID for new conversations
+                setContextTokens(convId ?? tempConvId, event.tokens);
+                setContextBudget(event.budget);
 
               } else if (event.type === 'done') {
                 const genTimeSec =
@@ -232,6 +235,7 @@ export function useSSEChat() {
       setMessages,
       activeConversationId,
       setContextTokens,
+      setContextBudget,
       setStatusMessage,
       setActiveModel,
       conversationSearchAll,

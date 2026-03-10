@@ -4,13 +4,14 @@ Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scop
 chunking, scope bar, and basic URL ingestion (Crawl4AI wired via Docker sidecar) all working.
 
 **Next up (in order):**
-1. Complete URL ingestion backend — add BackgroundTask + DB record creation to `POST /api/documents/url` so it matches the file upload pattern (returns document_id immediately, processes async, appears in list)
-2. Extract `scrape_url()` into `core/crawler.py` — shared utility for both URL ingestion and research pipeline Stage 1
-3. Frontend URL ingestion UX polish — loading state, error feedback, clear input on success, integrate with `onUploadStart`/`onUploadComplete` callbacks so URL docs appear in the processing list
-4. Add SearXNG to Docker Compose — self-hosted search, same sidecar pattern as Crawl4AI
-5. Redis + Celery — once both ingestion paths work, migrate to proper task queue with retries
-6. ~~Fix RAG scores always 0~~ ✓ Done
-7. Pagination + server-side search on documents tab
+1. **Investigate Crawl4AI response shape before writing ingestion** — add a `GET /api/documents/url/debug?url=...` endpoint (or just log the raw response) to inspect the actual payload for an article, docs page, and YouTube URL. The response `markdown` field can be a string or an object (`raw_markdown`, `markdown_with_citations`); the backend doesn't handle the object case at all. Don't write the ingestion pipeline until the extraction logic is validated against real data.
+2. **Fix context window tracking** — `conversations.token_count` is maintained in the DB but never exposed to the frontend. Expose it in `GET /api/chat/conversations` response (`token_count` field in `ConversationOut`). On conversation load/switch, pre-populate `contextTokens[convId]` from that value so context fill shows immediately — not just after sending. Also: apply `context_debug` tokens immediately when the SSE event fires (currently held until `done`); add `setContextBudget` to the store and read `event.budget` from `context_debug` (currently ignored); fix `contextBudget` hardcoded `4096` fallback in `DevModeOverlay.tsx:80`.
+3. Complete URL ingestion backend — after Crawl4AI response shape is confirmed, rewrite `POST /api/documents/url` to create a DB record, call `_process_document` as a BackgroundTask, return `document_id` immediately (same pattern as file upload). Extract crawl logic into `core/crawler.py` as `scrape_url(url) -> str`.
+4. Frontend URL ingestion UX polish — loading state, error feedback, clear input on success, integrate with `onUploadStart`/`onUploadComplete` callbacks so URL docs appear in the processing list. Remove the raw markdown preview debug display.
+5. Add SearXNG to Docker Compose — self-hosted search, same sidecar pattern as Crawl4AI
+6. Redis + Celery — once both ingestion paths work, migrate to proper task queue with retries
+7. ~~Fix RAG scores always 0~~ ✓ Done
+8. Pagination + server-side search on documents tab
 
 ---
 
@@ -37,7 +38,7 @@ chunking, scope bar, and basic URL ingestion (Crawl4AI wired via Docker sidecar)
 - [x] **Naive token chunking** — replaced with sentence-aware chunking in `ingestion.py`. Uses nltk
   `sent_tokenize`, 500-token chunks, 50-token sentence-level overlap. PDF hyphenated line breaks normalized.
 - [x] **RAG threshold incompatible with hybrid search** — duplicate of item above; confirmed fixed.
-- [ ] **URL ingestion returns 501** — `POST /api/documents/url` is a stub. Crawl4AI not wired up yet.
+- [ ] **URL ingestion is a scraper preview, not real ingestion** — `POST /api/documents/url` calls Crawl4AI and returns the raw markdown payload to the frontend. It never creates a `documents` row, never chunks/embeds, never stores in Qdrant. The frontend renders a markdown preview. Nothing is actually ingested. Additionally, the backend doesn't handle the case where `markdown` is an object (`{ raw_markdown, markdown_with_citations }`) — only the string case works.
 - [ ] **No deduplication in RAG** — can return near-identical chunks from the same document. Add a
   minimum chunk distance check or a per-document chunk cap before returning sources.
 - [x] **RAG sources not persisting across page reload** — `save_message` never stored `rag_sources`;
@@ -53,6 +54,15 @@ chunking, scope bar, and basic URL ingestion (Crawl4AI wired via Docker sidecar)
 
 - [x] **Sentence-aware chunking** — `chunk_text()` in `ingestion.py` uses nltk `sent_tokenize`.
   500-token chunks, 50-token sentence-level overlap, PDF hyphen normalization. `nltk>=3.9` in requirements.
+- [ ] **Replace pypdf + python-docx with Docling** — current `extract_text()` in `core/ingestion.py`
+  uses `pypdf` for PDFs (loses layout, fails on scanned/image-only PDFs, requires manual hyphen
+  normalization) and `python-docx` for DOCX (loses tables, heading hierarchy, structured content).
+  Replace both with `docling` — unified extraction for PDF, DOCX, PPTX, HTML, and images. Outputs
+  structured markdown so tables/headings/lists survive extraction intact. Built-in OCR handles
+  scanned PDFs that pypdf silently returns empty. The `chunk_text()` function and everything
+  downstream is unchanged — Docling just produces better input. Remove `pypdf` and `python-docx`
+  from `requirements.txt`, add `docling`. Note: Docling is compute-heavy; ensure it still runs
+  inside `asyncio.to_thread` as the current extraction does.
 - [ ] **Migrate document processing to Celery** — currently using FastAPI `BackgroundTasks`. Move
   `_process_document` into a Celery task in `tasks/ingestion.py`. API returns task ID immediately.
   Requires Redis broker and Celery worker added to Docker Compose.
@@ -332,6 +342,75 @@ On × remove:        DELETE /api/chat/{conv_id}/documents/{id} ← already exist
   is non-empty and no documents are in scope. Each row has filename + score + [+ Pin] button.
   Pinning calls the attach endpoint and moves the doc to the In Scope card.
 
+### Frontend Redesign — Structural Glass
+
+Full design spec in `frontend_design_vision.md`. The current codebase uses a broad glass/blur system
+applied to everything (sidebar, panels, nav, chat). The new direction restricts glass to AI surfaces
+only and uses a structural dark system for all utility views (tables, file lists, nav).
+
+**Current gaps vs vision:**
+- Token system is HSL-based (`hsl(var(--background))`) — needs to become raw rgba/hex (`var(--floor)`, `var(--surface)`, `--t1..t4`, etc.)
+- Glass utilities (`glass-subtle`, `glass`, `glass-strong`) applied to sidebar, panels, upload zone — need to be removed from non-AI surfaces
+- Mesh gradient backgrounds incompatible with structural aesthetic — remove
+- Content panel needs `border-radius: 22px` + ring + depth shadow stack
+- Sidebar needs to sit on the floor with no elevation, no blur
+- No table row pattern (`trow`) — file lists need bottom-divider rows + 2px left inset on select
+- No file type badges, no proper status badges
+- Progress bars are 1px, no color thresholds
+- No arc gauge or sparkline components for system panel
+- Upload flow is a flat zone, not the 4-stage modal
+- Message anatomy doesn't match: no asymmetric border-radius, no reasoning step checklist, no quote blocks, no suggestion pills
+
+#### Phase F1: Token System + Layout Shell
+- [ ] Replace HSL token system in `globals.css` with Structural Glass tokens (`--floor`, `--surface`, `--surface-2`, `--raised`, `--raised-h`, `--raised-a`, `--border`, `--border-s`, `--t1`–`--t4`, all accent colors with `-a` and `-br` variants)
+- [ ] Update `tailwind.config.ts` to expose new tokens as Tailwind color aliases
+- [ ] Set `body` background to `var(--floor)`, remove mesh gradient system
+- [ ] Remove light mode variant (design is dark-only)
+- [ ] Update scrollbar to `3px`, thumb `rgba(255,255,255,0.10)`
+- [ ] Update content panel to `border-radius: 22px` with full shadow stack: `0 0 0 1px rgba(255,255,255,0.055), 0 4px 40px rgba(0,0,0,0.55), 0 1px 0 rgba(255,255,255,0.035) inset`
+- [ ] Remove glass/blur from sidebar — set to `background: var(--floor)`, no border-radius, no elevation
+
+#### Phase F2: Core Component Library
+- [ ] Update `.nav-item` to vision spec: `padding: 7px 9px`, `border-radius: 10px`, `13px/500`, `--t3` default, `--t1` active with `rgba(255,255,255,0.07)` bg
+- [ ] Add `.trow` table row pattern: grid, `10px 20px` padding, bottom-divider border, hover `--raised-h`, selected `--raised-a` + `inset 2px 0 0 var(--blue)`
+- [ ] Add `FileTypeBadge` component: `28×28px`, `border-radius: 7px`, PDF=red tint / MD=blue tint / Web=purple tint, JetBrains Mono 8.5px 700
+- [ ] Add `.pill` / `.pill.on` pattern to globals.css
+- [ ] Update button variants: ghost (`--raised` bg, `--border`, `--t2`), primary (`var(--blue)`), danger (`--red-a` bg, `--red-br` border, `--red` text) — all `border-radius: 9px`, `12.5px/500`
+- [ ] Update progress bars to `3px` height, `border-radius: 2px`, color thresholds: `<65%` blue, `65–85%` amber, `>85%` red
+- [ ] Update status badges to pill-with-dot pattern: Indexed=green, Processing=amber, Error=red
+
+#### Phase F3: Glass Audit
+- [ ] Remove `glass-subtle` / `glass` / `glass-strong` from sidebar, nav, upload zone, document list, all utility surfaces
+- [ ] Keep glass on: chat message bubbles (assistant only), AI response cards, modal overlays
+- [ ] Modal overlays use `backdrop-filter: blur(8px)` on overlay + `border-radius: 20px` on card — the only blur in the app
+
+#### Phase F4: Documents / Library View
+- [ ] Rebuild document list as borderless table using `.trow` pattern — columns: Name+badge, Status, Chunks, Added, Size, Actions
+- [ ] Add two-pane library layout: left pane (folder/collection tree, 220px) + right pane (file table)
+- [ ] Rebuild upload flow as 4-stage modal (Drop → Files+options → Processing → Done) per spec in `frontend_design_vision.md`
+- [ ] Add collection color dots (7×7px squares, `border-radius: 2px`) throughout sidebar + table rows
+
+#### Phase F5: Chat View Update
+- [ ] Update message anatomy: assistant bubble `border-radius: 4px 13px 13px 13px`, user bubble `13px 13px 4px 13px`, blue-tinted user bg
+- [ ] Add suggestion pills above `MessageInput`
+- [ ] Add model status indicator in chat header (green dot + model name)
+- [ ] Add reasoning step checklist pattern (for future router/research integration)
+- [ ] Add quote block style to message content (blue left border, italic, `--t2`)
+
+#### Phase F6: System Panel
+- [ ] Build `ArcGauge` SVG component: half-circle, two concentric paths (track + fill), `stroke-dasharray` driven by percentage, color thresholds
+- [ ] Build `Sparkline` SVG component: `<polyline>` with normalized y-values, used for GPU + CPU history
+- [ ] Add context window 4-part breakdown to system panel: System / Docs / History / Buffer as mini stat cards
+- [ ] Add RAM stacked breakdown: Ollama / Qdrant / PG / Other
+
+#### Phase F7: Animation Polish
+- [ ] Update `fadeUp` keyframe: `translateY 6px→0` (currently 12px), `0.25s` (currently 0.3s)
+- [ ] Replace `bounce-dot` typing indicator with `blink` (`opacity 0.2→1→0.2, 1.2s, staggered`) per spec
+- [ ] Add list entry stagger: `animationDelay: index * 0.03s` on document rows and conversation list items
+- [ ] Ensure all transitions use `cubic-bezier(0.4, 0, 0.2, 1)` — audit for any `linear` or `ease` transitions on interactive elements
+
+---
+
 ### Chat: Other Modes
 
 - [ ] **Start chat from document** — see "Priority 1: Document Chat" section above.
@@ -372,9 +451,10 @@ On × remove:        DELETE /api/chat/{conv_id}/documents/{id} ← already exist
 
 ### Web Scraping Integration
 
-- [x] **Crawl4AI Docker sidecar** — `unclecode/crawl4ai:latest` added to `docker-compose.yml`. Backend calls `http://crawl4ai:11235/md` via httpx. No Python package needed.
-- [x] **Basic `POST /api/documents/url`** — validates URL, calls crawl4ai `/md`, returns markdown. Hardcoded URL bug fixed.
-- [ ] **Complete URL ingestion backend** — add `BackgroundTasks` + DB INSERT before returning, same pattern as file upload. Extract crawl logic into `core/crawler.py` as `scrape_url(url) -> str`.
+- [x] **Crawl4AI Docker sidecar** — `unclecode/crawl4ai:latest` added to `docker-compose.yml`. Backend calls `http://crawl4ai:11235/crawl` via httpx. No Python package needed.
+- [x] **`POST /api/documents/url` wired to Crawl4AI** — endpoint exists, calls Crawl4AI, returns raw markdown response. Not real ingestion — see bug above.
+- [ ] **Validate Crawl4AI response shape** — add debug endpoint or log raw payload for article/docs/YouTube URLs. Confirm whether `markdown` is always a string or sometimes `{ raw_markdown, ... }`. Do this before writing the ingestion pipeline.
+- [ ] **Complete URL ingestion backend** — after shape confirmed: add `BackgroundTasks` + DB INSERT, call `_process_document`, return `document_id`. Extract crawl logic into `core/crawler.py` as `scrape_url(url) -> str`.
 - [ ] **Frontend: URL ingestion UX** — loading state on "Ingest URL" button, error feedback card (matches file failed style), clear input on success, integrate `onUploadStart`/`onUploadComplete` so URL docs appear in the processing list with the same progress bar treatment. Add Enter key submit. Remove `urlIngestionResult` debug display.
 - [ ] **Frontend: URL zone design** — merge tab strip + content into a single glass card (tabs as header, content below). Remove `cursor-pointer` from outer div. URL icon (Globe) in document list for web-sourced docs.
 - [ ] **Backend: SearXNG Docker sidecar + client** — add SearXNG to `docker-compose.yml` (same pattern as Crawl4AI). Add `search(query) -> [urls]` to `core/crawler.py`. Read `SEARXNG_URL` from env; fall back to SerpAPI if set, skip if neither configured.
@@ -426,7 +506,7 @@ On × remove:        DELETE /api/chat/{conv_id}/documents/{id} ← already exist
   values in `config.py`. Add a startup warning in `main.py` lifespan if either matches the default.
 - [ ] **CORS too permissive** — `allow_methods=["*"]` and `allow_headers=["*"]` in `main.py`.
   Fine for local dev; tighten to specific methods/headers before any non-localhost exposure.
-- [ ] **`contextBudget` hardcoded to 4096 in store** — `chat.store.ts:77` has `contextBudget: 4096` but backend uses 8192. The `context_debug` SSE event sends `budget: 8192` but nothing in the store reads it. Fix: read `budget` from the `context_debug` event in `useSSEChat` and call `setContextBudget` (needs adding to store).
+- [ ] **Context window display broken in three ways** — (1) `contextBudget: 4096` hardcoded in `chat.store.ts` but backend uses 8192; `context_debug` SSE event sends `budget` but `useSSEChat` never reads it — add `setContextBudget` to store and wire it. (2) `context_debug` tokens are held in `pendingContextTokens` and only committed to the store on `done` — apply them immediately when the event fires so the fill updates as soon as the request starts, not after full generation. (3) `conversations.token_count` is maintained in the DB via `save_message()` but never returned by the conversations list API — add it to `ConversationOut` and pre-populate `contextTokens[convId]` on conversation load so fill is visible before any message is sent.
 - [ ] **`token_count` drift** — `save_message` counts only raw content tokens but `count_tokens()` adds 4 tokens overhead per message. Cached `token_count` drifts low over time, causing the fast path to load all history when it may be over budget. Fix: add the 4-token overhead in `save_message`.
 - [ ] **`score_type` not forwarded in done event** — `chat.py` builds `rag_sources` for the SSE `done` event but omits `score_type`. Add it so the frontend can label hybrid vs vector scores differently.
 - [ ] **Summarization blocks the next message** — `_generate_and_cache_summary()` in `context.py`

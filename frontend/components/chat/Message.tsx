@@ -151,9 +151,15 @@ export function Message({ message }: MessageProps) {
           }`}
           style={isUser ? { background: 'hsl(var(--glass-bg)/0.08)' } : undefined}
         >
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {message.content}
-          </ReactMarkdown>
+          {isUser ? (
+            <span className="whitespace-pre-wrap">{message.content}</span>
+          ) : (
+            <div className="prose prose-invert prose-sm max-w-none prose-headings:text-white/90 prose-p:text-white/80 prose-code:text-blue-300 prose-pre:bg-white/5 prose-strong:text-white">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {message.content}
+              </ReactMarkdown>
+            </div>
+          )}
         </div>
 
         {/* Footer: tier badge + sources toggle */}

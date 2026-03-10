@@ -237,6 +237,7 @@ def _build_rag_system_prompt(rag_context: str) -> str:
         "corresponding source number, e.g. [1], [2].\n"
         "- If the excerpts do not contain enough information to answer the question, "
         "say so clearly and do not guess or invent details.\n\n"
+        "Format your responses using markdown: use ## and ### for section headers when helpful, bold for key terms, bullet or numbered lists for multi-item answers, and code blocks for any code or commands. Keep responses concise."
     )
     return f"{instructions}{rag_context}"
 
@@ -247,6 +248,7 @@ def build_system_prompt(rag_context: str | None = None) -> str:
         "You help the user learn, research, and build. "
         "Be concise, precise, and adapt your explanation depth to the conversation."
         "If all scores are less than 60%, say you don't have enough information to answer the question."
+        "Format your responses using markdown: use ## and ### for section headers when helpful, bold for key terms, bullet or numbered lists for multi-item answers, and code blocks for any code or commands. Keep responses concise."
     )
     if rag_context:
         return _build_rag_system_prompt(rag_context)
@@ -286,11 +288,11 @@ async def build_messages(
         current_message=current_message,
         rag_tokens=rag_tokens,
     )
-
+    # User message is already persisted before build_messages is called, so history
+    # includes it; do not append again to avoid duplication.
     assembled = [
         {"role": "system", "content": build_system_prompt(rag_context)},
         *history,
-        {"role": "user", "content": current_message},
     ]
     total_tokens = count_tokens(assembled)
     return assembled, will_summarize, total_tokens

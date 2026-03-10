@@ -50,17 +50,27 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
     setActiveConversation,
     setMessages,
     setPendingDocuments,
+    setContextTokens,
+    bulkSetContextTokens,
   } = useChatStore();
 
   useEffect(() => {
     apiClient
       .get<Conversation[]>('/chat/conversations')
-      .then(setConversations)
+      .then((convs) => {
+        setConversations(convs);
+        const tokenMap: Record<string, number> = {};
+        for (const c of convs) {
+          if (c.token_count) tokenMap[c.conversation_id] = c.token_count;
+        }
+        bulkSetContextTokens(tokenMap);
+      })
       .catch(console.error);
-  }, [setConversations]);
+  }, [setConversations, bulkSetContextTokens]);
 
   const handleSelectConversation = async (conv: Conversation) => {
     setActiveConversation(conv.conversation_id);
+    setContextTokens(conv.conversation_id, conv.token_count ?? 0);
     if (onClose) onClose();
     try {
       const msgs = await apiClient.get<Message[]>(

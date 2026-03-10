@@ -9,7 +9,7 @@ from loguru import logger
 
 from app.models.chat import BatchAttachRequest, ChatRequest, ConversationOut, MessageOut
 from app.core.security import get_current_user
-from app.core.context import build_messages, count_tokens_text, MAX_MESSAGE_TOKENS, save_message
+from app.core.context import build_messages, count_tokens_text, MAX_MESSAGE_TOKENS, save_message, TOTAL_BUDGET
 from app.core import rag as rag_module
 from app.config import get_settings
 from app.db import postgres
@@ -155,6 +155,9 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
     if body.document_ids:
         await attach_documents(conversation_id, body.document_ids)
 
+    # Persist user message up front so it's always in history even if the stream fails.
+    await save_message(conversation_id, "user", body.message)
+
     async def stream_response():
         model = settings.ollama_model
         t0 = time.monotonic()
@@ -202,7 +205,7 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
         if will_summarize:
             yield f"data: {json.dumps({'type': 'status', 'content': 'summarizing context...'})}\n\n"
 
-        yield f"data: {json.dumps({'type': 'context_debug', 'tokens': total_tokens, 'budget': 8192})}\n\n"
+        yield f"data: {json.dumps({'type': 'context_debug', 'tokens': total_tokens, 'budget': TOTAL_BUDGET})}\n\n"
 
         full_response: list[str] = []
         first_token_logged = False
@@ -267,7 +270,6 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
 
         complete_response = "".join(full_response)
         if complete_response:
-            await save_message(conversation_id, "user", body.message)
             await save_message(conversation_id, "assistant", complete_response, model, rag_sources)
 
         latency_ms = int((time.monotonic() - start_time) * 1000)
@@ -307,7 +309,8 @@ async def list_conversations(
     current_user: dict = Depends(get_current_user),
 ) -> list[ConversationOut]:
     rows = await postgres.fetch_all(
-        """SELECT conversation_id, title, knowledge_tier, started_at, last_active
+        """SELECT conversation_id, title, knowledge_tier, started_at, last_active,
+                  COALESCE(token_count, 0) AS token_count
            FROM conversations
            WHERE user_id = $1
            ORDER BY last_active DESC

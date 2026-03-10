@@ -47,6 +47,7 @@ function isValidHttpUrl(raw: string): { ok: true; url: string } | { ok: false; e
     }
     return { ok: true, url: u.toString() };
   } catch {
+    
     return { ok: false, error: 'That doesn’t look like a valid URL.' };
   }
 }
@@ -66,7 +67,8 @@ export function UploadZone({ onUploadStart, onUploadComplete, onUploadFailed }: 
   const [url, setUrl] = useState('');
   const [inputKey, setInputKey] = useState(0);
   
-  const [urlIngestionResult, setUrlIngestionResult] = useState<string>('');
+  /** URL ingest: string = validation error, object = full Crawl4AI response */
+  const [urlIngestionResult, setUrlIngestionResult] = useState<string | Record<string, unknown> | null>(null);
   const [urlIngestionError, setUrlIngestionError] = useState<string>('');
   const [urlIngestionLoading, setUrlIngestionLoading] = useState(false);
 
@@ -142,22 +144,36 @@ export function UploadZone({ onUploadStart, onUploadComplete, onUploadFailed }: 
   const onUrlIngestion = async (url: string) => {
     try {
       setUrlIngestionLoading(true);
+      setUrlIngestionError('');
+      setUrlIngestionResult(null);
       const result = isValidHttpUrl(url);
       if (!result.ok) {
         setUrlIngestionResult(result.error);
         return;
       }
 
-      const response: { detail: string } = await apiClient.post('/documents/url', {
+      const response = await apiClient.post<Record<string, unknown>>('/documents/url', {
         url: result.url,
       });
-      setUrlIngestionResult(response.detail);
+      setUrlIngestionResult(response);
     } catch (error) {
       console.error(error);
       setUrlIngestionError('An error occurred while ingesting the URL.');
+      setUrlIngestionResult(null);
     } finally {
       setUrlIngestionLoading(false);
     }
+  };
+
+  /** Extract raw markdown from Crawl4AI response (markdown can be string or { raw_markdown, ... }) */
+  const getRawMarkdown = (data: Record<string, unknown>): string => {
+    const md = data.markdown;
+    if (typeof md === 'string') return md.trim();
+    if (md && typeof md === 'object' && !Array.isArray(md)) {
+      const raw = (md as Record<string, unknown>).raw_markdown ?? (md as Record<string, unknown>).markdown_with_citations;
+      return typeof raw === 'string' ? raw.trim() : '';
+    }
+    return '';
   };
 
   const succeeded = uploadResults.filter((r) => r.ok);
@@ -230,9 +246,25 @@ export function UploadZone({ onUploadStart, onUploadComplete, onUploadFailed }: 
             </div>
           )}
           {urlIngestionResult && !urlIngestionLoading && (
-            <ReactMarkdown>
-              {urlIngestionResult}
-            </ReactMarkdown>
+            <div className="mt-2 text-left space-y-2">
+              {typeof urlIngestionResult === 'string' ? (
+                <p className="text-sm text-destructive">{urlIngestionResult}</p>
+              ) : (
+                <>
+                  {getRawMarkdown(urlIngestionResult) ? (
+                    <div className="prose prose-invert prose-sm max-w-none prose-headings:text-white/90 prose-p:text-white/80 prose-code:text-blue-300 prose-pre:bg-white/5 prose-strong:text-white">
+                      <ReactMarkdown>{getRawMarkdown(urlIngestionResult)}</ReactMarkdown>
+                    </div>
+                  ) : null}
+                  <details className="text-xs text-muted-foreground">
+                    <summary className="cursor-pointer hover:text-foreground">Full response</summary>
+                    <pre className="mt-1 p-2 rounded bg-foreground/5 border border-foreground/10 overflow-auto max-h-48">
+                      {JSON.stringify(urlIngestionResult, null, 2)}
+                    </pre>
+                  </details>
+                </>
+              )}
+            </div>
           )}
         </div>
       )}

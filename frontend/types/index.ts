@@ -15,6 +15,7 @@ export interface Conversation {
   knowledge_tier: 'ephemeral' | 'persistent';
   started_at: string;
   last_active: string;
+  token_count?: number;
 }
 
 export interface ConversationDocument {

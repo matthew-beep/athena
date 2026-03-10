@@ -53,6 +53,12 @@ services:
       - "6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
+      
+  crawl4ai:
+    image: unclecode/crawl4ai:latest
+    ports:
+      - "11235:11235"
+    restart: unless-stopped
 
   backend:
     build:

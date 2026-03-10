@@ -22,6 +22,7 @@ class ConversationOut(BaseModel):
     knowledge_tier: str
     started_at: datetime
     last_active: datetime
+    token_count: int = 0
 
 
 class MessageOut(BaseModel):
