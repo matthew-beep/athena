@@ -5,6 +5,9 @@ import { UploadZone, type UploadedDocument } from './UploadZone';
 import { DocumentList } from './DocumentList';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { apiClient } from '@/api/client';
+import { FilePlusIcon } from 'lucide-react';
+import { DocumentSideBar } from './DocumentSideBar';
+import { DocumentTypeSelector } from './DocumentTypeSelector';
 
 export type ProcessingDoc = {
   document_id: string;
@@ -30,6 +33,24 @@ export function DocumentsPanel() {
   const startedAt = useRef<Map<string, number>>(new Map());
   const [search, setSearch] = useState('');
   const [mode, setMode] = useState<'upload' | 'url'>('upload');
+
+  const [selectedCollections, setSelectedCollections] = useState<string[]>([]); // will need to load this in
+  const [docTypes, setDocTypes] = useState<string[]>(["PDF", "TXT", "Markdown"]); // will need to load this in
+  const [tab, setTab] = useState<string>("all");
+  const [collections, setCollections] = useState<string[]>([]);
+  const [ loadingCollections, setLoadingCollections] = useState(false);
+
+  const handleSelectCollection = (collection: string) => {
+    setSelectedCollections((prev) =>
+      prev.includes(collection)
+        ? prev.filter((c) => c !== collection)
+        : [...prev, collection]
+    );
+  };
+
+  const handleSelectDocType = (docType: string) => {
+    setTab(docType);
+  };
 
   const onUploadStart = useCallback((payload: { file: File; tempId: string }) => {
     setProcessingDocs((prev) => [
@@ -123,26 +144,52 @@ export function DocumentsPanel() {
     prevLengthRef.current = processingDocs.length;
   }, [processingDocs.length]);
 
+
+  useEffect(() => {
+    const fetchCollections = async () => {
+      setLoadingCollections(true);
+      try {
+        const response:{ collections: string[] } = await apiClient.get("/collections");
+        console.log(response);
+        setCollections(response.collections);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoadingCollections(false);
+      }
+    }
+    fetchCollections();
+  }, []);
+
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="max-w-2xl mx-auto space-y-5 animate-fade-up">
-        
-        <div>
-          <h2 className="text-base font-display font-semibold tracking-tight">Documents</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Upload documents to add them to Athena's knowledge base
-          </p>
-        </div>
-        <UploadZone onUploadStart={onUploadStart} onUploadComplete={onUploadComplete} onUploadFailed={onUploadFailed} />
-        <GlassCard>
-         <input type="text" placeholder="Search documents" className="w-full bg-transparent outline-none p-2" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </GlassCard>
-        <GlassCard className="p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Knowledge Base</h3>
+    <div className="h-full overflow-y-auto flex flex-col">
+      <div className="animate-fade-up w-full flex flex-col h-full">
+        <header className="flex items-center justify-between border-b border-b-[var(--border)] p-4">
+          <div className="flex flex-col items-start justify-between">
+            <h2 className="text-base font-display font-semibold tracking-tight">Library</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              X Documents - {collections.length} Collections
+            </p>
           </div>
-          <DocumentList refreshKey={refreshKey} processingDocs={processingDocs} search={search}/>
-        </GlassCard>
+          <div className="flex items-center justify-between gap-2">
+            <input type="text" placeholder="Search documents" className="border-[var(--border)] border w-full bg-transparent outline-none p-2 rounded-md" value={search} onChange={(e) => setSearch(e.target.value)} />
+
+            <button className="flex items-center justify-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
+              <FilePlusIcon className="w-4 h-4" />
+              Upload
+            </button>
+          </div>
+        </header>
+
+        <div className="flex w-full h-full">
+          <DocumentSideBar collections={collections} loadingCollections={loadingCollections} selectedCollections={selectedCollections} onSelectCollection={handleSelectCollection} />
+          <div className="flex flex-col gap-4 w-full">
+            <div className="px-4 py-2 border-b border-b-[var(--border)]">
+              <DocumentTypeSelector docTypes={docTypes} onSelectDocType={handleSelectDocType} tab={tab} />
+            </div>
+            <DocumentList refreshKey={refreshKey} processingDocs={processingDocs} search={search}/>
+          </div>
+        </div>
       </div>
     </div>
   );

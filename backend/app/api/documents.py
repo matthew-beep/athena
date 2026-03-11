@@ -358,5 +358,3 @@ async def delete_document(document_id: str, current_user: dict = Depends(get_cur
     _progress.pop(document_id, None)
 
     return {"deleted": document_id}
-
-

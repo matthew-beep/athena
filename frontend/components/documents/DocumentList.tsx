@@ -400,66 +400,68 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
   };
 
   return (
-    <>
-    <div className="space-y-4">
-      {/* Processing Documents Section */}
-      {processingItems.length > 0 && (
-        <div>
-          <h3 className="text-xs font-medium text-muted-foreground mb-2 px-1">Processing</h3>
-          <ul className="space-y-1.5">
-            {processingItems.map(renderDocItem)}
-          </ul>
-        </div>
-      )}
-
-      {/* Uploaded Documents Section */}
-      {uploadedItems.length > 0 && (
-        <div>
+    <div className="border-2 border-red-800">
+      <div>
+        <div className="space-y-4">
+          {/* Processing Documents Section */}
           {processingItems.length > 0 && (
-            <h3 className="text-xs font-medium text-muted-foreground mb-2 px-1">Uploaded</h3>
+            <div>
+              <h3 className="text-xs font-medium text-muted-foreground mb-2 px-1">Processing</h3>
+              <ul className="space-y-1.5">
+                {processingItems.map(renderDocItem)}
+              </ul>
+            </div>
           )}
-          <ul className="space-y-1.5">
-            {uploadedItems.filter(file => file.searchName.indexOf(search.toLowerCase()) > -1).map(renderDocItem)}
-          </ul>
-        </div>
-      )}
-    </div>
 
-    {/* Conversations modal — pick existing or start new */}
-    <Modal
-      open={conversationsModal.open}
-      onClose={() => setConversationsModal((m) => ({ ...m, open: false }))}
-      title="Chats for this document"
-      footer={
-        <button
-          type="button"
-          onClick={handleNewChatFromModal}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-foreground bg-muted/50 hover:bg-muted border border-border/50 transition-colors"
-        >
-          <Plus size={14} />
-          Start new chat
-        </button>
-      }
-    >
-      <ul className="max-h-64 overflow-y-auto p-2">
-        {conversationsModal.conversations.map((conv) => (
-          <li key={conv.conversation_id}>
+          {/* Uploaded Documents Section */}
+          {uploadedItems.length > 0 && (
+            <div>
+              {processingItems.length > 0 && (
+                <h3 className="text-xs font-medium text-muted-foreground mb-2 px-1">Uploaded</h3>
+              )}
+              <ul className="space-y-1.5">
+                {uploadedItems.filter(file => file.searchName.indexOf(search.toLowerCase()) > -1).map(renderDocItem)}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        {/* Conversations modal — pick existing or start new */}
+        <Modal
+          open={conversationsModal.open}
+          onClose={() => setConversationsModal((m) => ({ ...m, open: false }))}
+          title="Chats for this document"
+          footer={
             <button
               type="button"
-              onClick={() => handlePickConversation(conv)}
-              className="w-full text-left px-3 py-2.5 rounded-lg text-sm text-foreground hover:bg-muted/50 transition-colors flex flex-col gap-0.5"
+              onClick={handleNewChatFromModal}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-foreground bg-muted/50 hover:bg-muted border border-border/50 transition-colors"
             >
-              <span className="font-medium truncate">
-                {conv.title || 'New Conversation'}
-              </span>
-              <span className="text-xs text-muted-foreground font-mono">
-                {formatDate(conv.last_active) ?? conv.last_active}
-              </span>
+              <Plus size={14} />
+              Start new chat
             </button>
-          </li>
-        ))}
-      </ul>
-    </Modal>
-    </>
+          }
+        >
+          <ul className="max-h-64 overflow-y-auto p-2">
+            {conversationsModal.conversations.map((conv) => (
+              <li key={conv.conversation_id}>
+                <button
+                  type="button"
+                  onClick={() => handlePickConversation(conv)}
+                  className="w-full text-left px-3 py-2.5 rounded-lg text-sm text-foreground hover:bg-muted/50 transition-colors flex flex-col gap-0.5"
+                >
+                  <span className="font-medium truncate">
+                    {conv.title || 'New Conversation'}
+                  </span>
+                  <span className="text-xs text-muted-foreground font-mono">
+                    {formatDate(conv.last_active) ?? conv.last_active}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Modal>
+      </div>
+    </div>
   );
 }

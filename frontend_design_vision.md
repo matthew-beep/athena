@@ -11,7 +11,7 @@ The aesthetic is called **Structural Glass** — a fusion of two distinct visual
 1. **Structural Minimalism** (inspired by dense SaaS data tools): crisp dark surfaces, high-contrast typography, information-dense tables, zero decorative effects on utility views.
 2. **Liquid Glass** (reserved for AI/chat surfaces only): subtle translucency, soft borders, atmospheric depth — used *only* where it communicates that the user is interacting with an AI system.
 
-**The core rule:** Glass effects belong on chat bubbles, AI panels, and modals. They do not belong on tables, file lists, folder trees, or navigation.
+**The core rule:** Glass effects belong on modal overlays only. They do not belong on tables, file lists, folder trees, navigation, or the main panel.
 
 ---
 
@@ -21,11 +21,11 @@ The app uses a **two-layer depth model**:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  FLOOR  (#070709) — raw dark background                  │
+│  FLOOR  (--floor) — raw background, no decoration        │
 │                                                          │
 │  ┌─────────┐  ┌────────────────────────────────────┐    │
 │  │ SIDEBAR │  │  CONTENT PANEL                     │    │
-│  │         │  │  background: #0d0d11               │    │
+│  │         │  │  background: var(--surface)        │    │
 │  │ sits on │  │  border-radius: 22px               │    │
 │  │  floor  │  │  box-shadow: ring + depth          │    │
 │  │         │  │  margin: 10px (floats above floor) │    │
@@ -33,55 +33,109 @@ The app uses a **two-layer depth model**:
 └─────────────────────────────────────────────────────────┘
 ```
 
-The sidebar lives directly on the floor — no border-radius, no elevation. The main content panel has `border-radius: 22px`, a 1px highlight ring (`rgba(255,255,255,0.055)`), and a deep drop shadow (`0 4px 40px rgba(0,0,0,0.55)`). This creates a clear "content is floating on top" feeling without any blur or glass effects on the panel itself.
+The sidebar lives directly on the floor — no border-radius, no elevation. The main content panel has `border-radius: 22px`, a 1px highlight ring, and a deep drop shadow. This creates a clear "content is floating on top" feeling without any blur or glass on the panel itself.
 
 ---
 
-## Color Tokens
+## Theme System
+
+All visual properties are driven by CSS custom properties on `:root`. There are two independent theme axes — **Color Depth** and **Typography** — that combine freely. Switching themes is a single `applyTheme(depth, font)` call that writes new values to `document.documentElement.style`.
+
+### Color Depth Themes
+
+Three depth options. All use the same token names — only the values change.
+
+#### Midnight (default)
+Deep near-black. Maximum contrast. Most premium-feeling.
 
 ```css
-:root {
-  /* Depth layers */
-  --floor:     #070709;          /* Page background, sidebar bg */
-  --surface:   #0d0d11;          /* Main content panel */
-  --surface-2: #121217;          /* Inset wells, modal bodies */
+--floor:     #070709;
+--surface:   #0d0d11;
+--surface-2: #121217;
+--raised:    rgba(255,255,255,0.038);
+--raised-h:  rgba(255,255,255,0.062);
+--raised-a:  rgba(255,255,255,0.092);
+--border:    rgba(255,255,255,0.072);
+--border-s:  rgba(255,255,255,0.13);
+--t1: rgba(255,255,255,0.90);
+--t2: rgba(255,255,255,0.52);
+--t3: rgba(255,255,255,0.28);
+--t4: rgba(255,255,255,0.14);
+--panel-shadow: 0 0 0 1px rgba(255,255,255,0.055),
+                0 4px 40px rgba(0,0,0,0.55),
+                0 1px 0 rgba(255,255,255,0.035) inset;
+```
 
-  /* Interactive surfaces */
-  --raised:    rgba(255,255,255,0.038);   /* Default card/row bg */
-  --raised-h:  rgba(255,255,255,0.062);   /* Hover state */
-  --raised-a:  rgba(255,255,255,0.090);   /* Active/selected state */
+#### Slate
+Lifted cool gray. Easier on the eyes for long sessions. Borders read slightly more visibly.
 
-  /* Borders */
-  --border:    rgba(255,255,255,0.072);   /* Default border */
-  --border-s:  rgba(255,255,255,0.12);    /* Stronger border (modals, focus) */
+```css
+--floor:     #141416;
+--surface:   #1c1c21;
+--surface-2: #242429;
+--raised:    rgba(255,255,255,0.05);
+--raised-h:  rgba(255,255,255,0.08);
+--raised-a:  rgba(255,255,255,0.11);
+--border:    rgba(255,255,255,0.09);
+--border-s:  rgba(255,255,255,0.16);
+--t1: rgba(255,255,255,0.88);
+--t2: rgba(255,255,255,0.54);
+--t3: rgba(255,255,255,0.32);
+--t4: rgba(255,255,255,0.18);
+--panel-shadow: 0 0 0 1px rgba(255,255,255,0.07),
+                0 4px 32px rgba(0,0,0,0.4),
+                0 1px 0 rgba(255,255,255,0.04) inset;
+```
 
-  /* Text */
-  --t1: rgba(255,255,255,0.90);   /* Primary */
-  --t2: rgba(255,255,255,0.52);   /* Secondary */
-  --t3: rgba(255,255,255,0.28);   /* Tertiary / metadata */
-  --t4: rgba(255,255,255,0.13);   /* Disabled / labels */
+#### Light
+Warm off-white. All opacity tokens invert to `rgba(0,0,0,...)`.
 
-  /* Accent */
-  --blue:      #3b7cf4;
-  --blue-a:    rgba(59,124,244,0.13);   /* Blue tinted bg */
-  --blue-b:    rgba(59,124,244,0.07);   /* Subtle blue tint */
-  --blue-br:   rgba(59,124,244,0.26);   /* Blue border */
+```css
+--floor:     #e8e6e1;
+--surface:   #f8f7f4;
+--surface-2: #efede9;
+--raised:    rgba(0,0,0,0.04);
+--raised-h:  rgba(0,0,0,0.07);
+--raised-a:  rgba(0,0,0,0.09);
+--border:    rgba(0,0,0,0.09);
+--border-s:  rgba(0,0,0,0.16);
+--t1: rgba(0,0,0,0.88);
+--t2: rgba(0,0,0,0.50);
+--t3: rgba(0,0,0,0.30);
+--t4: rgba(0,0,0,0.18);
+--panel-shadow: 0 0 0 1px rgba(0,0,0,0.07),
+                0 4px 32px rgba(0,0,0,0.08),
+                0 1px 0 rgba(255,255,255,0.9) inset;
+```
 
-  --green:     #34d399;
-  --green-a:   rgba(52,211,153,0.12);
-  --green-br:  rgba(52,211,153,0.24);
+### Accent Tokens (shared across all depth themes)
 
-  --amber:     #f59e0b;
-  --amber-a:   rgba(245,158,11,0.12);
-  --amber-br:  rgba(245,158,11,0.24);
+```css
+--blue:    #3b7cf4;   --blue-a:   rgba(59,124,244,0.13);
+                      --blue-b:   rgba(59,124,244,0.07);
+                      --blue-br:  rgba(59,124,244,0.26);
 
-  --red:       #f87171;
-  --red-a:     rgba(248,113,113,0.12);
-  --red-br:    rgba(248,113,113,0.24);
+--green:   #34d399;   --green-a:  rgba(52,211,153,0.12);
+                      --green-br: rgba(52,211,153,0.24);
 
-  --purple:    #a78bfa;
-  --purple-a:  rgba(167,139,250,0.11);
-}
+--amber:   #f59e0b;   --amber-a:  rgba(245,158,11,0.12);
+                      --amber-br: rgba(245,158,11,0.24);
+
+--red:     #f87171;   --red-a:    rgba(248,113,113,0.12);
+                      --red-br:   rgba(248,113,113,0.24);
+
+--purple:  #a78bfa;   --purple-a: rgba(167,139,250,0.11);
+```
+
+### Document Surface Tokens
+Used in white reading panes (research document output, chat doc viewer). These are always light regardless of the active depth theme.
+
+```css
+--doc-bg:     #f9f9f7;
+--doc-t:      #111;
+--doc-t2:     #374151;
+--doc-border: #e8e8e5;
+--doc-label:  #999;
 ```
 
 **Never use raw hex values in components.** Always reference these tokens.
@@ -90,16 +144,61 @@ The sidebar lives directly on the floor — no border-radius, no elevation. The 
 
 ## Typography
 
-| Role | Size | Weight | Notes |
-|---|---|---|---|
-| Page title | 15px | 700 | `letter-spacing: -0.02em` |
-| Section header | 13px | 600 | — |
-| Body / table content | 13px | 400 | `line-height: 1.65` |
-| Small label / meta | 11–12px | 400–500 | `color: var(--t2)` or `--t3` |
-| Section category label | 10px | 700 | `uppercase, letter-spacing: 0.08em, color: var(--t4)` |
-| Monospace values | 11–14px | 400–600 | JetBrains Mono, used for: file sizes, token counts, percentages, model names, stat values |
+### Font Roles
 
-**Fonts:** `Inter` for all UI text. `JetBrains Mono` for technical values, file sizes, chunk counts, tok/s, TTFT, VRAM numbers, and file type badges.
+Five distinct font roles, each with a dedicated CSS variable:
+
+| Variable | Role | Font | Usage |
+|---|---|---|---|
+| `--font-wordmark` | Brand name | Cormorant Garamond | "Athena" sidebar wordmark only |
+| `--fd` | Display / headings | Theme-dependent | Page titles, section headers, nav labels |
+| `--fb` | Body / UI | Theme-dependent | All interface chrome, labels, metadata |
+| `--fm` | Monospace | JetBrains Mono (always) | File sizes, stats, type badges, chunk counts |
+| `--font-ai-msg` | AI response text | Lora (always) | LLM chat bubbles only |
+
+**Fixed across all themes — never changed by font theme switching:**
+- `--font-wordmark`: `'Cormorant Garamond', Georgia, serif` — high-contrast, brand-grade. Used only for the "Athena" wordmark at 18px / weight 600 / `letter-spacing: 0.01em`.
+- `--font-ai-msg`: `'Lora', Georgia, serif` — designed for screen reading, warm and structured. Used at 13.5px / `line-height: 1.75` in AI response bubbles. Gives the AI a distinct voice separate from the interface chrome.
+- `--fm`: `'JetBrains Mono', monospace` — always mono regardless of theme.
+
+### Typography Themes (control `--fd`, `--fb`, `--tr`, `--wd`)
+
+#### Terminal
+JetBrains Mono runs everything. Feels like a database client or dev tool.
+```css
+--fd: 'JetBrains Mono', monospace;
+--fb: 'JetBrains Mono', monospace;
+--tr: -0.01em;   --wd: 700;
+```
+
+#### Editorial
+Plus Jakarta Sans headings (weight 800, tight tracking), Poppins body. Product-forward, warm.
+```css
+--fd: 'Plus Jakarta Sans', sans-serif;
+--fb: 'Poppins', sans-serif;
+--tr: -0.025em;  --wd: 800;
+```
+
+#### Serif
+Playfair Display headings, Lora body. Academic, editorial, printed-book quality.
+```css
+--fd: 'Playfair Display', serif;
+--fb: 'Lora', serif;
+--tr: -0.01em;   --wd: 700;
+```
+
+### Type Scale
+
+| Role | Size | Weight | Font var | Notes |
+|---|---|---|---|---|
+| Wordmark | 18px | 600 | `--font-wordmark` | `letter-spacing: 0.01em` |
+| Page title | 15–17px | `var(--wd)` | `--fd` | `letter-spacing: var(--tr)` |
+| Section header | 13px | 600 | `--fd` | — |
+| Body / table | 13px | 400 | `--fb` | `line-height: 1.65` |
+| AI response | 13.5px | 400 | `--font-ai-msg` | `line-height: 1.75` — Lora serif always |
+| Small label | 11–12px | 400–500 | `--fb` | `color: var(--t2)` or `--t3` |
+| Section category | 10px | 700 | `--fb` | uppercase, `letter-spacing: 0.08em`, `var(--t4)` |
+| Mono values | 11–14px | 400–600 | `--fm` | File sizes, stats, type badges, chunk counts |
 
 ---
 
@@ -107,14 +206,13 @@ The sidebar lives directly on the floor — no border-radius, no elevation. The 
 
 ### Sidebar
 
-- Collapsible between `220px` (expanded) and `56px` (collapsed)
+- Collapsible: `224px` (expanded) ↔ `56px` (collapsed)
 - Transition: `width 0.22s cubic-bezier(0.4,0,0.2,1)`
-- In collapsed mode: labels fade to `opacity: 0`, badges hide, icons center
-- Contains: logo, primary nav (3 items), collections list with color dots, settings, user avatar
+- Collapsed: labels `opacity: 0` / `width: 0`, badges hide, icons center
+- Contains: gradient logo icon + Cormorant Garamond wordmark, primary nav (Library / Research / Chat), collections list with color dots, Settings, user avatar
 - Background: `var(--floor)` — no elevation, no border-radius
-- Toggle button: small chevron button in the header row, flips direction
 
-**Collection dots:** Each collection has a unique accent color represented as a `7x7px` square with `border-radius: 2px`. Colors are consistent across sidebar, file rows, and folder trees (blue, purple, green, amber).
+**Collection dots:** `7×7px` square, `border-radius: 2px`, unique accent color per collection. Thread through sidebar, folder tree, and file table rows consistently.
 
 ### Nav Items
 
@@ -124,11 +222,12 @@ The sidebar lives directly on the floor — no border-radius, no elevation. The 
   border-radius: 10px;
   font-size: 13px;
   font-weight: 500;
+  font-family: var(--fb);
   color: var(--t3);
   transition: background 0.12s, color 0.12s;
 }
-.nav-item:hover  { background: rgba(255,255,255,0.05); color: var(--t2); }
-.nav-item.active { background: rgba(255,255,255,0.07); color: var(--t1); }
+.nav-item:hover  { background: var(--raised-h); color: var(--t2); }
+.nav-item.active { background: var(--raised-a); color: var(--t1); }
 ```
 
 ### Content Panel (Elevated Card)
@@ -139,23 +238,18 @@ The sidebar lives directly on the floor — no border-radius, no elevation. The 
   margin: 10px 10px 10px 0;
   background: var(--surface);
   border-radius: 22px;
-  box-shadow:
-    0 0 0 1px rgba(255,255,255,0.055),
-    0 4px 40px rgba(0,0,0,0.55),
-    0 1px 0 rgba(255,255,255,0.035) inset;
+  box-shadow: var(--panel-shadow);
   overflow: hidden;
 }
 ```
 
 ### File Type Badges
 
-Compact badges for PDF and Markdown file types:
-
 ```
-Width: 28px, Height: 28px, border-radius: 7px
-PDF  → background: rgba(248,113,113,0.1), border: rgba(248,113,113,0.22), color: var(--red)
-MD   → background: rgba(59,124,244,0.1),  border: rgba(59,124,244,0.22),  color: var(--blue)
-Font: JetBrains Mono, 8.5px, weight 700
+Size: 28×28px, border-radius: 7px
+PDF → bg: rgba(248,113,113,0.1), border: rgba(248,113,113,0.22), color: var(--red)
+MD  → bg: rgba(59,124,244,0.1),  border: rgba(59,124,244,0.22),  color: var(--blue)
+Font: var(--fm), 8.5px, weight 700
 ```
 
 ### Pill Tags
@@ -166,6 +260,7 @@ Font: JetBrains Mono, 8.5px, weight 700
   border-radius: 100px;
   font-size: 11px;
   font-weight: 500;
+  font-family: var(--fb);
   border: 1px solid var(--border);
   color: var(--t2);
   background: var(--raised);
@@ -179,12 +274,11 @@ Font: JetBrains Mono, 8.5px, weight 700
 
 ### Buttons
 
-- **Ghost:** `background: var(--raised), border: var(--border), color: var(--t2)`
-- **Primary:** `background: var(--blue), color: white`
-- **Danger:** `background: var(--red-a), border: var(--red-br), color: var(--red)`
-- Border-radius: `9px`
-- Font size: `12.5px`, weight `500`
-- Gap between icon and label: `6px`
+- **Ghost:** `background: var(--raised)`, `border: var(--border)`, `color: var(--t2)`
+- **Primary:** `background: var(--blue)`, `color: white`
+- **Success:** `background: var(--green-a)`, `border: var(--green-br)`, `color: var(--green)`
+- **Danger:** `background: var(--red-a)`, `border: var(--red-br)`, `color: var(--red)`
+- `border-radius: 9px`, `font-size: 12.5px`, `font-weight: 500`, `font-family: var(--fb)`, icon gap: `6px`
 
 ### Table / File Rows
 
@@ -192,7 +286,7 @@ Font: JetBrains Mono, 8.5px, weight 700
 .trow {
   display: grid;
   padding: 10px 20px;
-  border-bottom: 1px solid rgba(255,255,255,0.042);
+  border-bottom: 1px solid rgba(128,128,128,0.08);
   cursor: pointer;
   transition: background 0.1s;
 }
@@ -200,9 +294,7 @@ Font: JetBrains Mono, 8.5px, weight 700
 .trow.selected { background: var(--raised-a); box-shadow: inset 2px 0 0 var(--blue); }
 ```
 
-- No outer border on the table container — rows are self-contained with a bottom divider
-- Selected rows get a `2px blue left inset shadow` as the selection indicator
-- Column headers: `11px, weight 600, color: var(--t4), letter-spacing: 0.04em`
+Selected rows get a `2px blue left inset shadow`. Column headers: `10px / 700 / uppercase / 0.08em / var(--t4)`.
 
 ### Progress Bars
 
@@ -211,19 +303,45 @@ Font: JetBrains Mono, 8.5px, weight 700
 .prog-fill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
 ```
 
-Color logic:
-- `< 65%` → `var(--blue)`
-- `65–85%` → `var(--amber)`
-- `> 85%` → `var(--red)`
+Color: `< 65%` → blue · `65–85%` → amber · `> 85%` → red
 
 ### Status Badges
 
-Small pill with dot + label:
-```
-Indexed    → background: var(--green-a), border: var(--green-br), color: var(--green)
-Processing → background: var(--amber-a), border: var(--amber-br), color: var(--amber)
-Error      → background: var(--red-a),   border: var(--red-br),   color: var(--red)
-border-radius: 100px, font-size: 11px
+Dot + label pill. `border-radius: 100px`, `font-size: 11px`, `font-family: var(--fb)`.
+
+| Status | Background | Border | Text | Dot |
+|---|---|---|---|---|
+| Complete | `var(--green-a)` | `var(--green-br)` | `var(--green)` | Static |
+| Running | `var(--blue-a)` | `var(--blue-br)` | `var(--blue)` | Pulse |
+| Processing/Indexing | `var(--amber-a)` | `var(--amber-br)` | `var(--amber)` | Static |
+| Scraping | `var(--purple-a)` | purple border | `var(--purple)` | Pulse |
+| Error | `var(--red-a)` | `var(--red-br)` | `var(--red)` | Static |
+| Draft | `var(--raised)` | `var(--border)` | `var(--t3)` | Static |
+
+Pulse dot: `animation: shimmerPulse 2s ease-in-out infinite` (opacity 0.5→1→0.5).
+
+### Toggle Switch
+
+`34×19px`, `border-radius: 100px`. Thumb `13×13px`, transitions `left: 3px` ↔ `left: 18px`.
+Off: `background: var(--raised-h)`, `border: var(--border-s)`. On: `background: var(--blue)`.
+
+### Right Panel Tabs
+
+```css
+.rpanel-tab {
+  padding: 9px 16px;
+  border: none;
+  background: transparent;
+  font-family: var(--fb);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--t3);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.rpanel-tab:hover { color: var(--t2); }
+.rpanel-tab.on    { color: var(--t1); border-bottom-color: var(--blue); }
 ```
 
 ---
@@ -234,108 +352,127 @@ border-radius: 100px, font-size: 11px
 
 **Layout:** Two-pane inside the content panel.
 
-**Left pane (220px):** Folder/collection tree with collapsible subfolders, color dot per collection, tag section below a divider. Same visual language as the sidebar — subordinate navigation.
+**Left pane (210px):** Folder/collection tree with collapsible subfolders, color dot per collection, tag section below a divider.
 
-**Right pane (flex: 1):** File table with tab filter row (All Files / PDF / Markdown / Web), column headers, and borderless file rows. Columns: Name (with type badge), Collection (with color dot), Added, Size.
+**Right pane:** File table with tab filter row (All Files / PDF / Markdown / Web), column headers, file rows. Columns: Name (with type badge), Collection (with color dot), Added, Size.
 
-**Header:** Page title + subtitle, search input, Import button (triggers upload modal).
+**Header:** Page title + subtitle, search input, Import button → triggers 4-stage upload modal.
 
-**Collection dots** thread through both sidebar and table rows for visual continuity.
+---
 
 ### Research View
 
-**Layout:** Three-column split inside the content panel.
+A session-based research pipeline manager — not a chat.
 
-**Left (~400px):** AI chat panel — dark background, document scope pills in header, AI reasoning steps (checklist with green checkmarks), section reference chips in JetBrains Mono (`§2.1`, `§3.2`), AI response card with inline quoted blocks, suggestion pills above input.
+**Layout:** Two-column split.
 
-**Right (flex: 1):** Toggleable panel with two modes, selected via tab bar at the top:
+**Left panel (340px):** Session list. Each card shows query (2-line clamp), status badge, tags, source count, date. Search bar + filter tabs (All / Running / Complete / Draft). New Research button → modal.
 
-1. **Document tab** — white/off-white (`#f9f9f7`) document reader. Section navigation pills in a sticky toolbar. Active context highlighted with a blue left-border callout block. Clean serif-like typography in dark ink on light background. The contrast between dark AI panel and light doc panel is intentional.
+**Right panel:** Session detail header (full query, status, source count, action buttons, tags) + two tabs:
 
-2. **System tab** — dark system health dashboard with:
-   - Active model name (mono), live **tok/s** and **TTFT** as large mono numbers, sparkline graph
-   - GPU utilization as a **half-circle arc gauge** (SVG), VRAM usage bar, temperature bar
-   - System RAM breakdown (Ollama / Qdrant / PG / Other) with a stacked progress bar
-   - **Context window** usage with 4-part breakdown: System / Docs / History / Buffer — shown as mini stat cards
-   - CPU utilization with sparkline
-   - Stats animate on a slow interval to feel live without being distracting
+#### Sources Tab
+- AI synthesis block (complete sessions): blue left-border callout card with research summary
+- Running progress block: spinner + progress bar + "X of Y sources processed"
+- Scraped sources list: globe icon, title, domain, word count, status badge. Click to expand inline preview with View raw / Open URL
+- Empty state (draft): centered icon + "Start the research pipeline to begin scraping"
 
-**AI message anatomy:**
-```
-[Avatar 26x26 gradient icon]
-  ├── Reasoning steps (checklist, green checks, --t3 text)
-  │     └── Section ref chips (mono, blue tint)
-  └── Response card (var(--raised) bg, border, rounded 4px 13px 13px 13px)
-        ├── Paragraph text (13px, --t1, lineHeight 1.68)
-        ├── Quote block (blue left border, italic, --t2)
-        └── Tag pills footer (separated by top border)
+#### Document Tab
+White reading surface (`var(--doc-bg)`). AI-synthesized report with section nav pills, numbered key findings, source analysis list with Cited badges, Gaps & Limitations. Export .md + Chat about this buttons in header. Empty state if session not complete.
 
-User message: right-aligned, blue-tinted bg, rounded 13px 13px 4px 13px
-```
+#### New Research Modal
+Blur overlay. Research query textarea, max sources picker, save-to-collection picker, four toggles. Start button activates once query > 10 chars.
+
+---
 
 ### Chat View
 
-Single-pane chat. Same message anatomy as Research. Header shows model status (green dot, model name), document scope pills. Input has suggestion pills below it. Typing indicator is three animated dots.
+General-purpose chat with document scope control. Also serves as Research Chat when launched from a completed research session with context pre-loaded.
+
+**Layout:** Chat panel (420px) + right panel (flex: 1).
+
+#### Chat Panel
+
+**Header:**
+- AI gradient avatar + "Chat" title + model dot + scope summary line
+- Research context banner (research mode): blue-tinted bar with query text
+- Document scope pills (general mode): removable pills showing collection dot + truncated name + × button. "Add doc" button → document picker dropdown.
+
+**Document Picker Dropdown** (anchored below header, closes on outside click):
+- Search input filtering by name or collection
+- All library docs: type badge, name, collection dot, chunk count
+- Clicking toggles in/out of scope — filled blue circle (in scope) vs. empty ring (not)
+- Footer: scope count + Done button
+
+**Messages:**
+
+```
+User bubble:   right-aligned, bg: var(--blue-a), border: var(--blue-br)
+               border-radius: 13px 13px 4px 13px, font: var(--fb) 13px
+
+AI bubble:     left-aligned with 24×24 gradient avatar
+               bg: var(--raised), border: var(--border)
+               border-radius: 4px 13px 13px 13px
+               font: var(--font-ai-msg) 13.5px, line-height 1.75  ← Lora, always
+```
+
+Typing indicator: three dots with staggered `blink` animation inside an AI bubble shape.
+
+**Input bar:** `var(--raised)` container. Send button — blue when input has content, muted ring when empty.
+
+**Suggestion pills** adapt: no docs → generic prompts · docs in scope → "Summarize all docs", "Find contradictions", "Key takeaways" · research mode → "Key findings", "Compare sources", "Export summary".
+
+#### Right Panel Tabs
+
+**Document tab:**
+- Docs in scope: multi-doc tab strip (when >1), then white reading surface with section nav, active context callout, document body. Active doc title + chunk count in header.
+- No docs: empty state on white surface pointing to "Add doc."
+
+**System tab:** Live hardware stats (see System Panel).
+
+---
+
+## System Panel
+
+Dark stats panel. Values animate on ~1.8s interval with sine-based jitter.
+
+**Sections:** Active Model (name mono + Tok/s + TTFT + sparkline) · GPU (arc gauge + VRAM bar + temp bar) · System RAM (total mono + bar + Ollama/Qdrant/PG breakdown) · Context Window (token count + bar + 4 mini cards: System/Docs/History/Buffer) · CPU (percentage + sparkline).
+
+**Arc Gauge:** Pure SVG half-circle. Two `<path>` elements — track in `rgba(128,128,128,0.12)`, fill with `stroke-dasharray` driven by percentage. Colors: `< 60%` blue · `60–80%` amber · `> 80%` red.
+
+**Sparkline:** Pure SVG `<polyline>`. Values normalized to SVG height, 1.5px colored stroke.
 
 ---
 
 ## Upload Modal — 4-Stage Flow
 
-The modal uses `backdrop-filter: blur(8px)` on the overlay and `border-radius: 20px` on the modal card. This is one of the few places blur is used — it's appropriate because the modal is a full-focus interruption, not a utility surface.
+`backdrop-filter: blur(8px)` on overlay. Modal `border-radius: 20px`. Four small progress bars in header fill blue as you advance.
 
-### Stage 1: Drop
-- Large dashed dropzone (`border: 2px dashed`) with upload icon, label, and subtitle
-- URL import input below the dropzone
-- Supported format pills: PDF, Markdown, DOCX, TXT, HTML, YouTube URL, Web page
-- Drop zone highlights (blue tint + border-color change) on `dragover`
+**Stage 1 — Drop:** Dashed dropzone (highlights blue on dragover) + URL import input + format pills.
 
-### Stage 2: Files
-- File list with type badge, name, size, remove button
-- **Collection picker:** color-coded buttons, selected state uses collection's accent color for border + background tint
-- **Indexing options:** three toggles (Auto-tag with AI / Generate summary / Sentence-aware chunking) styled as iOS-style toggle switches
+**Stage 2 — Files:** File list with type badge + remove. Collection picker as color-coded buttons. Three toggles: Auto-tag / Generate summary / Sentence-aware chunking.
 
-### Stage 3: Processing
-- Per-file progress bars with animated fill
-- Status label updates by phase: `Parsing → Chunking → Generating embeddings → Finalizing`
-- File icon swaps to green checkmark on completion
-- Percentage counter in mono
+**Stage 3 — Processing:** Per-file animated progress bars. Spinner → green check on complete. Phase labels: `Parsing → Chunking → Generating embeddings`. Mono percentage.
 
-### Stage 4: Done
-- Large green check icon in a tinted card
-- Summary: "3 documents imported · added to [Collection] · N chunks indexed"
-- File confirmation list with green checkmarks
-- Actions: "Import more" (ghost) + "View in Library" (primary)
+**Stage 4 — Done:** Green check circle. Files listed with chunk counts in mono. "View in Library" primary button.
 
 ---
 
 ## Motion & Animation
 
-All transitions use `cubic-bezier(0.4, 0, 0.2, 1)`. Never `linear`.
+All transitions: `cubic-bezier(0.4, 0, 0.2, 1)`. Never `linear`.
 
-| Animation | Keyframe | Usage |
+| Name | Definition | Usage |
 |---|---|---|
-| `fadeUp` | opacity 0→1 + translateY 6px→0, 0.25s | Page entry, row reveals, modal content |
-| `scaleIn` | scale 0.96→1 + opacity 0→1, 0.2s | Modal open, dropdown appears |
-| `shimmer` | gradient sweep 1.5s loop | Loading skeletons |
-| `blink` | opacity 0.2→1→0.2, 1.2s loop, staggered | Typing indicator dots |
-| Sidebar collapse | `width` transition, 0.22s cubic | Sidebar expand/collapse |
-| Progress bars | `width` transition, 0.4s ease | Upload progress, system stats |
+| `fadeUp` | opacity 0→1, translateY 6→0px, 0.25s | Page entry, row reveals, modal content |
+| `scaleIn` | scale 0.97→1, opacity 0→1, 0.18s | Modal open, dropdown appear |
+| `blink` | opacity 0.2→1→0.2, 1.2s, staggered | Typing indicator dots |
+| `shimmerPulse` | opacity 0.5→1→0.5, 2s | Live status dots (Running, Scraping) |
+| `spin` | rotate 360°, 1s linear | Processing spinners |
+| Sidebar | `width` 0.22s cubic | Expand/collapse |
+| Progress | `width` 0.4s ease | Upload bars, stat bars |
+| Send button | `background` 0.15s | Active/inactive state |
 
-**Stagger:** List entries use `animationDelay: index * 0.03s` with `fadeUp`.
-
----
-
-## Data Visualization (System Panel)
-
-### Arc Gauge (GPU / CPU utilization)
-
-Pure SVG half-circle arc. Two concentric `<path>` elements traced along the same arc — one as track (`rgba(255,255,255,0.07)`), one as fill (colored, with `stroke-dasharray` driven by percentage). Rotated so 0° starts at the left.
-
-Color thresholds: `< 60%` → blue · `60–80%` → amber · `> 80%` → red
-
-### Sparkline
-
-Pure SVG `<polyline>`. Input is an array of numbers, normalized to the SVG height. Used for GPU utilization history and CPU history.
+**Stagger:** `animationDelay: index * 0.03–0.05s` on list entries.
 
 ---
 
@@ -344,32 +481,36 @@ Pure SVG `<polyline>`. Input is an array of numbers, normalized to the SVG heigh
 ```css
 ::-webkit-scrollbar       { width: 3px; height: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.25); border-radius: 3px; }
 ```
 
 ---
 
-## Key Design Rules (Do / Don't)
+## Key Design Rules
 
-### ✅ Do
-- Use `var(--token)` for all colors — no raw hex
-- Keep glass/blur effects for AI surfaces and modal overlays only
-- Use JetBrains Mono for all technical values (sizes, speeds, counts, percentages, IDs)
-- Give selected table rows a `2px left inset shadow` in blue
-- Use collection accent colors consistently across sidebar dots, table dots, and folder cards
-- Keep section category labels at `10px / 700 / uppercase / 0.08em tracking / var(--t4)`
-- Animate stats with a slow jitter (1.5–2s interval) so they feel live but not distracting
-- Keep the sidebar on the raw floor — it should feel like it's part of the chrome, not a panel
-- Use `border-radius: 22px` on the main content panel with the full shadow stack
+### Do
+- Use `var(--token)` for all colors — no raw hex ever
+- Use `--font-wordmark` (Cormorant Garamond) only for the "Athena" brand name in the sidebar
+- Use `--font-ai-msg` (Lora) only for AI response bubbles — gives the AI a distinct voice
+- Use `--fm` (JetBrains Mono) for all technical values: sizes, speeds, counts, IDs, type badges
+- Keep blur/glass only for modal overlays — never tables, nav, panels, or sidebars
+- Give selected table rows a `2px left inset shadow` in `var(--blue)`
+- Thread collection accent colors consistently: sidebar dots → folder tree → table rows
+- Keep the sidebar on `var(--floor)` — no elevation, no border-radius, it's part of the chrome
+- Use `border-radius: 22px` on the content panel with the full `var(--panel-shadow)` stack
+- Show empty states with clear next-step guidance when a pane has no content
+- Adapt suggestion pills to the current context (no docs / docs loaded / research mode)
+- Activate the send button (blue) only when input has content
 
-### ❌ Don't
-- Use backdrop-filter blur on tables, file lists, nav items, or the sidebar
-- Use colored backgrounds on the sidebar (it lives on `var(--floor)`, no fill)
-- Use more than one accent color per surface — one blue highlight per view
-- Navigate to a new route for detail views — use slide-in panels or toggleable panes
-- Use `text-white` or `bg-black` directly — use tokens
-- Use Inter for technical values — always JetBrains Mono
-- Add decorative gradients or glows to utility views (library, documents table)
+### Don't
+- Use `backdrop-filter` blur anywhere except modal overlays
+- Use `--font-wordmark` (Cormorant) for anything other than the brand name
+- Use `--font-ai-msg` (Lora) for interface chrome — only AI response text
+- Use `--fb` (Poppins/body font) for AI responses — Lora only
+- Use more than one accent color per surface
+- Navigate to a new route for detail views — use toggleable panels
+- Add decorative gradients or glows to utility views (library, table)
+- Show an active send button when the input is empty
 
 ---
 
@@ -378,8 +519,9 @@ Pure SVG `<polyline>`. Input is an array of numbers, normalized to the SVG heigh
 | Layer | Technology |
 |---|---|
 | Framework | React + TypeScript |
-| Styling | Tailwind CSS + CSS custom properties (HSL tokens) |
-| Icons | Lucide React (`size`, `strokeWidth` props) |
-| Animation | CSS keyframes + Framer Motion (spring physics for panel reveals) |
-| Fonts | Inter (UI) · JetBrains Mono (technical values) |
-| Charts | Pure SVG (arc gauges, sparklines) — no chart library needed |
+| Styling | CSS custom properties (theme tokens) |
+| Icons | Lucide React — thin custom `Ic` wrapper |
+| Animation | CSS keyframes (`fadeUp`, `scaleIn`, `blink`, `shimmerPulse`, `spin`) |
+| Fonts | Cormorant Garamond (wordmark) · Plus Jakarta Sans + Poppins (editorial) · Playfair Display (serif display) · Lora (serif body + AI messages) · JetBrains Mono (technical values) |
+| Data viz | Pure SVG — arc gauges (`stroke-dasharray`) and sparklines (`<polyline>`) |
+| Dropdowns | Absolute position, `mousedown` outside-click handler to close |

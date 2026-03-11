@@ -344,70 +344,160 @@ On × remove:        DELETE /api/chat/{conv_id}/documents/{id} ← already exist
 
 ### Frontend Redesign — Structural Glass
 
-Full design spec in `frontend_design_vision.md`. The current codebase uses a broad glass/blur system
-applied to everything (sidebar, panels, nav, chat). The new direction restricts glass to AI surfaces
-only and uses a structural dark system for all utility views (tables, file lists, nav).
+Full design spec in `frontend_design_vision.md`. Two themes: Slate (dark default) + Light.
+Glass/blur is restricted to modal overlays only — never panels, tables, nav, or sidebar.
 
-**Current gaps vs vision:**
-- Token system is HSL-based (`hsl(var(--background))`) — needs to become raw rgba/hex (`var(--floor)`, `var(--surface)`, `--t1..t4`, etc.)
-- Glass utilities (`glass-subtle`, `glass`, `glass-strong`) applied to sidebar, panels, upload zone — need to be removed from non-AI surfaces
-- Mesh gradient backgrounds incompatible with structural aesthetic — remove
-- Content panel needs `border-radius: 22px` + ring + depth shadow stack
-- Sidebar needs to sit on the floor with no elevation, no blur
-- No table row pattern (`trow`) — file lists need bottom-divider rows + 2px left inset on select
-- No file type badges, no proper status badges
-- Progress bars are 1px, no color thresholds
-- No arc gauge or sparkline components for system panel
-- Upload flow is a flat zone, not the 4-stage modal
-- Message anatomy doesn't match: no asymmetric border-radius, no reasoning step checklist, no quote blocks, no suggestion pills
+---
 
-#### Phase F1: Token System + Layout Shell
-- [ ] Replace HSL token system in `globals.css` with Structural Glass tokens (`--floor`, `--surface`, `--surface-2`, `--raised`, `--raised-h`, `--raised-a`, `--border`, `--border-s`, `--t1`–`--t4`, all accent colors with `-a` and `-br` variants)
-- [ ] Update `tailwind.config.ts` to expose new tokens as Tailwind color aliases
-- [ ] Set `body` background to `var(--floor)`, remove mesh gradient system
-- [ ] Remove light mode variant (design is dark-only)
-- [ ] Update scrollbar to `3px`, thumb `rgba(255,255,255,0.10)`
-- [ ] Update content panel to `border-radius: 22px` with full shadow stack: `0 0 0 1px rgba(255,255,255,0.055), 0 4px 40px rgba(0,0,0,0.55), 0 1px 0 rgba(255,255,255,0.035) inset`
-- [ ] Remove glass/blur from sidebar — set to `background: var(--floor)`, no border-radius, no elevation
+#### Phase F1: Token System + Layout Shell ✓ Done
+- [x] New Structural Glass token system in `globals.css`: `--floor`, `--surface`, `--surface-2`, `--raised*`, `--border`, `--border-s`, `--t1`–`--t4`, full accent palette with `-a`/`-br` variants
+- [x] Slate as dark default in `:root` — `[data-theme="light"]` for light mode
+- [x] `tailwind.config.ts`: `border` → `hsl(var(--tw-border))` to avoid clash with rgba `--border` token. `display` font family → Plus Jakarta Sans.
+- [x] Body background: `var(--floor)`, mesh gradient system removed
+- [x] Scrollbar: `3px`, `rgba(128,128,128,0.25)` thumb
+- [x] Font variables: `--font-wordmark` (Cormorant Garamond), `--fd` (Plus Jakarta Sans), `--fb` (Poppins), `--font-ai-msg` (Lora), `--fm` (JetBrains Mono)
+- [x] CSS utility classes defined: `.panel`, `.nav-item`, `.trow`, `.col-header`, `.pill/.pill.on`, `.btn/.btn-ghost/.btn-primary/.btn-success/.btn-danger`, `.prog-bar/.prog-fill`, `.status-badge/.status-*`, `.toggle`, `.rpanel-tab`, `.input-field`, `.msg-user/.msg-ai`, `.wordmark`, `.glass-overlay/.glass-modal`
+- [x] Animations: `blink`, `shimmerPulse`, `fadeUp` (6px, 0.25s), `scaleIn` (0.97→1, 0.18s), all `cubic-bezier(0.4,0,0.2,1)`
 
-#### Phase F2: Core Component Library
-- [ ] Update `.nav-item` to vision spec: `padding: 7px 9px`, `border-radius: 10px`, `13px/500`, `--t3` default, `--t1` active with `rgba(255,255,255,0.07)` bg
-- [ ] Add `.trow` table row pattern: grid, `10px 20px` padding, bottom-divider border, hover `--raised-h`, selected `--raised-a` + `inset 2px 0 0 var(--blue)`
-- [ ] Add `FileTypeBadge` component: `28×28px`, `border-radius: 7px`, PDF=red tint / MD=blue tint / Web=purple tint, JetBrains Mono 8.5px 700
-- [ ] Add `.pill` / `.pill.on` pattern to globals.css
-- [ ] Update button variants: ghost (`--raised` bg, `--border`, `--t2`), primary (`var(--blue)`), danger (`--red-a` bg, `--red-br` border, `--red` text) — all `border-radius: 9px`, `12.5px/500`
-- [ ] Update progress bars to `3px` height, `border-radius: 2px`, color thresholds: `<65%` blue, `65–85%` amber, `>85%` red
-- [ ] Update status badges to pill-with-dot pattern: Indexed=green, Processing=amber, Error=red
+---
 
-#### Phase F3: Glass Audit
-- [ ] Remove `glass-subtle` / `glass` / `glass-strong` from sidebar, nav, upload zone, document list, all utility surfaces
-- [ ] Keep glass on: chat message bubbles (assistant only), AI response cards, modal overlays
-- [ ] Modal overlays use `backdrop-filter: blur(8px)` on overlay + `border-radius: 20px` on card — the only blur in the app
+#### Phase F2: Glass Audit + Component Rewrites
 
-#### Phase F4: Documents / Library View
-- [ ] Rebuild document list as borderless table using `.trow` pattern — columns: Name+badge, Status, Chunks, Added, Size, Actions
-- [ ] Add two-pane library layout: left pane (folder/collection tree, 220px) + right pane (file table)
-- [ ] Rebuild upload flow as 4-stage modal (Drop → Files+options → Processing → Done) per spec in `frontend_design_vision.md`
-- [ ] Add collection color dots (7×7px squares, `border-radius: 2px`) throughout sidebar + table rows
+The old `.glass`, `.glass-subtle`, `.glass-strong` classes are no longer defined — any component referencing them renders with no background. New replacements:
+- `.glass-overlay` + `.glass-modal` — modal overlays only (the only blur in the app)
+- `bg-[var(--raised)] border border-[var(--border)]` — replaces glass on cards/inputs/panels
+- Nothing — replaces glass on sidebar/nav (floor color, hover only)
+
+**UI primitives — update these first, everything else depends on them:**
+- [ ] **`GlassCard.tsx`** — CRITICAL. Remap variants: default → `bg-[var(--raised)] border border-[var(--border)] rounded-[12px]`, strong → `bg-[var(--surface-2)] border border-[var(--border-s)] rounded-[14px]`. Remove `backdrop-filter` from all variants.
+- [ ] **`GlassButton.tsx`** — replace glass variant references with `.btn-ghost` / `.btn-primary` from globals.css. Remove file entirely if all usages can migrate to the `.btn` classes directly.
+- [ ] **`Modal.tsx`** — replace `.glass-strong` with `.glass-overlay` on backdrop + `.glass-modal` on card. Already close to spec.
+
+**Layout:**
+- [ ] **`AppShell.tsx`** — sidebar div: `background: var(--floor)`, no radius, no shadow, no ceiling-light gradient. Main content: `flex-1 m-[10px] ml-0 bg-[var(--surface)] rounded-[22px] shadow-[var(--panel-shadow)]`.
+- [ ] **`Sidebar.tsx`** — apply `.wordmark` class to "Athena" text. Nav items already use `.nav-item` — verify active state is `bg-[var(--raised-a)] text-[var(--t1)]` not the old foreground/background inversion. Remove any remaining `bg-white/5` or `text-muted-foreground` Tailwind classes.
+- [ ] **`SystemFooter.tsx`** — remove `.glass-subtle`. `background: var(--floor)`, `border-top: 1px solid var(--border)]`. Stat labels → `color: var(--t3)`. Values → `font-family: var(--fm)`. Progress bars → `.prog-bar` / `.prog-fill` classes.
+- [ ] **`MobileHeader.tsx`** — remove `.glass-subtle`. `background: var(--surface)`, `border-bottom: 1px solid var(--border)`.
+- [ ] **`BottomNav.tsx`** — remove `.glass-strong`. `background: var(--surface)`, `border-top: 1px solid var(--border)`.
+
+**Chat:**
+- [ ] **`ChatWindow.tsx`** — remove `.glass-strong` from wrapper. Panel already handled by AppShell `.panel` class — ChatWindow itself should be `h-full flex flex-col` with no background of its own.
+- [ ] **`MessageList.tsx`** — remove `.glass-subtle` from streaming bubble. Streaming state uses `.msg-ai` class.
+- [ ] **`MessageInput.tsx`** — remove `.glass` from input container. Replace with `bg-[var(--raised)] border border-[var(--border)] rounded-[9px]`. Search-all toggle: replace `bg-white/10` with `bg-[var(--raised-h)]`.
+- [ ] **`Message.tsx`** — AI bubble: remove `.glass-subtle`, apply `.msg-ai`. User bubble: apply `.msg-user`. Both defined in globals.css with correct asymmetric border-radius.
+- [ ] **`DocumentBar.tsx`** — replace all `white/X` opacity Tailwind classes (`bg-white/5`, `text-white/30`, etc.) with proper `--t*` tokens. Use `var(--t2)`, `var(--t3)`, `var(--raised)`, `var(--border)`.
+- [ ] **`DevModeOverlay.tsx`** — remove `.glass-subtle`. Replace with `bg-[var(--surface-2)] border border-[var(--border)]`.
+
+**Documents:**
+- [ ] **`UploadZone.tsx`** — remove `.glass`. Drop zone: `bg-[var(--raised)] border border-dashed border-[var(--border-s)]`. Dragover: `border-[var(--blue-br)] bg-[var(--blue-b)]`.
+- [ ] **`DocumentList.tsx`** — remove `.glass` from document item cards. Migrate to `.trow` row pattern. Status badges → `.status-badge .status-complete/.status-processing/.status-error`.
+
+**Other:**
+- [ ] **`SettingsPanel.tsx`** — remove `.glass-subtle` from color mode buttons. Use `.btn-ghost` or `bg-[var(--raised)]`.
+- [ ] **`LoginPage.tsx`** — remove `GlassCard variant="strong"`. Replace with `bg-[var(--surface-2)] border border-[var(--border-s)] rounded-[20px] shadow-[var(--panel-shadow)]`.
+
+---
+
+#### Phase F3: Layout Shell Polish
+
+- [ ] **`AppShell.tsx`** — sidebar width transition: `width 0.22s cubic-bezier(0.4,0,0.2,1)`, `224px ↔ 56px`. Collapsed: nav labels `opacity: 0 width: 0 overflow: hidden`, icons stay centered.
+- [ ] **`Sidebar.tsx`** — section category labels (`LIBRARY`, `COLLECTIONS`) at `10px/700/uppercase/0.08em letter-spacing/var(--t4)`. Dividers: `1px solid var(--border)`. Collections list with color dots (stub entries until F4 wires real data).
+- [ ] **`SystemFooter.tsx`** — finalize stat layout: NVMe / HDD / CPU / GPU. Each stat: label `var(--t4)` + value `var(--fm) var(--t2)` + `.prog-bar`. Color threshold on fill: `<65%` blue, `65–85%` amber, `>85%` red.
+
+---
+
+#### Phase F4: Library View + Collections
+
+Full spec in `frontend_design_vision.md` → Library View section.
+
+**Backend — Collections API**
+- [ ] Add `collections` table to schema: `(id SERIAL PK, collection_id VARCHAR UNIQUE, user_id INT FK, name VARCHAR, color VARCHAR, created_at TIMESTAMP)`. Add migration `004_collections.sql`.
+- [ ] Add `collection_id VARCHAR` nullable FK column to `documents` table. Migration `004`.
+- [ ] `GET /api/collections` — list all collections for current user, include `document_count` via COUNT join
+- [ ] `POST /api/collections` — create collection `{ name, color }`. Auto-generate `collection_id`. Return full object.
+- [ ] `PUT /api/collections/{collection_id}` — rename or recolor
+- [ ] `DELETE /api/collections/{collection_id}` — delete collection, set `collection_id = NULL` on all its documents (don't delete docs)
+- [ ] `POST /api/collections/{collection_id}/documents` — assign documents `{ document_ids: list[str] }` to collection. Batch update.
+- [ ] `DELETE /api/collections/{collection_id}/documents/{document_id}` — remove single doc from collection (sets `collection_id = NULL`)
+- [ ] Update `GET /api/documents` — add optional `collection_id` query param to filter. Include `collection_id` + `collection_name` + `collection_color` in each document row response.
+- [ ] Update `DocumentOut` model in `models/documents.py` — add `collection_id`, `collection_name`, `collection_color` fields (all nullable)
+
+**Frontend — Layout shell**
+- [ ] Rebuild the documents tab as a two-pane layout inside `.panel`:
+  - Left pane: fixed `210px`, `background: var(--surface-2)`, right border `1px solid var(--border)`, full panel height
+  - Right pane: `flex: 1`, holds header + filter tabs + file table
+- [ ] Left pane header: "Library" label (`13px/600/--fd`) + `+` button to create collection (opens inline name+color picker, not a modal)
+
+**Frontend — Collection sidebar (left pane)**
+- [ ] Fetch `GET /api/collections` on mount, store in local state alongside a synthetic "All Files" entry
+- [ ] Render each collection as a nav row: `7×7px` square dot (`border-radius: 2px`, collection color) + collection name + document count badge
+- [ ] "All Files" row is always first, selected by default
+- [ ] Active collection row: `background: var(--raised-a)`, `color: var(--t1)`. Inactive: `color: var(--t3)`, hover `var(--raised-h)`
+- [ ] Clicking a collection filters the file table to that collection only (client-side filter if all docs loaded, or pass `collection_id` to API if paginated)
+- [ ] Inline create: clicking `+` appends an editable row at the bottom of the list with a color swatch strip (6 preset colors: blue, green, amber, red, purple, slate) and a name input. Enter to confirm, Escape to cancel. POST on confirm.
+- [ ] Right-click or `•••` on a collection row: rename / delete options. Delete shows inline "Remove collection? Documents will be kept." confirm.
+
+**Frontend — File table (right pane)**
+- [ ] Header row: page title "Library" (`15px/--fd/var(--wd)`) + subtitle showing count, search input (right side), "Import" button → upload modal
+- [ ] Filter tab strip below header: All Files / PDF / Markdown / Web. Tabs use `.rpanel-tab` pattern. Active tab filters table.
+- [ ] Column header row using `.col-header`: Name · Collection · Added · Size · (blank for actions)
+- [ ] Rebuild each document row as `.trow` with `grid-template-columns: 1fr 140px 100px 70px 48px`:
+  - **Name cell**: `FileTypeBadge` (28×28px, type-colored, mono label) + filename (`13px/500/--t1`) + processing status badge if not complete
+  - **Collection cell**: colored `7×7px` dot + collection name (`12px/--t2`), or "—" (`--t4`) if unassigned
+  - **Added cell**: relative date (`12px/--t3`, e.g. "3 days ago")
+  - **Size cell**: file size in mono (`12px/--fm/--t3`)
+  - **Actions cell**: `•••` icon button → dropdown: "Move to collection", "Chat", "Delete"
+- [ ] Selected row: `background: var(--raised-a)` + `box-shadow: inset 2px 0 0 var(--blue)`
+- [ ] Empty state (no docs): centered upload icon + "No documents yet" + "Import your first document" primary button
+- [ ] Empty state (collection has no docs): "No documents in this collection" + "Import" button
+
+**Frontend — FileTypeBadge component**
+- [ ] Create `components/library/FileTypeBadge.tsx`: `28×28px`, `border-radius: 7px`, centered label
+  - PDF: `bg: var(--red-a)`, `border: 1px solid var(--red-br)`, `color: var(--red)`, label "PDF"
+  - MD / TXT: `bg: var(--blue-a)`, `border: 1px solid var(--blue-br)`, `color: var(--blue)`, label "MD" / "TXT"
+  - Web: `bg: var(--purple-a)`, `border: 1px solid var(--purple-br)`, `color: var(--purple)`, label "WEB"
+  - Video: `bg: var(--amber-a)`, `border: 1px solid var(--amber-br)`, `color: var(--amber)`, label "VID"
+  - Font: `var(--fm)`, `8.5px`, `700`
+
+**Frontend — Upload modal (4-stage)**
+- [ ] Replace current `UploadZone` flat zone with a proper modal triggered by the "Import" button
+- [ ] Modal overlay: `background: rgba(7,7,9,0.72)`, `backdrop-filter: blur(8px)`. Modal card: `background: var(--surface-2)`, `border-radius: 20px`, `box-shadow: var(--panel-shadow)`, `width: 520px`
+- [ ] Modal header: "Import Documents" title + 4 small progress bars (3px height, fills blue as stages advance) + × close button
+- [ ] **Stage 1 — Drop**: dashed dropzone (`border: 1.5px dashed var(--border-s)`, highlights `var(--blue-br)` on dragover) + "or paste a URL" input below + format pills (PDF / MD / TXT / DOCX / Web / Video)
+- [ ] **Stage 2 — Configure**: file list with `FileTypeBadge` + filename + × remove per file. Below: "Save to collection" picker (inline color-dot buttons, one per collection + "No collection"). Three toggle rows using `.toggle`: "Sentence-aware chunking" (on by default), "Auto-tag", "Generate summary". "Start Import" primary button.
+- [ ] **Stage 3 — Processing**: per-file row: `FileTypeBadge` + filename + animated progress bar + phase label (`Parsing → Chunking → Embedding`) + mono percentage. Spinner → green check on complete. No close/back while processing.
+- [ ] **Stage 4 — Done**: green check circle (32px, `var(--green)`). "Import complete" heading. File list with chunk counts in mono. "View in Library" primary button closes modal + scrolls to new docs. "Import more" ghost button resets to Stage 1.
+- [ ] Wire Stage 3 to existing `GET /api/documents/progress/active` polling (same pattern as current `DocumentList`)
 
 #### Phase F5: Chat View Update
-- [ ] Update message anatomy: assistant bubble `border-radius: 4px 13px 13px 13px`, user bubble `13px 13px 4px 13px`, blue-tinted user bg
-- [ ] Add suggestion pills above `MessageInput`
-- [ ] Add model status indicator in chat header (green dot + model name)
-- [ ] Add reasoning step checklist pattern (for future router/research integration)
-- [ ] Add quote block style to message content (blue left border, italic, `--t2`)
+
+Message anatomy classes are now defined in globals.css (`.msg-user`, `.msg-ai`) — components just need to apply them.
+
+- [ ] **`Message.tsx`** — wire `.msg-user` and `.msg-ai` classes (covered in F2 above). Verify asymmetric border-radius: AI `4px 13px 13px 13px`, user `13px 13px 4px 13px`.
+- [ ] **Chat header** — add model status indicator: `6px` green pulse dot + model name in `var(--fm)` + tier badge. Sits in the panel header row alongside the "Chat" title.
+- [ ] **Suggestion pills** — 3–4 `.pill` buttons above `MessageInput`, adapt to context: no docs → generic ("Summarize my docs", "Quiz me on…"), docs in scope → "Summarize all", "Find contradictions", "Key takeaways", research mode → "Key findings", "Compare sources". Click pre-fills textarea.
+- [ ] **Quote block style** — add to `message-content` in globals.css: `blockquote { border-left: 2px solid var(--blue); padding-left: 12px; color: var(--t2); font-style: italic; margin: 0.5rem 0; }`
+- [ ] **`ScopeBar.tsx`** — verify pills use `.pill` / `.pill.on` classes and collection color dots are threaded through from document metadata.
+
+---
 
 #### Phase F6: System Panel
-- [ ] Build `ArcGauge` SVG component: half-circle, two concentric paths (track + fill), `stroke-dasharray` driven by percentage, color thresholds
-- [ ] Build `Sparkline` SVG component: `<polyline>` with normalized y-values, used for GPU + CPU history
-- [ ] Add context window 4-part breakdown to system panel: System / Docs / History / Buffer as mini stat cards
-- [ ] Add RAM stacked breakdown: Ollama / Qdrant / PG / Other
 
-#### Phase F7: Animation Polish
-- [ ] Update `fadeUp` keyframe: `translateY 6px→0` (currently 12px), `0.25s` (currently 0.3s)
-- [ ] Replace `bounce-dot` typing indicator with `blink` (`opacity 0.2→1→0.2, 1.2s, staggered`) per spec
-- [ ] Add list entry stagger: `animationDelay: index * 0.03s` on document rows and conversation list items
-- [ ] Ensure all transitions use `cubic-bezier(0.4, 0, 0.2, 1)` — audit for any `linear` or `ease` transitions on interactive elements
+- [ ] **`ArcGauge` component** — `components/system/ArcGauge.tsx`. Pure SVG half-circle. Two `<path>` elements: track `rgba(128,128,128,0.12)`, fill `stroke-dasharray` driven by `(percent/100) * circumference`. Color: `<60%` `var(--blue)`, `60–80%` `var(--amber)`, `>80%` `var(--red)`. Props: `value`, `max`, `size`.
+- [ ] **`Sparkline` component** — `components/system/Sparkline.tsx`. Pure SVG `<polyline>`. Accept `values: number[]`, normalize to SVG height, `1.5px` colored stroke, no axes, no fill. Props: `values`, `color`, `width`, `height`.
+- [ ] **`SystemPanel.tsx`** — rebuild using new components. Sections: Active Model (name `var(--fm)` + Tok/s + TTFT + `<Sparkline>`) · GPU (`<ArcGauge>` + VRAM `.prog-bar` + temp `.prog-bar`) · System RAM (total mono + bar + Ollama/Qdrant/PG breakdown) · Context Window (token count + bar + 4 mini stat cards: System / Docs / History / Buffer) · CPU (percentage + `<Sparkline>`).
+- [ ] **Mini stat card** — `48px` wide, `background: var(--raised)`, `border: 1px solid var(--border)`, `border-radius: 6px`. Label `10px/--t4/uppercase`, value `12px/--fm/--t1`.
+- [ ] **Backend: `GET /api/system/resources`** — not yet implemented. Returns live CPU %, GPU VRAM used/total/temp, RAM used/total, per-process RAM (Ollama, Qdrant, PG). Frontend polls every 10s.
+
+---
+
+#### Phase F7: Animation Polish ✓ Mostly Done (keyframes updated in F1)
+- [x] `fadeUp`: `translateY 6px→0`, `0.25s cubic-bezier(0.4,0,0.2,1)`
+- [x] `blink` typing indicator: `opacity 0.2→1→0.2`, `1.2s`, staggered delays (replaces old `bounce-dot`)
+- [x] `shimmerPulse`: `opacity 0.5→1→0.5`, `2s` — used on running/scraping status dots
+- [x] `scaleIn`: `scale 0.97→1`, `0.18s` — modal open, dropdown appear
+- [ ] **List entry stagger** — apply `animationDelay: index * 0.03s` on document rows, conversation list items, and collection nav rows. Add `.animate-fade-up` class to each row on mount/filter-change.
+- [ ] **Audit `linear` / `ease` transitions** — grep components for `transition.*linear` or `duration` without explicit easing. Replace with `cubic-bezier(0.4,0,0.2,1)` equivalents. Check: `MessageInput` send button, `ScopeBar` pills, `DocumentBar` shutter.
 
 ---
 
@@ -437,17 +527,12 @@ only and uses a structural dark system for all utility views (tables, file lists
 
 ### Documents Tab
 
-- [ ] **URL ingestion UI** — `UploadZone.tsx` only handles file upload. Add a URL input field
-  (tab or second section) that POSTs to `POST /api/documents/url`. Show the submitted URL as a
-  processing item with the same progress tracking as file uploads. **Blocked on Crawl4AI backend.**
-- [ ] **Video file support in UploadZone** — `accept=".pdf,.txt,.md,.docx"` excludes video.
-  Add video MIME types once Faster-Whisper pipeline is wired backend-side.
-- [ ] **Delete confirmation** — delete in `DocumentList.tsx:133` fires immediately on click with
-  no confirmation. Add inline "Are you sure?" state per item (show confirm/cancel on first click,
-  execute on second). Hold-to-confirm is an alternative.
-- [ ] **Search filter edge cases** — `DocumentList.tsx:337` uses `indexOf` and only filters
-  `uploadedItems`, not `processingItems`. Fix: also filter processing items; handle empty query
-  (show all) and special regex chars gracefully.
+*Library view rebuild and collections are tracked in Phase F4 above. Items below are functional bugs/gaps independent of the redesign.*
+
+- [ ] **URL ingestion UI** — Stage 1 of the F4 upload modal includes a URL input. This is blocked on Crawl4AI backend completing real ingestion (see Web Scraping section).
+- [ ] **Video file support** — `accept=".pdf,.txt,.md,.docx"` excludes video. Add video MIME types to the F4 upload modal once Faster-Whisper pipeline is wired backend-side.
+- [ ] **Delete confirmation** — delete fires immediately with no confirmation. Add inline confirm state per row in the new `.trow` layout: first click shows "Delete?" confirm + cancel, second click executes. Wire to `DELETE /api/documents/{id}`.
+- [ ] **Search debounce edge cases** — current search uses `indexOf` and only filters uploaded items, not processing items. Fix in F4 rebuild: filter both lists, handle empty query (show all), escape regex special chars.
 
 ### Web Scraping Integration
 

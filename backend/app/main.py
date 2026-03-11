@@ -9,7 +9,7 @@ from app.config import get_settings
 from app.db import postgres
 from app.db import qdrant
 from app.core.security import hash_password
-from app.api import auth, chat, documents, research, quizzes, graph, system
+from app.api import auth, chat, documents, research, quizzes, graph, system, collections
 
 
 async def seed_admin_user() -> None:
@@ -103,6 +103,7 @@ app.include_router(research.router)
 app.include_router(quizzes.router)
 app.include_router(graph.router)
 app.include_router(system.router)
+app.include_router(collections.router)
 
 
 @app.get("/")

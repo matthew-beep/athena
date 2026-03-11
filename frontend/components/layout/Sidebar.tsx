@@ -244,7 +244,7 @@ export function Sidebar() {
       {/* Desktop / Tablet sidebar */}
       <div
         className={cn(
-          'hidden md:flex h-full flex-col glass-strong border-r border-border/50 flex-shrink-0 transition-all duration-200',
+          'hidden md:flex h-full flex-col flex-shrink-0 transition-all duration-200',
           sidebarCollapsed ? 'w-14' : 'w-60'
         )}
       >
@@ -260,7 +260,7 @@ export function Sidebar() {
             onClick={() => setSidebarOpen(false)}
           />
           {/* Drawer */}
-          <div className="fixed inset-y-0 left-0 z-50 w-72 md:hidden glass-strong border-r border-border/50 animate-shutter">
+          <div className="fixed inset-y-0 left-0 z-50 w-72 md:hidden animate-shutter">
             <SidebarContent
               collapsed={false}
               isMobileDrawer

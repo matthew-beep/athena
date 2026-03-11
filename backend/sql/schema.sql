@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS documents (
     processing_status VARCHAR(50) DEFAULT 'pending',
     knowledge_tier VARCHAR(20) DEFAULT 'persistent',
     error_message TEXT,
+    collection_id VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
     metadata JSONB
 );
@@ -118,3 +119,19 @@ CREATE TABLE IF NOT EXISTS bm25_indexes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_bm25_document ON bm25_indexes(document_id);
+
+
+-- Collections table: user_id lives directly here, no user-collection junction needed
+CREATE TABLE IF NOT EXISTS collections (
+    id SERIAL PRIMARY KEY,
+    collection_id VARCHAR(255) UNIQUE NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_collections_user ON collections(user_id);
+
+ALTER TABLE documents
+    ADD CONSTRAINT fk_documents_collection
+    FOREIGN KEY (collection_id) REFERENCES collections(collection_id) ON DELETE SET NULL;
