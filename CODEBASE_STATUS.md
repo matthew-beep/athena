@@ -1,5 +1,5 @@
 # Athena — Codebase Status
-## 2026-03-09
+## 2026-03-11
 
 ---
 
@@ -7,180 +7,81 @@
 
 | Metric | Value |
 |---|---|
-| Backend Python LOC | ~2,250 |
-| Frontend TypeScript/TSX LOC | ~3,400 |
-| Total Code LOC | ~5,650 |
-| Backend Python files | 24 |
-| Frontend TS/TSX files | 50 |
-| API endpoints | 27 |
-| Database tables | 7 |
-| SQL migrations | 4 |
+| Backend Python LOC | ~2,500 |
+| Frontend TypeScript/TSX LOC | ~3,800 |
+| Total Code LOC | ~6,300 |
+| Backend Python files | 26 |
+| Frontend TS/TSX files | 57 |
+| API endpoints | 30 |
+| Database tables | 8 |
 
 ### Backend File Breakdown
 
 | File | Lines | Notes |
 |---|---|---|
-| `api/chat.py` | 390 | SSE streaming, conv management, doc attach/detach/batch |
-| `api/documents.py` | 296 | Upload, ingestion, progress, delete |
-| `api/system.py` | 85 | Health, resources, models |
-| `api/auth.py` | 29 | Login, /me |
-| `api/research.py` | 20 | Stub |
-| `api/quizzes.py` | 20 | Stub |
-| `api/graph.py` | 20 | Stub |
-| `core/context.py` | 336 | Token budget, summarization, history |
-| `core/rag.py` | 272 | BM25 + vector hybrid search, RRF |
-| `core/ingestion.py` | 209 | Chunking, embedding, Qdrant upsert |
-| `core/security.py` | 65 | JWT auth |
-| `core/bm25.py` | 55 | Per-document BM25 index cache |
-| `db/qdrant.py` | 95 | httpx Qdrant REST client |
-| `db/postgres.py` | 60 | asyncpg pool + query helpers |
-| `main.py` | 94 | FastAPI app, lifespan, admin seed |
-| `config.py` | 58 | Pydantic settings |
-| `models/chat.py` | 50 | ChatRequest (+ document_ids), BatchAttachRequest, ConversationOut, MessageOut (+ rag_sources) |
-| `models/auth.py` | 18 | Token, UserOut |
-| `models/system.py` | 21 | ResourceStats, HealthResponse |
+| `api/chat.py` | ~390 | SSE streaming, conv management, doc attach/detach/batch |
+| `api/documents.py` | ~300 | Upload, ingestion, progress, delete, conversations |
+| `api/collections.py` | ~30 | Stub — get/create only, no real logic yet |
+| `api/system.py` | ~85 | Health, resources, models |
+| `api/auth.py` | ~29 | Login, /me |
+| `api/research.py` | ~20 | Stub |
+| `api/quizzes.py` | ~20 | Stub |
+| `api/graph.py` | ~20 | Stub |
+| `core/context.py` | ~336 | Token budget, summarization, history |
+| `core/rag.py` | ~272 | BM25 + vector hybrid search, RRF |
+| `core/ingestion.py` | ~209 | Chunking, embedding, Qdrant upsert |
+| `core/security.py` | ~65 | JWT auth |
+| `core/bm25.py` | ~55 | Per-document BM25 index cache |
+| `db/qdrant.py` | ~95 | httpx Qdrant REST client |
+| `db/postgres.py` | ~60 | asyncpg pool + query helpers |
+| `main.py` | ~94 | FastAPI app, lifespan, admin seed |
+| `config.py` | ~58 | Pydantic settings |
+| `models/chat.py` | ~50 | ChatRequest, ConversationOut, MessageOut |
+| `models/auth.py` | ~18 | Token, UserOut |
+| `models/system.py` | ~21 | ResourceStats, HealthResponse |
 
 ---
 
-## What Was Investigated This Session (2026-03-09)
+## What Was Worked On This Session (2026-03-11)
+
+### Collections Backend
+- **`backend/sql/schema.sql`** — added `collections` table (`collection_id`, `user_id`, `name`, `color`, `created_at`). Added `collection_id VARCHAR(255)` nullable column to `documents` table. FK constraint added after both tables exist to avoid ordering issues. Index on `collections(user_id)`.
+- **`api/collections.py`** (new file) — minimal skeleton: `GET /api/collections` (returns list for current user), `POST /api/collections/create-collection` (stub). Moved out of `documents.py` to avoid route collision with `GET /api/documents/{document_id}`.
+- **`main.py`** — collections router imported and registered at `/api/collections`.
+- **Root cause of 401**: `get_collections` was missing `Depends(get_current_user)` parameter — `current_user` was referenced but undefined. Fixed.
+- **Root cause of 500**: `collections` table didn't exist because the `ALTER TABLE IF NOT EXISTS` syntax is invalid in PostgreSQL. Fixed by placing `collection_id` column inline in the `CREATE TABLE documents` block and using `ALTER TABLE documents ADD CONSTRAINT` (after collections table is defined) for the FK.
+
+### Frontend Design System — Structural Glass
+- **`frontend/app/globals.css`** — complete rewrite. Replaced HSL token system with Structural Glass design tokens:
+  - Slate theme as dark default in `:root` — `[data-theme="light"]` for light mode
+  - Floor/surface/elevation tokens: `--floor`, `--surface`, `--surface-2`, `--raised`, `--raised-h`, `--raised-a`
+  - Border tokens: `--border`, `--border-s`
+  - Text hierarchy: `--t1` through `--t4`
+  - Full accent palette with alpha variants: `--blue`, `--blue-a`, `--blue-br`, etc.
+  - Document reading surface: `--doc-bg`, `--doc-t`, `--doc-t2`, `--doc-border`, `--doc-label`
+  - Font variables: `--font-wordmark` (Cormorant Garamond), `--fd` (Plus Jakarta Sans), `--fb` (Poppins), `--font-ai-msg` (Lora), `--fm` (JetBrains Mono)
+  - CSS utility classes: `.panel`, `.nav-item`, `.trow`, `.col-header`, `.pill/.pill.on`, `.btn` variants, `.prog-bar/.prog-fill`, `.status-badge` variants, `.toggle`, `.rpanel-tab`, `.input-field`, `.msg-user/.msg-ai`, `.wordmark`, `.glass-overlay/.glass-modal`
+  - Animations: `blink`, `shimmerPulse`, `fadeUp` (6px, 0.25s), `scaleIn` (0.97→1, 0.18s), all `cubic-bezier(0.4,0,0.2,1)`
+  - Added custom checkbox `.doc-sidebar-checkbox` and `.tabs/.tab` pill tab pattern
+- **`frontend/tailwind.config.ts`** — `border` color updated to `hsl(var(--tw-border))` to avoid naming clash with new rgba `--border` token. `display` font updated to Plus Jakarta Sans.
+- **`frontend_design_vision.md`** (new file) — complete UI/design handoff document. Covers Structural Glass aesthetic, all theme tokens, typography system, every component pattern, all views (Library, Research, Chat), motion/animation spec, and do/don't rules.
+
+### Documentation
+- **`TODO.md`** — major update: Phase F1 marked complete, F2 rewritten as per-component action list with exact replacement instructions for dead glass classes, F3 renamed to Layout Shell Polish, F4 expanded with full collections + library view breakdown, F5–F7 updated with accurate current state. Documents Tab section deduplicated against F4.
+
+---
+
+## What Was Worked On This Session (2026-03-09)
 
 ### URL Ingestion — Identified as Non-Functional
-- **`api/documents.py`** — `POST /api/documents/url` calls Crawl4AI and returns the raw response payload. No document record is created, no chunking/embedding occurs, nothing enters Qdrant. The endpoint is a scraper preview, not ingestion.
-- **`components/documents/UploadZone.tsx`** — `onUrlIngestion` treats the response as a Crawl4AI payload for markdown preview display. It never calls `onUploadStart`/`onUploadComplete`, so URL "ingestions" never appear in the document list.
-- **Crawl4AI response shape unverified** — the `markdown` field may be a string or an object (`{ raw_markdown, markdown_with_citations }`). The backend only handles the string case. Need to validate against real URLs before writing extraction logic.
-- **Decision**: validate response shape first (debug endpoint or logging), then rewrite the ingestion endpoint properly.
+- **`api/documents.py`** — `POST /api/documents/url` calls Crawl4AI and returns the raw response payload. No document record is created, no chunking/embedding occurs, nothing enters Qdrant.
+- **`components/documents/UploadZone.tsx`** — treats response as markdown preview only.
+- **Crawl4AI response shape unverified** — `markdown` field may be string or object. Needs validation before proper ingestion can be written.
 
 ### Context Window Display — Three Bugs Identified
-- **`chat.store.ts:77`** — `contextBudget` hardcoded to `4096`. Backend sends `budget: 8192` in `context_debug` SSE event. `useSSEChat` reads `event.tokens` but never `event.budget`. Store has no `setContextBudget` action.
-- **`hooks/useSSEChat.ts:133-135`** — `context_debug` tokens stored in `pendingContextTokens` and only committed to store via `setContextTokens` when `done` fires. Context fill only updates after full generation completes, not immediately when the request starts.
-- **`conversations.token_count`** — maintained in DB by `save_message()` but never returned by `GET /api/chat/conversations`. `ConversationOut` model excludes it. Context fill cannot be shown before the first message is sent in a session, or when switching conversations, because the frontend has no access to the stored count.
-- **`DevModeOverlay.tsx:80`** — `total sent` row has hardcoded `'— / 4096'` fallback string.
-- **Plan**: expose `token_count` in `ConversationOut` → pre-populate store on conversation load; apply `context_debug` immediately (not at done); add `setContextBudget` + read `event.budget`; fix fallback string.
-
----
-
-## What Was Worked On This Session (2026-03-04)
-
-### Sentence-Aware Chunking
-- **`core/ingestion.py`** — replaced naive 512-token sliding window with sentence-boundary-aware chunker.
-  Uses `nltk.sent_tokenize`, 500-token target chunks, ~50-token sentence-level overlap. PDF hyphenated
-  line breaks (`word-\nword`) normalized before tokenizing. Oversized single sentences emitted as their
-  own chunk (no mid-sentence splits ever). Token counts pre-computed once per sentence via `tiktoken`.
-- **`requirements.txt`** — added `nltk>=3.9`.
-- **Impact**: all RAG results will now be coherent, readable excerpts. Previously could split mid-word.
-  Existing documents should be re-ingested to benefit.
-
-### Search-All Globe Toggle
-- **`components/chat/MessageInput.tsx`** — added `Globe` icon button left of the textarea. Reads
-  `conversationSearchAll[activeConversationId]` for existing conversations, `pendingSearchAll` for
-  new ones. Toggle calls `setSearchAll` or `setPendingSearchAll` accordingly.
-
-### Scope Bar
-- **`components/chat/ScopeBar.tsx`** (new file) — compact bar between `MessageList` and `MessageInput`.
-  Three states: hidden (no docs, search_all off), "Searching all documents" pill with × (search_all on),
-  document chips with × to detach (docs attached). Handles pending state (store) and existing
-  conversation state (API) transparently.
-- **`components/chat/ChatWindow.tsx`** — `refetchDocs` callback (wrapped in `useCallback`) now runs on
-  every `activeConversationId` change, not just on `DocumentBar` mount. This means `ScopeBar` has data
-  even when the right panel is closed. `<ScopeBar />` inserted between `<MessageList />` and
-  `<MessageInput />`. `CommandPalette` receives `refetchDocs` directly instead of via a ref antipattern.
-
-### ConversationDocuments Store
-- **`stores/chat.store.ts`** — added `conversationDocuments: Record<string, ConversationDocument[]>`
-  with three actions: `setConversationDocuments`, `addConversationDocument`, `removeConversationDocument`.
-- **`types/index.ts`** — added `ConversationDocument` interface (`document_id`, `filename`, `file_type?`,
-  `word_count?`, `added_at?`).
-
-### Pin / Attach Button on Source Cards
-- **`components/chat/Message.tsx`** — `SourcesPanel` now reads `activeConversationId`,
-  `conversationDocuments`, `addConversationDocument`, `setSearchAll` from store via `useShallow`.
-  Each source card has a `Pin` icon button: POSTs to batch attach endpoint, updates store,
-  disables search_all. Disabled/dimmed when document already in scope.
-
-### Clear Pending Docs on New Chat
-- **`components/layout/Sidebar.tsx`** — `handleNewChat` now calls `setPendingDocuments([])` so stale
-  staged documents don't carry over when starting a fresh conversation.
-
-### Documents → Conversations Endpoint
-- **`api/documents.py`** — added `GET /api/documents/{document_id}/conversations`. Returns the 3 most
-  recent conversations that have this document attached (via `conversation_documents` join). Used by
-  `DocumentList` chat modal to skip the "fetch all conversations" approach.
-
-### Docker Compose Fixes
-- **`docker-compose.yml`** — removed deprecated `version: "3.9"`, changed GPU `count: 1` → `count: all`,
-  removed stray `qdrant: service_started` from `init-ollama` depends_on.
-- **`docker-compose.mac.yml`** (new) — standalone CPU-only compose for MacBook. No `deploy` block on
-  ollama. Default model `qwen2.5:7b`. Usage instructions in file header.
-- Deleted `docker-compose.gpu.yml` and `docker-compose.override.yml.example` (redundant/conflicting).
-
----
-
-## What Was Worked On This Session (2026-03-02)
-
-### RAG Sources Persistence
-- **`core/context.py`** — `save_message()` now accepts `rag_sources: list | None` and writes it to `messages.rag_sources` (JSONB). Import `json` added.
-- **`api/chat.py`** — passes `rag_sources` list to `save_message()` for assistant messages.
-- **`models/chat.py`** — `MessageOut` gains `rag_sources: list[Any] | None` with a `model_validator` that handles asyncpg returning JSONB as either a Python object or raw string.
-- **`api/chat.py`** — `get_messages` SELECT now includes `rag_sources` column.
-- **`sql/migrations/003_messages_rag_sources.sql`** — `ALTER TABLE messages ADD COLUMN IF NOT EXISTS rag_sources JSONB`.
-- **`sql/schema.sql`** — `rag_sources JSONB` added to `messages` table definition.
-- **Result**: RAG source citations now persist across page reloads and conversation switches.
-
-### Document–Conversation Scoping — Full Rework
-#### Batch attach endpoint
-- **`models/chat.py`** — added `BatchAttachRequest(document_ids: list[str])`.
-- **`api/chat.py`** — added `POST /{conversation_id}/documents` batch attach endpoint (defined before the single-doc route to avoid path conflicts). Replaces serial for-loop with one DB call.
-
-#### First-message document scoping
-- **`models/chat.py`** — re-added `document_ids: list[str] = []` to `ChatRequest`.
-- **`api/chat.py`** — before `stream_response()` starts, calls `attach_documents(conversation_id, body.document_ids)` if any provided. This means the first message both attaches the docs AND searches them in the same request — the backend's `get_conversation_document_ids()` sees them immediately.
-
-#### PendingDocument store state
-- **`stores/chat.store.ts`** — replaced `pendingDocumentIds: string[]` with `pendingDocuments: PendingDocument[]` (full objects: `document_id`, `filename`, `file_type`). This lets the DocumentBar display them before any conversation exists.
-- **`hooks/useSSEChat.ts`** — reads `pendingDocuments` from store, sends `document_ids` in the request body for new conversations, clears `pendingDocuments` on `done`.
-- **`components/chat/CommandPalette.tsx`** — when no active conversation, builds full `PendingDocument` objects from `allDocs` and calls `setPendingDocuments`. Uses batch endpoint when conversation exists. Fixed `useShallow` selector and `useCallback` deps.
-- **`components/documents/DocumentList.tsx`** — all three "Chat" click paths fixed:
-  - No existing conversations → `setPendingDocuments([{ doc }])` then navigate
-  - "Start new chat" from modal → same
-  - Pick existing conversation → immediately calls batch attach API
-
-#### DocumentBar pending state display
-- **`components/chat/DocumentBar.tsx`** — reads `pendingDocuments` + `setPendingDocuments` from store. `displayDocuments` computed: when `activeConversationId` is null, uses `pendingDocuments`; otherwise uses DB-fetched `documents`. `handleRemoveDoc` removes from pending list (no API call) when no conversation exists yet.
-
-#### Auto-open context panel
-- **`components/chat/ChatWindow.tsx`** — `useEffect` watches `pendingDocuments.length`: when > 0 and no active conversation, automatically opens the context panel and collapses the sidebar so the user sees staged documents immediately.
-
-### Model Update: qwen3.5:9b
-- **`backend/app/config.py`** — default `ollama_model` → `qwen3.5:9b`
-- **`init-ollama.sh`** — default `MODEL` → `qwen3.5:9b`
-- **`.env.example`** — both `OLLAMA_MODEL` and `NEXT_PUBLIC_OLLAMA_MODEL` → `qwen3.5:9b`
-- **`docker-compose.yml`** — `OLLAMA_MODEL` passed explicitly to `init-ollama` and `backend` services
-- **`stores/chat.store.ts`** — fallback model name → `qwen3.5:9b`
-
----
-
-## What Was Worked On This Session (2026-02-26)
-
-### Backend Fixes Applied
-
-#### `core/rag.py`
-- **Removed dead branch** in `find_referenced_document` — the `if document_ids is not None and len(document_ids) == 0: return None` guard was unreachable because the outer `if document_ids:` already handled the empty case. Removed.
-- **Fixed RRF attribute access bug** — `hit.payload["chunk_id"]` crashed because Qdrant returns plain JSON dicts, not objects. Fixed to `hit.get("payload", {}).get("chunk_id")` with a `None` guard.
-- **Added `user_id` guard to chunk text fetch** — the Postgres query fetching chunk text from `document_chunks` had no ownership check. Added `AND d.user_id = $2` to the `JOIN documents` clause and passed `user_id` as the second bind parameter. Defense-in-depth against cross-user data leakage.
-- **Removed stray comment** — cleaned up a `# Should be` comment left over from an earlier refactor.
-
-#### `api/chat.py`
-- **Removed `resolve_mode` and `_sync_conversation_mode`** — these were dead code once the DB became the source of truth for document scope. Also removed `resolve_mode` calls from `attach_document` and `detach_document` responses.
-- **Simplified `_get_or_create_conversation`** — now returns `str` only (the conversation ID), not a dict. `get_conversation` is called separately after for the title check.
-- **DB is source of truth for `document_ids`** — `doc_ids` is now fetched inside `stream_response()` from the `conversation_documents` join table via `get_conversation_document_ids(conversation_id)`. The frontend no longer sends `document_ids` in the chat POST body.
-
-#### `models/chat.py`
-- **Removed `document_ids` from `ChatRequest`** — frontend never sends doc IDs in chat body. Ownership and scoping is enforced entirely via the `conversation_documents` join table in Postgres.
-
-### Documentation Updated
-- **`TODO.md`** — rewrote the entire Frontend section with verified status of each item; marked already-implemented items as `[x]`; added stream abort, suggestion pills, document attachment UI, bulk progress, web scraping, SearXNG, and contextBudget bug
-- **`backend.md`** — added `## Current Implementation State` section with what's working, known gaps, Docker Compose status table, phase status table
-- **`frontend.md`** — added `## Current Implementation State` section with actual vs planned tech stack, Precision Glass v2.1 design notes, implemented vs not-implemented feature lists, actual file structure
+- **`chat.store.ts`** — `contextBudget` hardcoded to `4096`. Backend sends `budget: 8192` in `context_debug` SSE. Store has no `setContextBudget` action.
+- **`useSSEChat.ts`** — `context_debug` tokens held until `done` fires; context fill only updates after full generation.
+- **`conversations.token_count`** — maintained in DB but never returned by conversations list API. Fill can't show before first message.
 
 ---
 
@@ -192,21 +93,18 @@
 POST /api/chat
     │
     ├─ token check (reject if > 5500 tokens)
-    ├─ _get_or_create_conversation() → str (conversation_id)
+    ├─ _get_or_create_conversation() → str
     ├─ _update_title() if still "New Conversation"
-    ├─ attach_documents(conversation_id, body.document_ids)  ← if any provided (first-message flow)
+    ├─ attach_documents(conversation_id, body.document_ids)  ← first-message flow
     │
     └─ stream_response() [generator]
            │
-           ├─ get_conversation_document_ids(conversation_id)  ← DB source of truth
+           ├─ get_conversation_document_ids(conversation_id)
            │
-           ├─ [if doc_ids] retrieve(query, user_id, document_ids=doc_ids)
+           ├─ [if doc_ids or search_all] retrieve(query, user_id, doc_ids, search_all)
            │       ├─ embed query → nomic-embed-text via Ollama
-           │       ├─ find_referenced_document() → fuzzy filename match in scope
-           │       ├─ asyncio.gather(
-           │       │     qdrant.search(vector, filters=user+doc_ids),
-           │       │     _bm25_search(query, doc_ids)
-           │       │   )
+           │       ├─ find_referenced_document() → fuzzy filename match
+           │       ├─ asyncio.gather(qdrant.search(), _bm25_search())
            │       ├─ reciprocal_rank_fusion(vector_hits, bm25_hits)[:top_k]
            │       └─ batch fetch chunk text from document_chunks WHERE user_id = $2
            │
@@ -215,11 +113,9 @@ POST /api/chat
            │       ├─ get_managed_history() → trim/summarize if over budget
            │       └─ assemble [system, ...history, user]
            │
-           ├─ POST ollama /api/chat stream=True
-           │       └─ yield SSE token events
-           │
+           ├─ POST ollama /api/chat stream=True → yield SSE token events
            ├─ save_message(user) + save_message(assistant)
-           └─ yield SSE done event {conversation_id, model, latency_ms, rag_sources}
+           └─ yield SSE done {conversation_id, model, latency_ms, rag_sources}
 ```
 
 ### Document Ingestion Pipeline
@@ -231,16 +127,16 @@ POST /api/documents/upload (multipart)
     ├─ INSERT documents row (status=pending)
     └─ BackgroundTask: _process_document(document_id, user_id, filename, filepath)
            │
-           ├─ extract text (pypdf for PDF, plain read for txt/md)
-           ├─ chunk_text() — sentence-aware, 500-token chunks, ~50-token sentence-level overlap (nltk)
+           ├─ extract text (pypdf / python-docx / plain text / faster-whisper for video)
+           ├─ chunk_text() — sentence-aware, 500-token chunks, ~50-token overlap
            ├─ build BM25 index → INSERT bm25_indexes (chunk_ids, corpus)
            ├─ embed all chunks → nomic-embed-text via Ollama
-           ├─ qdrant.upsert_points() — payload: document_id, chunk_id, user_id, filename, etc.
-           ├─ INSERT document_chunks rows (chunk_id, text, token_count)
+           ├─ qdrant.upsert_points() — payload: document_id, chunk_id, user_id, filename
+           ├─ INSERT document_chunks rows
            └─ UPDATE documents SET processing_status='complete', chunk_count=N
 ```
 
-### Qdrant Point Payload (current)
+### Qdrant Point Payload
 
 ```json
 {
@@ -252,27 +148,30 @@ POST /api/documents/upload (multipart)
   "chunk_index": 0,
   "source_type": "pdf",
   "knowledge_tier": "persistent",
-  "created_at": "2026-02-26T10:00:00Z"
+  "created_at": "2026-03-11T10:00:00Z"
 }
 ```
 
-Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` in Postgres for the actual text fetch.
+Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` in Postgres.
 
-### Database Tables
+---
+
+## Database Tables (8)
 
 | Table | Purpose |
 |---|---|
 | `users` | Auth — username, hashed_password |
 | `conversations` | Chat sessions — tier, title, token_count, summary, summarized_up_to_id |
 | `messages` | Individual messages — role, content, model_used, timestamp, rag_sources JSONB |
-| `documents` | Uploaded documents — status, chunk_count, user_id, error_message |
+| `documents` | Uploaded documents — status, chunk_count, user_id, error_message, collection_id |
 | `document_chunks` | Chunks — text, token_count, qdrant_point_id, user_id |
-| `conversation_documents` | Junction table — scopes documents to conversations |
-| `bm25_indexes` | Per-document BM25 corpus — chunk_ids, corpus JSON |
+| `conversation_documents` | Junction — scopes documents to conversations |
+| `bm25_indexes` | Per-document BM25 corpus — chunk_ids, corpus JSONB |
+| `collections` | User-defined document collections — name, color, user_id |
 
 ---
 
-## API Endpoints (27 total)
+## API Endpoints (30 total)
 
 | Method | Path | Status |
 |---|---|---|
@@ -287,14 +186,16 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | DELETE | `/api/chat/{id}/documents/{doc_id}` | ✅ |
 | GET | `/api/documents` | ✅ |
 | POST | `/api/documents/upload` | ✅ |
-| POST | `/api/documents/url` | ⚠️ scraper preview only — no DB record, no ingestion |
+| POST | `/api/documents/url` | ⚠️ scraper preview only |
 | GET | `/api/documents/{id}` | ✅ |
-| GET | `/api/documents/{id}/progress` | ✅ per-doc |
+| GET | `/api/documents/{id}/progress` | ✅ |
 | GET | `/api/documents/progress/active` | ✅ bulk active |
 | GET | `/api/documents/{id}/conversations` | ✅ |
 | DELETE | `/api/documents/{id}` | ✅ |
+| GET | `/api/collections` | ⚠️ skeleton only |
+| POST | `/api/collections/create-collection` | ⚠️ stub |
 | GET | `/api/system/health` | ✅ |
-| GET | `/api/system/resources` | ✅ |
+| GET | `/api/system/resources` | ✅ (storage stats return 0) |
 | GET | `/api/system/models` | ✅ |
 | GET/POST | `/api/research` | ❌ stub |
 | POST | `/api/quizzes/generate` | ❌ stub |
@@ -310,18 +211,17 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 | # | Severity | Description | File |
 |---|---|---|---|
-| 1 | ~~High~~ ✅ | ~~Wrong LLM~~ — Updated to `qwen3.5:9b` across all config files | `config.py`, `docker-compose.yml`, `.env.example`, `init-ollama.sh` |
-| 2 | ~~High~~ ✅ | ~~Vector dimension unverified~~ — confirmed `nomic-embed-text` = 768-dim; `VECTOR_SIZE = 768` is correct | `db/qdrant.py` |
-| 3 | ~~Medium~~ ✅ | ~~Per-document progress polling~~ — `GET /api/documents/progress/active` bulk endpoint implemented | `api/documents.py`, `DocumentList.tsx` |
-| 4 | ~~Medium~~ ✅ | ~~Naive chunking~~ — replaced with sentence-aware chunking via nltk in `core/ingestion.py` | `core/ingestion.py` |
-| 5 | Medium | Summarization in hot path — `_generate_and_cache_summary()` blocks the next user request | `core/context.py` |
-| 6 | Medium | No Celery/Redis — background processing uses FastAPI `BackgroundTasks`; no retries, no persistence | `api/documents.py` |
-| 7 | Medium | Context window display broken — three separate issues: (a) `contextBudget` hardcoded 4096 in store, `event.budget` never read from `context_debug` SSE; (b) `context_debug` tokens held until `done`, not applied immediately; (c) `conversations.token_count` never returned by conversations API so fill can't show pre-send | `chat.store.ts`, `useSSEChat.ts`, `api/chat.py`, `DevModeOverlay.tsx` |
-| 8 | Medium | URL ingestion non-functional — `POST /api/documents/url` returns Crawl4AI raw payload, creates no DB record, nothing enters Qdrant. Frontend renders a markdown preview. Response shape unverified (`markdown` may be string or object). | `api/documents.py`, `UploadZone.tsx` |
-| 9 | ~~Low~~ ✅ | ~~No stream abort~~ — `AbortController` wired in `useSSEChat`, Square button in `MessageInput` calls abort | `hooks/useSSEChat.ts`, `api/client.ts` |
-| 10 | Low | Muting docs is UI-only — `mutedIds` in `DocumentBar` never sent to backend; all attached docs searched | `DocumentBar.tsx`, `api/chat.py` |
-| 11 | ~~Low~~ ✅ | ~~`pendingDocuments` not cleared on new chat~~ — `Sidebar.tsx` `handleNewChat` calls `setPendingDocuments([])` | `Sidebar.tsx` |
-| 12 | Low | RAG scores always 0.0 — RRF produces ranks not similarity scores; citation panel shows 0% | `core/rag.py`, `Message.tsx` |
+| 1 | High | `httpx` used in `main.py` lifespan (model warmup) but not imported at module level — warmup silently fails on every boot | `main.py` |
+| 2 | High | `MAX_RRF_SCORE` referenced in `rag.py` but never defined — will cause `NameError` on any hybrid search request | `core/rag.py` |
+| 3 | Medium | Summarization in hot path — `_generate_and_cache_summary()` blocks the next user request | `core/context.py` |
+| 4 | Medium | No Celery/Redis — background processing uses FastAPI `BackgroundTasks`; no retries, no persistence across restarts | `api/documents.py` |
+| 5 | Medium | Context window display broken — (a) `contextBudget` hardcoded 4096 in store; (b) `context_debug` tokens held until `done`, not applied immediately; (c) `token_count` never returned by conversations API | `chat.store.ts`, `useSSEChat.ts`, `api/chat.py` |
+| 6 | Medium | URL ingestion non-functional — `POST /api/documents/url` returns Crawl4AI raw payload, creates no DB record, nothing enters Qdrant | `api/documents.py`, `UploadZone.tsx` |
+| 7 | Medium | Storage stats return 0.0 — `/api/system/resources` NVMe/HDD percentages hardcoded to 0 (Redis cache not yet wired) | `api/system.py` |
+| 8 | Medium | `.glass`, `.glass-subtle`, `.glass-strong` removed from globals.css — multiple components referencing these classes now render with no background | Various components |
+| 9 | Low | Muting docs is UI-only — `mutedIds` in `DocumentBar` never sent to backend | `DocumentBar.tsx` |
+| 10 | Low | Collections API skeleton only — table exists, endpoint returns rows, but create/update/delete not implemented | `api/collections.py` |
+| 11 | Low | `color` column missing from `collections` table — schema has `name` and `created_at` but no `color` field yet | `schema.sql` |
 
 ---
 
@@ -330,24 +230,29 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | Service | Current | Target |
 |---|---|---|
 | postgres | ✅ Running | ✅ |
-| ollama | ✅ Running | ✅ |
+| ollama | ✅ Running (GPU passthrough enabled) | ✅ |
 | init-ollama | ✅ (pulls qwen3.5:9b + nomic-embed-text) | ✅ |
-| qdrant | ✅ Running (named volume `qdrant_data`) | ✅ |
+| qdrant | ✅ Running | ✅ |
+| crawl4ai | ✅ Running | ✅ |
 | backend | ✅ Running | ✅ |
-| redis | ❌ Missing | Add to compose |
-| celery worker | ❌ Missing | Add (Phase 2) |
-| celery beat | ❌ Missing | Add (Phase 2) |
-| nginx | ❌ Missing | Add for prod |
-| frontend | ❌ Not containerized | Add for prod |
+| redis | ❌ Missing | Phase 2 |
+| celery worker | ❌ Missing | Phase 2 |
+| celery beat | ❌ Missing | Phase 2 |
+| nginx | ❌ Missing | Production only |
+| frontend | ❌ Host-only (npm run dev) | Production only |
 
 ---
 
 ## Phase Status
 
-| Phase | Status | Blocker |
+| Phase | Status | Notes |
 |---|---|---|
-| Phase 1: Foundation | ~95% | Missing: Celery, Redis |
-| Phase 2: Document Processing | ~15% | URL ingestion wired to Crawl4AI but doesn't ingest; response shape unverified; video/Whisper and Celery missing |
+| Phase 1: Foundation | ~95% | Core chat, RAG, ingestion, auth all working. Missing: Celery/Redis, httpx import bug, MAX_RRF_SCORE bug |
+| Phase 2: Document Processing | ~20% | URL ingestion wired but non-functional; collections table exists, API skeleton only |
+| Phase F1: Design System | ✅ Done | Structural Glass tokens, Slate default, all CSS utility classes |
+| Phase F2: Glass Audit | 0% | 15+ components still reference undefined glass classes |
+| Phase F3: Layout Shell Polish | 0% | AppShell, Sidebar, SystemFooter need token updates |
+| Phase F4: Library View + Collections | 0% | Backend schema ready; frontend two-pane layout not started |
 | Phase 3: Learning Features | 0% | |
 | Phase 4: Two-Tier Knowledge | 0% | |
 | Phase 5: Research Pipeline | 0% | |
@@ -365,31 +270,33 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | JWT auth + auth guard | ✅ |
 | SSE streaming chat | ✅ |
 | Conversation list + switching | ✅ |
-| Markdown rendering (react-markdown + remark-gfm) | ✅ |
-| Source citations (collapsible SourcesPanel) | ✅ |
-| Tier badge on assistant messages | ✅ |
+| Markdown rendering | ✅ |
+| Source citations (collapsible) | ✅ |
+| Tier badge on messages | ✅ |
 | Documents tab (upload, staging, progress, delete) | ✅ |
 | System footer (live polling) | ✅ |
-| Typed API client (`api/client.ts`) | ✅ |
 | Stream abort / stop button | ✅ |
-| Token flush throttle (50ms buffer) | ❌ |
-| Auto-scroll at-bottom detection | ❌ |
-| Suggestion/recommendation pills | ❌ |
-| Document attachment UI in chat (CommandPalette + DocumentBar working memory) | ✅ |
-| "Chat about this" from Documents tab (all paths: new/existing/modal) | ✅ |
-| Search-all globe toggle in MessageInput | ✅ |
-| Scope bar (document chips + search-all pill above input) | ✅ |
+| Document attachment UI (CommandPalette + DocumentBar) | ✅ |
+| Search-all globe toggle | ✅ |
+| Scope bar (doc chips + search-all pill) | ✅ |
 | Pin/attach button on RAG source cards | ✅ |
-| URL ingestion input | ⚠️ UI exists, Crawl4AI wired, but shows markdown preview only — not real ingestion |
+| Structural Glass token system (globals.css) | ✅ |
+| Glass audit (component rewrites) | ❌ F2 pending |
+| Library two-pane layout + collections | ❌ F4 pending |
+| 4-stage upload modal | ❌ F4 pending |
+| Chat message anatomy update | ❌ F5 pending |
+| System panel (ArcGauge, Sparkline) | ❌ F6 pending |
+| URL ingestion (real, not preview) | ❌ blocked on Crawl4AI shape validation |
+| Context window display (3 bugs) | ❌ |
+| Token flush throttle | ❌ |
+| Auto-scroll at-bottom detection | ❌ |
+| Suggestion pills | ❌ |
 | Delete confirmation | ❌ |
-| Bulk document progress (frontend) | ❌ |
-| PromotionCard + StreamDone.promotion_suggestion | ❌ |
-| Message list virtualization | ❌ |
-| Research tab (beyond stub) | ❌ |
-| Quizzes tab (beyond stub) | ❌ |
-| Knowledge Graph tab (beyond stub) | ❌ |
-| Settings tab (beyond stub) | ❌ |
+| Research tab | ❌ stub |
+| Quizzes tab | ❌ stub |
+| Knowledge Graph tab | ❌ stub |
+| Settings tab | ❌ stub |
 
 ---
 
-*Athena · Codebase Status · 2026-03-09*
+*Athena · Codebase Status · 2026-03-11*

@@ -1,17 +1,22 @@
 # Athena — TODO
 
 Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scoped retrieval, sentence-aware
-chunking, scope bar, and basic URL ingestion (Crawl4AI wired via Docker sidecar) all working.
+chunking, scope bar, basic URL ingestion (Crawl4AI wired), collections table + API skeleton, and
+Structural Glass design system (globals.css) all done.
 
 **Next up (in order):**
-1. **Investigate Crawl4AI response shape before writing ingestion** — add a `GET /api/documents/url/debug?url=...` endpoint (or just log the raw response) to inspect the actual payload for an article, docs page, and YouTube URL. The response `markdown` field can be a string or an object (`raw_markdown`, `markdown_with_citations`); the backend doesn't handle the object case at all. Don't write the ingestion pipeline until the extraction logic is validated against real data.
-2. **Fix context window tracking** — `conversations.token_count` is maintained in the DB but never exposed to the frontend. Expose it in `GET /api/chat/conversations` response (`token_count` field in `ConversationOut`). On conversation load/switch, pre-populate `contextTokens[convId]` from that value so context fill shows immediately — not just after sending. Also: apply `context_debug` tokens immediately when the SSE event fires (currently held until `done`); add `setContextBudget` to the store and read `event.budget` from `context_debug` (currently ignored); fix `contextBudget` hardcoded `4096` fallback in `DevModeOverlay.tsx:80`.
-3. Complete URL ingestion backend — after Crawl4AI response shape is confirmed, rewrite `POST /api/documents/url` to create a DB record, call `_process_document` as a BackgroundTask, return `document_id` immediately (same pattern as file upload). Extract crawl logic into `core/crawler.py` as `scrape_url(url) -> str`.
-4. Frontend URL ingestion UX polish — loading state, error feedback, clear input on success, integrate with `onUploadStart`/`onUploadComplete` callbacks so URL docs appear in the processing list. Remove the raw markdown preview debug display.
-5. Add SearXNG to Docker Compose — self-hosted search, same sidecar pattern as Crawl4AI
-6. Redis + Celery — once both ingestion paths work, migrate to proper task queue with retries
-7. ~~Fix RAG scores always 0~~ ✓ Done
-8. Pagination + server-side search on documents tab
+1. **Fix `MAX_RRF_SCORE` NameError** — `core/rag.py` references `MAX_RRF_SCORE` which is never defined. Will crash on any hybrid search request. Define it or remove the reference.
+2. **Fix `httpx` missing import in `main.py`** — model warmup in lifespan uses `httpx` but it's not imported at module level. Warmup silently fails every boot.
+3. **Investigate Crawl4AI response shape before writing ingestion** — add a `GET /api/documents/url/debug?url=...` endpoint (or just log the raw response) to inspect the actual payload for an article, docs page, and YouTube URL. The response `markdown` field can be a string or an object (`raw_markdown`, `markdown_with_citations`); the backend doesn't handle the object case at all. Don't write the ingestion pipeline until the extraction logic is validated against real data.
+4. **Fix context window tracking** — `conversations.token_count` is maintained in the DB but never exposed to the frontend. Expose it in `GET /api/chat/conversations` response (`token_count` field in `ConversationOut`). On conversation load/switch, pre-populate `contextTokens[convId]` from that value so context fill shows immediately — not just after sending. Also: apply `context_debug` tokens immediately when the SSE event fires (currently held until `done`); add `setContextBudget` to the store and read `event.budget` from `context_debug` (currently ignored); fix `contextBudget` hardcoded `4096` fallback in `DevModeOverlay.tsx:80`.
+5. Complete URL ingestion backend — after Crawl4AI response shape is confirmed, rewrite `POST /api/documents/url` to create a DB record, call `_process_document` as a BackgroundTask, return `document_id` immediately (same pattern as file upload). Extract crawl logic into `core/crawler.py` as `scrape_url(url) -> str`.
+6. Frontend URL ingestion UX polish — loading state, error feedback, clear input on success, integrate with `onUploadStart`/`onUploadComplete` callbacks so URL docs appear in the processing list. Remove the raw markdown preview debug display.
+7. Add `color` column to `collections` table — currently missing from schema. Add to `schema.sql` and `collections.py`.
+8. Complete collections CRUD — `PUT /api/collections/{id}` (rename/recolor), `DELETE /api/collections/{id}` (nulls documents), `POST /api/collections/{id}/documents` (batch assign).
+9. Add SearXNG to Docker Compose — self-hosted search, same sidecar pattern as Crawl4AI
+10. Redis + Celery — once both ingestion paths work, migrate to proper task queue with retries
+11. ~~Fix RAG scores always 0~~ ✓ Done
+12. Pagination + server-side search on documents tab
 
 ---
 
@@ -39,6 +44,9 @@ chunking, scope bar, and basic URL ingestion (Crawl4AI wired via Docker sidecar)
   `sent_tokenize`, 500-token chunks, 50-token sentence-level overlap. PDF hyphenated line breaks normalized.
 - [x] **RAG threshold incompatible with hybrid search** — duplicate of item above; confirmed fixed.
 - [ ] **URL ingestion is a scraper preview, not real ingestion** — `POST /api/documents/url` calls Crawl4AI and returns the raw markdown payload to the frontend. It never creates a `documents` row, never chunks/embeds, never stores in Qdrant. The frontend renders a markdown preview. Nothing is actually ingested. Additionally, the backend doesn't handle the case where `markdown` is an object (`{ raw_markdown, markdown_with_citations }`) — only the string case works.
+- [ ] **`MAX_RRF_SCORE` undefined** — `core/rag.py` references `MAX_RRF_SCORE` but it is never defined. Will raise `NameError` on any hybrid search request that reaches the RRF step. Define it as a constant or remove the reference.
+- [ ] **`httpx` not imported in `main.py`** — lifespan model warmup block uses `httpx.AsyncClient` but `httpx` is not imported at the top of the file. Warmup silently fails on every boot (caught by bare `except`). Add `import httpx`.
+- [ ] **`collections` table missing `color` column** — `schema.sql` defines `collections` with `name` and `created_at` but no `color` field. Collections API and frontend both expect a color. Add `color VARCHAR(20) NOT NULL DEFAULT '#3b7cf4'` to the table definition.
 - [ ] **No deduplication in RAG** — can return near-identical chunks from the same document. Add a
   minimum chunk distance check or a per-document chunk cap before returning sources.
 - [x] **RAG sources not persisting across page reload** — `save_message` never stored `rag_sources`;
