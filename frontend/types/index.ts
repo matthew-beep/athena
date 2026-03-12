@@ -104,3 +104,43 @@ export interface ModelStats {
   gpu_pct?: number
   ram_pct?: number
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Collections (mirrors backend/app/models/collections.py)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CollectionNameRequest {
+  name: string;
+}
+
+export interface CollectionDocumentsRequest {
+  document_ids: string[];
+}
+
+export interface CollectionItem {
+  collection_id: string;
+  name: string;
+  created_at: string; // datetime
+  document_count: number;
+}
+
+export interface CollectionsListResponse {
+  collections: CollectionItem[];
+  total: number;
+}
+
+export interface CollectionMutateResponse {
+  collection_id: string;
+  name: string;
+  detail: string;
+  created_at?: string | null; // datetime | null (only on create)
+}
+
+export interface CollectionDetailResponse {
+  detail: string;
+}
+
+export interface CollectionDocumentsMutateResponse {
+  detail: string;
+  updated: number;
+}

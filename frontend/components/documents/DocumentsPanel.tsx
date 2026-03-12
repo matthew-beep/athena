@@ -8,6 +8,7 @@ import { apiClient } from '@/api/client';
 import { FilePlusIcon } from 'lucide-react';
 import { DocumentSideBar } from './DocumentSideBar';
 import { DocumentTypeSelector } from './DocumentTypeSelector';
+import type { CollectionItem, CollectionsListResponse } from '@/types';
 
 export type ProcessingDoc = {
   document_id: string;
@@ -37,7 +38,7 @@ export function DocumentsPanel() {
   const [selectedCollections, setSelectedCollections] = useState<string[]>([]); // will need to load this in
   const [docTypes, setDocTypes] = useState<string[]>(["PDF", "TXT", "Markdown"]); // will need to load this in
   const [tab, setTab] = useState<string>("all");
-  const [collections, setCollections] = useState<string[]>([]);
+  const [collections, setCollections] = useState<CollectionItem[]>([]);
   const [ loadingCollections, setLoadingCollections] = useState(false);
 
   const handleSelectCollection = (collection: string) => {
@@ -78,6 +79,24 @@ export function DocumentsPanel() {
     setProcessingDocs((prev) => prev.filter((d) => d.document_id !== payload.tempId));
     startedAt.current.delete(payload.tempId);
   }, []);
+
+  const refetchCollections = useCallback(async () => {
+    try{
+      setLoadingCollections(true);
+      const response = await apiClient.get<CollectionsListResponse>("/collections");
+      setCollections(response.collections);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoadingCollections(false);
+    }
+  }, [])
+
+  // refetch collections on mount and on changes
+  useEffect(() => {
+      refetchCollections();
+    
+  }, [refetchCollections]);
 
 
 
@@ -145,21 +164,7 @@ export function DocumentsPanel() {
   }, [processingDocs.length]);
 
 
-  useEffect(() => {
-    const fetchCollections = async () => {
-      setLoadingCollections(true);
-      try {
-        const response:{ collections: string[] } = await apiClient.get("/collections");
-        console.log(response);
-        setCollections(response.collections);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoadingCollections(false);
-      }
-    }
-    fetchCollections();
-  }, []);
+  useEffect(() => { refetchCollections(); }, [refetchCollections]);
 
   return (
     <div className="h-full overflow-y-auto flex flex-col">
@@ -182,7 +187,13 @@ export function DocumentsPanel() {
         </header>
 
         <div className="flex w-full h-full">
-          <DocumentSideBar collections={collections} loadingCollections={loadingCollections} selectedCollections={selectedCollections} onSelectCollection={handleSelectCollection} />
+          <DocumentSideBar
+            collections={collections.map((c) => c.name)}
+            loadingCollections={loadingCollections}
+            selectedCollections={selectedCollections}
+            onSelectCollection={handleSelectCollection}
+            refetchCollections={refetchCollections}
+          />
           <div className="flex flex-col gap-4 w-full">
             <div className="px-4 py-2 border-b border-b-[var(--border)]">
               <DocumentTypeSelector docTypes={docTypes} onSelectDocType={handleSelectDocType} tab={tab} />
