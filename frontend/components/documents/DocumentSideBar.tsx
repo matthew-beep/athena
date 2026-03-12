@@ -57,7 +57,7 @@ export function DocumentSideBar({ collections, selectedCollections, onSelectColl
           {creatingCollection && (
             <div className="flex items-center justify-center h-full">
               <input ref={inputRef} type="text" placeholder="New Collection" className="w-full bg-transparent outline-none p-2 rounded-md" />
-              <div className="flex items-center justify-center gap-2">
+              <div className="flex items-center justify-center gap-2 rounded-full">
                 <CheckIcon className="w-4 h-4" />
               </div>
             </div>

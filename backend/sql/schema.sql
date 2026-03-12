@@ -132,6 +132,10 @@ CREATE TABLE IF NOT EXISTS collections (
 
 CREATE INDEX IF NOT EXISTS idx_collections_user ON collections(user_id);
 
+-- One collection name per user (case-insensitive)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_user_lower_name
+    ON collections (user_id, LOWER(name));
+
 ALTER TABLE documents
     ADD CONSTRAINT fk_documents_collection
     FOREIGN KEY (collection_id) REFERENCES collections(collection_id) ON DELETE SET NULL;
