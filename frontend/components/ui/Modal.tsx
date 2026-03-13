@@ -33,7 +33,7 @@ export function Modal({
       {open && (
         <motion.div
           key="modal-backdrop"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 glass-overlay"
           onClick={onClose}
           role="dialog"
           aria-modal="true"
@@ -46,7 +46,7 @@ export function Modal({
           <motion.div
             key="modal-panel"
             className={cn(
-              'glass-strong rounded-xl border border-border/50 shadow-glass w-full overflow-hidden',
+              'glass-modal w-full overflow-hidden',
               maxWidth,
               className
             )}
@@ -57,14 +57,14 @@ export function Modal({
             transition={{ duration: 0.15, ease: 'easeOut' }}
           >
             {title != null && (
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
-                <h2 id="modal-title" className="text-sm font-semibold text-foreground">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+                <h2 id="modal-title" className="text-sm font-semibold text-[var(--t1)]" style={{ fontFamily: 'var(--fd)' }}>
                   {title}
                 </h2>
                 <button
                   type="button"
                   onClick={onClose}
-                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                  className="p-1.5 rounded-lg text-[var(--t2)] hover:text-[var(--t1)] hover:bg-[var(--raised)] transition-colors"
                   aria-label="Close"
                 >
                   <X size={16} />
@@ -73,7 +73,7 @@ export function Modal({
             )}
             <div>{children}</div>
             {footer != null && (
-              <div className="p-2 border-t border-border/30">{footer}</div>
+              <div className="p-2 border-t border-[var(--border)]">{footer}</div>
             )}
           </motion.div>
         </motion.div>

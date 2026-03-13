@@ -144,7 +144,7 @@ def reciprocal_rank_fusion(
         scores[chunk_id] = scores.get(chunk_id, 0) + 1 / (k + rank + 1)
 
     return [
-        (chunk_id, round(score / MAX_RRF_SCORE, 3))
+        (chunk_id, round(score, 4))
         for chunk_id, score in sorted(scores.items(), key=lambda x: x[1], reverse=True)
     ]
 

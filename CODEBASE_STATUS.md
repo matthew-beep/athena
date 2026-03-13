@@ -1,5 +1,5 @@
 # Athena — Codebase Status
-## 2026-03-11
+## 2026-03-12
 
 ---
 
@@ -42,14 +42,50 @@
 
 ---
 
-## What Was Worked On This Session (2026-03-11)
+## What Was Worked On This Session (2026-03-12)
 
-### Collections Backend
-- **`backend/sql/schema.sql`** — added `collections` table (`collection_id`, `user_id`, `name`, `color`, `created_at`). Added `collection_id VARCHAR(255)` nullable column to `documents` table. FK constraint added after both tables exist to avoid ordering issues. Index on `collections(user_id)`.
-- **`api/collections.py`** (new file) — minimal skeleton: `GET /api/collections` (returns list for current user), `POST /api/collections/create-collection` (stub). Moved out of `documents.py` to avoid route collision with `GET /api/documents/{document_id}`.
-- **`main.py`** — collections router imported and registered at `/api/collections`.
-- **Root cause of 401**: `get_collections` was missing `Depends(get_current_user)` parameter — `current_user` was referenced but undefined. Fixed.
-- **Root cause of 500**: `collections` table didn't exist because the `ALTER TABLE IF NOT EXISTS` syntax is invalid in PostgreSQL. Fixed by placing `collection_id` column inline in the `CREATE TABLE documents` block and using `ALTER TABLE documents ADD CONSTRAINT` (after collections table is defined) for the FK.
+### Critical Bug Fixes
+- **`backend/app/main.py`** — added `import httpx`. Model warmup was silently failing every boot with a masked `NameError`.
+- **`backend/app/core/rag.py`** — removed `MAX_RRF_SCORE` reference. Was raising `NameError` on every hybrid search request, caught by `except Exception` and returning empty results. RRF scores are already `(0,1)` range — no normalization needed.
+- **`backend/app/api/collections.py`** — added `asyncpg.UniqueViolationError` catch to `update_collection`. Rename to duplicate name was returning 500 instead of 409.
+
+### Collections — NOW FULLY COMPLETE (2026-03-12)
+
+**Backend (`api/collections.py`) — 6 endpoints, all working:**
+- `GET /api/collections` — list with per-collection document count
+- `POST /api/collections` — create, 409 on duplicate name (case-insensitive via unique index)
+- `PUT /api/collections/{id}` — rename, 409 on duplicate, 404 if not found
+- `DELETE /api/collections/{id}` — nulls all document assignments, then deletes
+- `POST /api/collections/{id}/documents` — batch assign documents
+- `DELETE /api/collections/{id}/documents` — batch remove documents
+
+**Schema (`sql/schema.sql`):**
+- `collections` table: `collection_id`, `user_id`, `name`, `created_at`
+- Unique index on `(user_id, LOWER(name))` — enforces case-insensitive name uniqueness per user on both create and rename
+- `documents.collection_id` FK with `ON DELETE SET NULL`
+
+**Frontend — all wired:**
+- `DocumentSideBar.tsx` — create/rename/delete all call API with `CollectionItem` (has `collection_id`). Refetches on every mutation. Rename uses inline edit with Enter/Esc/blur handling.
+- `CollectionsList.tsx` — accepts `CollectionItem[]`, uses `collection_id` for keys and selection. Inline rename input per row with `isEditing` prop. Delete styled red. Document count shown as dim number.
+- `DocumentsPanel.tsx` — passes full `CollectionItem[]` to sidebar (not name strings).
+
+**Remaining gaps in Library view (not blocking collections itself):**
+- `selectedCollections` filter not wired to `DocumentList` — checking a collection doesn't filter the document list
+- `DocumentTypeSelector` tab not wired to `DocumentList` — file type filter has no effect
+- "X Documents" in header is a hardcoded string, not a real count
+- `docTypes` hardcoded to `["PDF", "TXT", "Markdown"]` — not fetched from backend
+- No collection assignment during upload — UploadZone doesn't pass `collection_id`
+- Debug red border left in `DocumentList.tsx` (line ~403)
+- Duplicate `refetchCollections` call in `DocumentsPanel` (lines 101 and 167)
+- `DocumentsPanel.tsx` — loads collections on mount, passes to sidebar, filter state tracked in `selectedCollections[]`.
+
+**Not wired / broken:**
+- Collections passed to `CollectionsList` as `string[]` (names only) — `collection_id` is lost, making API calls for rename/delete impossible without a name→id lookup.
+- Rename/Delete actions in `CollectionsList` fire `onAction` callback, but `DocumentSideBar` handler only `console.log`s — no API calls made.
+- `selectedCollections` filter is tracked in state but never passed to `DocumentList` — filtering has no effect on displayed documents.
+- Document assignment to collection — no UI at all; user cannot drag/assign docs to a collection from the document list.
+- `DocumentTypeSelector` tab state is tracked but not wired to `DocumentList` filtering.
+- "X Documents" count in panel header is hardcoded string, not dynamic.
 
 ### Frontend Design System — Structural Glass
 - **`frontend/app/globals.css`** — complete rewrite. Replaced HSL token system with Structural Glass design tokens:

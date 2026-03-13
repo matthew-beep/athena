@@ -112,6 +112,8 @@ async def update_collection(collection_id: str, body: CollectionNameRequest, cur
             name=body.name,
             detail="Collection updated.",
         )
+    except asyncpg.UniqueViolationError:
+        return JSONResponse(status_code=409, content={"detail": "A collection with this name already exists."})
     except asyncpg.PostgresError as e:
         logger.exception("Update collection failed for {}: {}", collection_id, e)
         return JSONResponse(status_code=500, content={"detail": "Failed to update collection."})

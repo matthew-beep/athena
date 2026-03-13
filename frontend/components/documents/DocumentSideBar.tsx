@@ -3,23 +3,27 @@
 import { Loader2, PlusIcon, CheckIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { apiClient } from '@/api/client';
-import type { CollectionMutateResponse } from '@/types';
+import type { CollectionMutateResponse, CollectionItem } from '@/types';
 import { CollectionsList } from './CollectionsList';
+import { Modal } from '@/components/ui/Modal';
 
 
 interface DocumentSideBarProps {
-  collections: string[];
-  selectedCollections: string[];
-  onSelectCollection: (collection: string) => void;
+  collections: CollectionItem[];
+  selectedCollections: CollectionItem[];
+  onSelectCollection: (collection: CollectionItem) => void;
+  onCollectionDeleted?: (collectionId: string) => void;
   loadingCollections: boolean;
   refetchCollections: () => void;
 }
 
-export function DocumentSideBar({ collections, selectedCollections, onSelectCollection, loadingCollections, refetchCollections }: DocumentSideBarProps) {
+export function DocumentSideBar({ collections, selectedCollections, onSelectCollection, onCollectionDeleted, loadingCollections, refetchCollections }: DocumentSideBarProps) {
 
-  const  [creatingCollection, setCreatingCollection] = useState<boolean>(false);
+  const [creatingCollection, setCreatingCollection] = useState<boolean>(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const [newCollectionName, setNewCollectionName] = useState('');
+  const [collectionToDelete, setCollectionToDelete] = useState<CollectionItem | null>(null);
+  const [editingCollectionId, setEditingCollectionId] = useState<string | null>(null);
 
 
   useEffect(() => {
@@ -51,7 +55,45 @@ export function DocumentSideBar({ collections, selectedCollections, onSelectColl
     if (loadingCollections) return;
 
     setCreatingCollection(!creatingCollection);
-  }
+  };
+
+  const handleCollectionAction = (collection: CollectionItem, action: 'rename' | 'delete') => {
+    if (action === 'delete') {
+      setCollectionToDelete(collection);
+    }
+    if (action === 'rename') {
+      setEditingCollectionId(collection.collection_id);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!collectionToDelete) return;
+    try {
+      await apiClient.delete(`/collections/${collectionToDelete.collection_id}`);
+      onCollectionDeleted?.(collectionToDelete.collection_id);
+      await refetchCollections();
+    } catch (err) {
+      console.error('Failed to delete collection:', err);
+    } finally {
+      setCollectionToDelete(null);
+    }
+  };
+
+  const handleSaveRename = async (collectionId: string, newName: string) => {
+    const name = newName.trim();
+    if (!name) {
+      setEditingCollectionId(null);
+      return;
+    }
+    try {
+      await apiClient.put(`/collections/${collectionId}`, { name });
+      await refetchCollections();
+    } catch (err) {
+      console.error('Failed to rename collection:', err);
+    } finally {
+      setEditingCollectionId(null);
+    }
+  };
 
   return (
     <div 
@@ -108,9 +150,10 @@ export function DocumentSideBar({ collections, selectedCollections, onSelectColl
                     collections={collections}
                     selectedCollections={selectedCollections}
                     onSelectCollection={onSelectCollection}
-                    onAction={(collection, action) => {
-                      console.log('collection action', { collection, action });
-                    }}
+                    onAction={handleCollectionAction}
+                    editingCollectionId={editingCollectionId}
+                    onSaveRename={handleSaveRename}
+                    onCancelRename={() => setEditingCollectionId(null)}
                   />
                 ) : (
                   <div className="flex items-center justify-center flex-1">
@@ -121,23 +164,38 @@ export function DocumentSideBar({ collections, selectedCollections, onSelectColl
           )}
 
           </div>
-
-
-
-
-          {/**
-           * basically if no collections exist display no collections
-           * if a user creates document then create a new collection
-           * 
-           * 
-           * 
-           * 
-           * 
-           */}
-
-
         </div>
       </div>
+
+      <Modal
+        open={!!collectionToDelete}
+        onClose={() => setCollectionToDelete(null)}
+        title="Delete collection?"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setCollectionToDelete(null)}
+              className="px-3 py-1.5 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmDelete}
+              className="px-3 py-1.5 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+            >
+              Delete
+            </button>
+          </div>
+        }
+      >
+        <p className="text-sm text-muted-foreground px-4 py-2">
+          {collectionToDelete && (
+            <>Delete &quot;{collectionToDelete.name}&quot;? Documents in it will be unassigned.</>
+          )}
+        </p>
+      </Modal>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import asyncio
+import httpx
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI

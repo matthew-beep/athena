@@ -8,7 +8,9 @@ import { apiClient } from '@/api/client';
 import { FilePlusIcon } from 'lucide-react';
 import { DocumentSideBar } from './DocumentSideBar';
 import { DocumentTypeSelector } from './DocumentTypeSelector';
+import { UploadModal } from './UploadModal';
 import type { CollectionItem, CollectionsListResponse } from '@/types';
+import { Pill } from '@/components/ui/Pill';
 
 export type ProcessingDoc = {
   document_id: string;
@@ -35,16 +37,17 @@ export function DocumentsPanel() {
   const [search, setSearch] = useState('');
   const [mode, setMode] = useState<'upload' | 'url'>('upload');
 
-  const [selectedCollections, setSelectedCollections] = useState<string[]>([]); // will need to load this in
+  const [selectedCollections, setSelectedCollections] = useState<CollectionItem[]>([]); // will need to load this in
   const [docTypes, setDocTypes] = useState<string[]>(["PDF", "TXT", "Markdown"]); // will need to load this in
   const [tab, setTab] = useState<string>("all");
   const [collections, setCollections] = useState<CollectionItem[]>([]);
-  const [ loadingCollections, setLoadingCollections] = useState(false);
+  const [loadingCollections, setLoadingCollections] = useState(false);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
-  const handleSelectCollection = (collection: string) => {
+  const handleSelectCollection = (collection: CollectionItem) => {
     setSelectedCollections((prev) =>
-      prev.includes(collection)
-        ? prev.filter((c) => c !== collection)
+      prev.some((c) => c.collection_id === collection.collection_id)
+        ? prev.filter((c) => c.collection_id !== collection.collection_id)
         : [...prev, collection]
     );
   };
@@ -91,6 +94,10 @@ export function DocumentsPanel() {
       setLoadingCollections(false);
     }
   }, [])
+
+  const removeSelectedCollection = (collectionId: string) => {
+    setSelectedCollections((prev) => prev.filter((c) => c.collection_id !== collectionId));
+  };
 
   // refetch collections on mount and on changes
   useEffect(() => {
@@ -179,7 +186,11 @@ export function DocumentsPanel() {
           <div className="flex items-center justify-between gap-2">
             <input type="text" placeholder="Search documents" className="border-[var(--border)] border w-full bg-transparent outline-none p-2 rounded-md" value={search} onChange={(e) => setSearch(e.target.value)} />
 
-            <button className="flex items-center justify-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
+            <button
+              type="button"
+              onClick={() => setUploadModalOpen(true)}
+              className="flex items-center justify-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
               <FilePlusIcon className="w-4 h-4" />
               Upload
             </button>
@@ -188,13 +199,22 @@ export function DocumentsPanel() {
 
         <div className="flex w-full h-full">
           <DocumentSideBar
-            collections={collections.map((c) => c.name)}
+            collections={collections}
             loadingCollections={loadingCollections}
             selectedCollections={selectedCollections}
             onSelectCollection={handleSelectCollection}
+            onCollectionDeleted={(id) => setSelectedCollections((prev) => prev.filter((c) => c.collection_id !== id))}
             refetchCollections={refetchCollections}
           />
-          <div className="flex flex-col gap-4 w-full">
+          <div className="flex flex-col w-full">
+
+            {selectedCollections.length > 0 && (
+              <div className="flex items-center gap-2 px-4 py-2">
+                {selectedCollections.map((c) => (
+                  <Pill key={c.collection_id} onDelete={() => removeSelectedCollection(c.collection_id)}>{c.name}</Pill>
+                ))}
+              </div>
+            )}
             <div className="px-4 py-2 border-b border-b-[var(--border)]">
               <DocumentTypeSelector docTypes={docTypes} onSelectDocType={handleSelectDocType} tab={tab} />
             </div>
@@ -202,6 +222,8 @@ export function DocumentsPanel() {
           </div>
         </div>
       </div>
+
+      <UploadModal open={uploadModalOpen} onClose={() => setUploadModalOpen(false)} />
     </div>
   );
 }

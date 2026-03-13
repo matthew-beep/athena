@@ -1,22 +1,42 @@
 # Athena — TODO
 
 Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scoped retrieval, sentence-aware
-chunking, scope bar, basic URL ingestion (Crawl4AI wired), collections table + API skeleton, and
-Structural Glass design system (globals.css) all done.
+chunking, scope bar, full collections CRUD (backend + frontend), and Structural Glass design system all done.
+
+~~Fix `MAX_RRF_SCORE` NameError~~ ✓ Done
+~~Fix `httpx` missing import in `main.py`~~ ✓ Done
+~~Collections backend CRUD~~ ✓ Done (all 6 endpoints)
+~~Collections frontend~~ ✓ Done (create, rename, delete, selection all wired)
+
+---
 
 **Next up (in order):**
-1. **Fix `MAX_RRF_SCORE` NameError** — `core/rag.py` references `MAX_RRF_SCORE` which is never defined. Will crash on any hybrid search request. Define it or remove the reference.
-2. **Fix `httpx` missing import in `main.py`** — model warmup in lifespan uses `httpx` but it's not imported at module level. Warmup silently fails every boot.
-3. **Investigate Crawl4AI response shape before writing ingestion** — add a `GET /api/documents/url/debug?url=...` endpoint (or just log the raw response) to inspect the actual payload for an article, docs page, and YouTube URL. The response `markdown` field can be a string or an object (`raw_markdown`, `markdown_with_citations`); the backend doesn't handle the object case at all. Don't write the ingestion pipeline until the extraction logic is validated against real data.
-4. **Fix context window tracking** — `conversations.token_count` is maintained in the DB but never exposed to the frontend. Expose it in `GET /api/chat/conversations` response (`token_count` field in `ConversationOut`). On conversation load/switch, pre-populate `contextTokens[convId]` from that value so context fill shows immediately — not just after sending. Also: apply `context_debug` tokens immediately when the SSE event fires (currently held until `done`); add `setContextBudget` to the store and read `event.budget` from `context_debug` (currently ignored); fix `contextBudget` hardcoded `4096` fallback in `DevModeOverlay.tsx:80`.
-5. Complete URL ingestion backend — after Crawl4AI response shape is confirmed, rewrite `POST /api/documents/url` to create a DB record, call `_process_document` as a BackgroundTask, return `document_id` immediately (same pattern as file upload). Extract crawl logic into `core/crawler.py` as `scrape_url(url) -> str`.
-6. Frontend URL ingestion UX polish — loading state, error feedback, clear input on success, integrate with `onUploadStart`/`onUploadComplete` callbacks so URL docs appear in the processing list. Remove the raw markdown preview debug display.
-7. Add `color` column to `collections` table — currently missing from schema. Add to `schema.sql` and `collections.py`.
-8. Complete collections CRUD — `PUT /api/collections/{id}` (rename/recolor), `DELETE /api/collections/{id}` (nulls documents), `POST /api/collections/{id}/documents` (batch assign).
-9. Add SearXNG to Docker Compose — self-hosted search, same sidecar pattern as Crawl4AI
-10. Redis + Celery — once both ingestion paths work, migrate to proper task queue with retries
-11. ~~Fix RAG scores always 0~~ ✓ Done
-12. Pagination + server-side search on documents tab
+
+### Library View — Remaining Wiring (current focus)
+1. **Wire collection filter to DocumentList** — `selectedCollections` is tracked in `DocumentsPanel` but never passed to `DocumentList`. Add `collectionIds: string[]` prop. Backend: add optional `collection_id` query param to `GET /api/documents` with `AND ($n = '' OR collection_id = $n)` filter.
+2. **Wire DocumentTypeSelector tab to DocumentList** — `tab` state set by `handleSelectDocType` but never passed down. Add `fileType: string` prop to `DocumentList`, filter by `file_type` in the backend query.
+3. **Fix "X Documents" header count** — hardcoded string. Add `total: int` to `GET /api/documents` response (separate `COUNT(*)` query). Frontend reads it on fetch.
+4. **Document assign to collection UX** — no way to assign a doc to a collection from the document list. Add "Move to collection" in the document row action menu — calls `POST /api/collections/{id}/documents`. Consider a submenu or small popover listing available collections.
+5. **Remove debug red border** — `DocumentList.tsx` line ~403 has `border-2 border-red-800` left from debugging.
+6. **Remove duplicate `refetchCollections` call** — `DocumentsPanel` calls it at both lines 101 and 167. Delete the duplicate at line 167.
+
+### RAG Scoring Audit
+- [ ] **Audit RRF score accuracy** — with scoring unblocked, verify numbers are meaningful. With `k=60` and ~20 results, max RRF score is ~2*(1/61) ≈ 0.033 — too small to display raw. Normalize against top result score so displayed scores span `0.0–1.0`. Add debug log of top-5 chunk_ids + scores in `retrieve()` for validation.
+- [ ] **Expose scores in frontend source citations** — `rag_sources` carries `score` and `score_type` but verify `SourcesPanel` in `Message.tsx` actually renders them. Show as a small badge (e.g. `0.87 · hybrid`) next to each source.
+
+### URL Ingestion
+- [ ] **Investigate Crawl4AI response shape** — add `GET /api/documents/url/debug?url=...` or log raw response. The `markdown` field can be string or object (`raw_markdown`, `markdown_with_citations`) — backend doesn't handle the object case.
+- [ ] **Complete URL ingestion backend** — after response shape confirmed, rewrite `POST /api/documents/url` to create a DB record, call `_process_document` as BackgroundTask, return `document_id` immediately. Extract crawl logic into `core/crawler.py`.
+- [ ] **Frontend URL ingestion UX** — loading state, error feedback, clear input on success, wire `onUploadStart`/`onUploadComplete`. Remove raw markdown preview.
+
+### Pagination + Search
+- [ ] **Backend: search + pagination on `GET /api/documents`** — add `search: str`, `limit: int`, `offset: int` query params. Return `total` count alongside results. Filter: `AND ($n = '' OR filename ILIKE '%' || $n || '%')`.
+- [ ] **Frontend: debounced search + pagination controls** — remove client-side `.filter()` in `DocumentList`. Pass `search` as query param (debounced ~300ms). Add prev/next controls, reset offset on search change.
+
+### Infrastructure
+- [ ] **Fix context window tracking** — expose `conversations.token_count` in `GET /api/chat/conversations`. Pre-populate `contextTokens[convId]` on load. Apply `context_debug` tokens immediately on SSE event. Fix `contextBudget` hardcoded `4096` in `DevModeOverlay.tsx`.
+- [ ] **Add SearXNG to Docker Compose** — self-hosted search, same sidecar pattern as Crawl4AI.
+- [ ] **Redis + Celery** — migrate document processing from `BackgroundTasks` to Celery once ingestion paths are stable. Enables retries and progress from a real task queue.
 
 ---
 
@@ -46,7 +66,7 @@ Structural Glass design system (globals.css) all done.
 - [ ] **URL ingestion is a scraper preview, not real ingestion** — `POST /api/documents/url` calls Crawl4AI and returns the raw markdown payload to the frontend. It never creates a `documents` row, never chunks/embeds, never stores in Qdrant. The frontend renders a markdown preview. Nothing is actually ingested. Additionally, the backend doesn't handle the case where `markdown` is an object (`{ raw_markdown, markdown_with_citations }`) — only the string case works.
 - [ ] **`MAX_RRF_SCORE` undefined** — `core/rag.py` references `MAX_RRF_SCORE` but it is never defined. Will raise `NameError` on any hybrid search request that reaches the RRF step. Define it as a constant or remove the reference.
 - [ ] **`httpx` not imported in `main.py`** — lifespan model warmup block uses `httpx.AsyncClient` but `httpx` is not imported at the top of the file. Warmup silently fails on every boot (caught by bare `except`). Add `import httpx`.
-- [ ] **`collections` table missing `color` column** — `schema.sql` defines `collections` with `name` and `created_at` but no `color` field. Collections API and frontend both expect a color. Add `color VARCHAR(20) NOT NULL DEFAULT '#3b7cf4'` to the table definition.
+- [ ] **`collections` table missing `color` column** — `schema.sql` defines `collections` with `name` and `created_at` but no `color` field. The current API and frontend don't use color yet, but the original spec required it. Add `color VARCHAR(20) NOT NULL DEFAULT '#3b7cf4'` when wiring rename (the PUT endpoint will need to accept it).
 - [ ] **No deduplication in RAG** — can return near-identical chunks from the same document. Add a
   minimum chunk distance check or a per-document chunk cap before returning sources.
 - [x] **RAG sources not persisting across page reload** — `save_message` never stored `rag_sources`;
