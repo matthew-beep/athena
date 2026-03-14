@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Upload } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { cn } from '@/utils/cn';
@@ -14,10 +14,36 @@ interface UploadModalProps {
 
 export function UploadModal({ open, onClose }: UploadModalProps) {
   const [stage, setStage] = useState<UploadStage>(1);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleClose = () => {
     setStage(1);
+    setSelectedFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
     onClose();
+  };
+
+  const addFiles = (files: File[]) => {
+    if (files.length) setSelectedFiles((prev) => [...prev, ...files]);
+    console.log('files', files);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files?.length) addFiles(Array.from(files));
+  };
+
+  const triggerFileInput = () => fileInputRef.current?.click();
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    addFiles(Array.from(e.dataTransfer.files));
   };
 
   return (
@@ -85,15 +111,30 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
         {/* Stage 1 — Drop */}
         {stage === 1 && (
           <div className="space-y-4">
-            <div
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={handleFileChange}
+              className="hidden"
+              accept=".pdf,.md,.markdown,.txt,text/plain,text/markdown,application/pdf"
+            />
+            <button
+              type="button"
+              onClick={triggerFileInput}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
               className={cn(
-                'border-2 border-dashed rounded-xl p-8 text-center transition-colors',
+                'w-full border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer',
                 'border-[var(--border)] hover:border-[var(--blue-br)] bg-[var(--raised)]/30'
               )}
             >
               <Upload className="w-10 h-10 mx-auto mb-2 text-[var(--t3)]" />
               <p className="text-sm text-[var(--t2)]">Drop files here or click to browse</p>
-            </div>
+              {selectedFiles.length > 0 && (
+                <p className="text-xs text-[var(--t3)] font-mono mt-1">{selectedFiles.length} file(s) selected</p>
+              )}
+            </button>
             <div>
               <label className="block text-xs font-medium text-[var(--t3)] uppercase tracking-wider mb-1.5">
                 Or import from URL
@@ -101,10 +142,24 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
               <input
                 type="text"
                 placeholder="https://..."
-                className="w-full px-3 py-2 rounded-lg bg-[var(--raised)] border border-[var(--border)] text-sm text-[var(--t1)] placeholder:text-[var(--t3)] outline-none focus:border-[var(--blue-br)]"
-                readOnly
+                className= "w-full px-3 py-2 rounded-lg bg-[var(--raised)] border border-[var(--border)] text-sm text-[var(--t1)] placeholder:text-[var(--t3)] outline-none focus:border-[var(--blue-br)]"
               />
             </div>
+
+            {selectedFiles.length > 0 && (
+              <div>
+                <span className="block text-xs font-medium text-[var(--t3)] uppercase tracking-wider mb-2">
+                  Files
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {selectedFiles.map((file) => (
+                    <span key={file.name} className="px-2.5 py-1 rounded-full text-xs font-medium border border-[var(--border)] text-[var(--t2)] bg-[var(--raised)]">
+                      {file.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
             <div>
               <span className="block text-xs font-medium text-[var(--t3)] uppercase tracking-wider mb-2">
                 Formats

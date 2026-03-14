@@ -11,6 +11,7 @@ import { DocumentTypeSelector } from './DocumentTypeSelector';
 import { UploadModal } from './UploadModal';
 import type { CollectionItem, CollectionsListResponse } from '@/types';
 import { Pill } from '@/components/ui/Pill';
+import { useAuthStore } from '@/stores/auth.store';
 
 export type ProcessingDoc = {
   document_id: string;
@@ -32,6 +33,9 @@ const COMPLETE_DELAY_MS = 600;
 
 export function DocumentsPanel() {
   const [refreshKey, setRefreshKey] = useState(0);
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [docCount, setDocCount] = useState<number>(0);
+  const [error, setError] = useState<string | null>(null);
   const [processingDocs, setProcessingDocs] = useState<ProcessingDoc[]>([]);
   const startedAt = useRef<Map<string, number>>(new Map());
   const [search, setSearch] = useState('');
@@ -43,6 +47,21 @@ export function DocumentsPanel() {
   const [collections, setCollections] = useState<CollectionItem[]>([]);
   const [loadingCollections, setLoadingCollections] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+
+  const fetchDocuments = () => {
+    const token = useAuthStore.getState().token;
+    return fetch('/api/documents', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((r) => r.json())
+      .then((data) => { 
+        setDocuments(data.documents ?? []); 
+        setDocCount(data.doc_count ?? 0); 
+        setError(null); 
+      })
+      .catch(() => setError('Failed to load documents'));
+  };
+
 
   const handleSelectCollection = (collection: CollectionItem) => {
     setSelectedCollections((prev) =>
@@ -173,6 +192,10 @@ export function DocumentsPanel() {
 
   useEffect(() => { refetchCollections(); }, [refetchCollections]);
 
+  useEffect(() => {
+    fetchDocuments();
+  }, []);
+
   return (
     <div className="h-full overflow-y-auto flex flex-col">
       <div className="animate-fade-up w-full flex flex-col h-full">
@@ -180,7 +203,7 @@ export function DocumentsPanel() {
           <div className="flex flex-col items-start justify-between">
             <h2 className="text-base font-display font-semibold tracking-tight">Library</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              X Documents - {collections.length} Collections
+              {docCount} Documents - {collections.length} Collections
             </p>
           </div>
           <div className="flex items-center justify-between gap-2">
