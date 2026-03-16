@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Upload } from 'lucide-react';
+import { FileIcon, Upload } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { cn } from '@/utils/cn';
 
@@ -17,6 +17,8 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [url, setUrl] = useState<string>('');
+
   const handleClose = () => {
     setStage(1);
     setSelectedFiles([]);
@@ -25,8 +27,12 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
   };
 
   const addFiles = (files: File[]) => {
-    if (files.length) setSelectedFiles((prev) => [...prev, ...files]);
-    console.log('files', files);
+    if (!files.length) return;
+    setSelectedFiles((prev) => {
+      const existing = new Set(prev.map((f) => `${f.name}:${f.size}`));
+      const deduplicated = files.filter((f) => !existing.has(`${f.name}:${f.size}`));
+      return [...prev, ...deduplicated];
+    });
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -44,6 +50,10 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
     e.preventDefault();
     e.stopPropagation();
     addFiles(Array.from(e.dataTransfer.files));
+  };
+
+  const handleAddURL = () => {
+    console.log('add URL');
   };
 
   return (
@@ -90,7 +100,7 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
               <button
                 type="button"
                 onClick={() => setStage((prev) => (prev + 1) as UploadStage)}
-                className="px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--blue)] text-white hover:opacity-90 transition-opacity"
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${selectedFiles.length > 0 || url.length > 0 ? 'bg-[var(--blue)]' : 'bg-[var(--border)]'} text-white hover:opacity-90 transition-opacity`}
               >
                 Next
               </button>
@@ -125,56 +135,63 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
               onDragOver={handleDragOver}
               onDrop={handleDrop}
               className={cn(
-                'w-full border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer',
+                'w-full border-2 border-dashed rounded-xl p-4 text-center transition-colors cursor-pointer flex',
                 'border-[var(--border)] hover:border-[var(--blue-br)] bg-[var(--raised)]/30'
               )}
             >
-              <Upload className="w-10 h-10 mx-auto mb-2 text-[var(--t3)]" />
-              <p className="text-sm text-[var(--t2)]">Drop files here or click to browse</p>
-              {selectedFiles.length > 0 && (
-                <p className="text-xs text-[var(--t3)] font-mono mt-1">{selectedFiles.length} file(s) selected</p>
-              )}
+              <div className="flex items-center justify-center w-10 h-10 border rounded-lg">
+                <Upload className=" text-[var(--t3)]" />
+              </div>
+              <div className="flex flex-col gap-2 items-start">
+                <p className="text-sm text-[var(--t1)]">Drop files here or click to browse</p>
+                <div className="flex flex-wrap gap-2">
+                  {['PDF', 'Markdown', 'TXT', 'Web'].map((fmt) => (
+                    <span
+                      key={fmt}
+                      className="px-2.5 py-1 rounded-full text-xs font-medium border border-[var(--border)] text-[var(--t2)] bg-[var(--raised)]"
+                    >
+                      {fmt}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
             </button>
-            <div>
-              <label className="block text-xs font-medium text-[var(--t3)] uppercase tracking-wider mb-1.5">
-                Or import from URL
-              </label>
+            <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="https://..."
+                placeholder="Or paste a URL..."
                 className= "w-full px-3 py-2 rounded-lg bg-[var(--raised)] border border-[var(--border)] text-sm text-[var(--t1)] placeholder:text-[var(--t3)] outline-none focus:border-[var(--blue-br)]"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
               />
+              <button
+                type="button"
+                onClick={handleAddURL}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${url.length > 0 ? 'bg-[var(--blue)]' : 'bg-[var(--border)]'} text-white hover:opacity-90 transition-opacity`}
+              >
+                Add
+              </button>
             </div>
 
             {selectedFiles.length > 0 && (
               <div>
-                <span className="block text-xs font-medium text-[var(--t3)] uppercase tracking-wider mb-2">
-                  Files
-                </span>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex items-center justify-between py-2">
+                  <span className="block text-xs font-medium text-[var(--t3)] uppercase tracking-wider">
+                    {selectedFiles.length} file(s) queued 
+                  </span>
+                  <button type="button" className="text-xs font-medium text-[var(--t3)] uppercase tracking-wider">Clear all</button>
+                </div>
+                <div className="flex flex-col gap-2">
                   {selectedFiles.map((file) => (
-                    <span key={file.name} className="px-2.5 py-1 rounded-full text-xs font-medium border border-[var(--border)] text-[var(--t2)] bg-[var(--raised)]">
+                    <span key={file.name} className="px-2.5 py-1 rounded-md text-xs font-medium border border-[var(--border)] text-[var(--t2)] bg-[var(--raised)]">
+                      <FileIcon className="w-4 h-4 mr-1" />
                       {file.name}
                     </span>
                   ))}
                 </div>
               </div>
             )}
-            <div>
-              <span className="block text-xs font-medium text-[var(--t3)] uppercase tracking-wider mb-2">
-                Formats
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {['PDF', 'Markdown', 'TXT', 'Web'].map((fmt) => (
-                  <span
-                    key={fmt}
-                    className="px-2.5 py-1 rounded-full text-xs font-medium border border-[var(--border)] text-[var(--t2)] bg-[var(--raised)]"
-                  >
-                    {fmt}
-                  </span>
-                ))}
-              </div>
-            </div>
           </div>
         )}
 
