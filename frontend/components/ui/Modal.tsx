@@ -7,15 +7,10 @@ import { cn } from '@/utils/cn';
 export interface ModalProps {
   open: boolean;
   onClose: () => void;
-  /** Optional title; when provided, a header with title and close button is rendered */
   title?: React.ReactNode;
-  /** Main content of the modal */
   children: React.ReactNode;
-  /** Optional footer (e.g. actions) */
   footer?: React.ReactNode;
-  /** Max width class for the panel (default: max-w-md) */
   maxWidth?: string;
-  /** Additional class for the panel */
   className?: string;
 }
 
@@ -25,7 +20,7 @@ export function Modal({
   title,
   children,
   footer,
-  maxWidth = 'max-w-md',
+  maxWidth = 'max-w-[520px]',
   className,
 }: ModalProps) {
   return (
@@ -45,35 +40,54 @@ export function Modal({
         >
           <motion.div
             key="modal-panel"
-            className={cn(
-              'glass-modal w-full overflow-hidden',
-              maxWidth,
-              className
-            )}
+            className={cn('glass-modal w-full overflow-hidden', maxWidth, className)}
             onClick={(e) => e.stopPropagation()}
-            initial={{ scale: 0.95, opacity: 0 }}
+            initial={{ scale: 0.97, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
+            exit={{ scale: 0.97, opacity: 0 }}
+            transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
           >
             {title != null && (
-              <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
-                <h2 id="modal-title" className="text-sm font-semibold text-[var(--t1)]" style={{ fontFamily: 'var(--fd)' }}>
+              <div
+                style={{
+                  padding: '16px 20px 14px',
+                  borderBottom: '1px solid var(--border)',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                }}
+              >
+                <div id="modal-title" style={{ flex: 1 }}>
                   {title}
-                </h2>
+                </div>
                 <button
                   type="button"
                   onClick={onClose}
-                  className="p-1.5 rounded-lg text-[var(--t2)] hover:text-[var(--t1)] hover:bg-[var(--raised)] transition-colors"
                   aria-label="Close"
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 8,
+                    border: '1px solid var(--border)',
+                    background: 'var(--raised)',
+                    color: 'var(--t2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
                 >
-                  <X size={16} />
+                  <X size={14} />
                 </button>
               </div>
             )}
             <div>{children}</div>
             {footer != null && (
-              <div className="p-2 border-t border-[var(--border)]">{footer}</div>
+              <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
+                {footer}
+              </div>
             )}
           </motion.div>
         </motion.div>

@@ -1,5 +1,5 @@
 # Athena — Codebase Status
-## 2026-03-12
+## 2026-03-16
 
 ---
 
@@ -21,7 +21,7 @@
 |---|---|---|
 | `api/chat.py` | ~390 | SSE streaming, conv management, doc attach/detach/batch |
 | `api/documents.py` | ~300 | Upload, ingestion, progress, delete, conversations |
-| `api/collections.py` | ~30 | Stub — get/create only, no real logic yet |
+| `api/collections.py` | ~175 | Fully complete — 6 endpoints, Pydantic models, response_model |
 | `api/system.py` | ~85 | Health, resources, models |
 | `api/auth.py` | ~29 | Login, /me |
 | `api/research.py` | ~20 | Stub |
@@ -39,6 +39,58 @@
 | `models/chat.py` | ~50 | ChatRequest, ConversationOut, MessageOut |
 | `models/auth.py` | ~18 | Token, UserOut |
 | `models/system.py` | ~21 | ResourceStats, HealthResponse |
+| `models/collections.py` | ~60 | CollectionNameRequest, CollectionDocumentsRequest, CollectionItem, CollectionsListResponse, CollectionMutateResponse, CollectionDocumentsMutateResponse |
+
+---
+
+## What Was Worked On This Session (2026-03-16)
+
+### Collections API — Now Fully Correct
+
+**`api/collections.py` — all 6 endpoints hardened:**
+- Fixed `PUT /{collection_id}` — was missing `body: dict` param entirely; `name` was undefined, would `NameError` on any rename call. Rewritten with `CollectionNameRequest` body.
+- Fixed `POST /{collection_id}/documents` — was missing `@` decorator (route never registered with FastAPI); was using wrong SQL (`INSERT INTO collection_documents` join table doesn't exist); `document_id` undefined. Replaced with correct `UPDATE documents SET collection_id = $1 WHERE document_id = ANY($2) AND user_id = $3`.
+- Fixed `DELETE /{collection_id}/documents` — WHERE clause missing `AND collection_id = $3`. Without it, passing doc IDs from a different collection would silently unassign them from the wrong collection.
+- Fixed `DELETE /{collection_id}` — documents UPDATE was missing `AND user_id = $2`, allowing a crafted request to NULL docs from any collection by ID.
+- Added `_get_collection(collection_id, user_id)` private helper — used by both document endpoints for 404 checking before mutation.
+- Added `_parse_update_count(status)` helper — parses asyncpg `"UPDATE 3"` string to int for `updated` field in responses.
+
+**`models/collections.py` — Pydantic models wired throughout:**
+- Merged `CreateCollectionRequest` + `UpdateCollectionRequest` into single `CollectionNameRequest` (were identical).
+- All endpoints now use `response_model=` on decorators.
+- All request bodies use Pydantic models — no more `body: dict`.
+- Create endpoint uses `RETURNING collection_id, name, created_at` to get `created_at` from DB without a second query.
+- Decided: no `color` field — removed from spec and schema.
+
+### Upload Modal — Stage 1 Styled Per Spec
+
+**`components/ui/Modal.tsx`:**
+- Default width: `max-w-[520px]`
+- Animation: scale `0.95 → 0.97`, easing `cubic-bezier(0.4,0,0.2,1)`
+- Header: padding `16px 20px 14px`, `align-items: flex-start` (title has two lines)
+- Close button: now has `border: 1px solid var(--border)`, `background: var(--raised)`, `width/height: 28px`, `border-radius: 8px`
+- Footer: padding `12px 20px`
+
+**`components/documents/UploadModal.tsx` — Stage 1 fully implemented:**
+- Dynamic stage title (`"Add Files"` / `"Save to Collection"` / `"Indexing…"` / `"Import Complete"`) with progress dots below
+- Drop zone: flex row layout — icon box left, label + format pills center, Browse button right. `isDragOver` state for blue border/tint.
+- Format pills: monospace font, `border-radius: 4px`, values PDF/MD/DOCX/TXT
+- URL input: inset `<Link2>` icon absolutely positioned at left 10px
+- File queue empty state: centered "No files added yet"
+- File queue rows: full cards with colored `TypeBadge` (PDF=red, MD=blue, DOC=purple, TXT=green), filename, file size (`formatSize()`), per-item remove button with staggered `animate-fade-up`
+- Footer: left side = dynamic status text, Next disabled (`opacity: 0.45, pointerEvents: none`) when queue empty, correct labels per stage (Next/Start Import/Close)
+- Stages 2 and 3 remain placeholders
+
+**`app/globals.css` — missing utility classes added:**
+- `.btn-g` and `.btn-p` — spec aliases for ghost and primary buttons
+- `.inp` — input shorthand matching spec exactly
+- `.slabel` — section label (10px/700/uppercase/0.08em tracking/`--t4`)
+- `.df` — display font utility (`--fd`/800/−0.025em tracking)
+- `.glass-modal` box-shadow updated to deeper spec value: `0 24px 60px rgba(0,0,0,0.5)`
+
+### DEPLOYMENT.md Updated
+- Two deployment paths: Mac (`docker-compose.mac.yml`) and GPU desktop (`docker-compose.yml`)
+- Removed outdated `docker-compose.gpu.yml` reference
 
 ---
 
@@ -228,8 +280,12 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | GET | `/api/documents/progress/active` | ✅ bulk active |
 | GET | `/api/documents/{id}/conversations` | ✅ |
 | DELETE | `/api/documents/{id}` | ✅ |
-| GET | `/api/collections` | ⚠️ skeleton only |
-| POST | `/api/collections/create-collection` | ⚠️ stub |
+| GET | `/api/collections` | ✅ with document_count |
+| POST | `/api/collections` | ✅ |
+| PUT | `/api/collections/{id}` | ✅ rename, 409 on duplicate |
+| DELETE | `/api/collections/{id}` | ✅ nulls documents, then deletes |
+| POST | `/api/collections/{id}/documents` | ✅ batch assign |
+| DELETE | `/api/collections/{id}/documents` | ✅ batch unassign |
 | GET | `/api/system/health` | ✅ |
 | GET | `/api/system/resources` | ✅ (storage stats return 0) |
 | GET | `/api/system/models` | ✅ |
@@ -256,8 +312,8 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | 7 | Medium | Storage stats return 0.0 — `/api/system/resources` NVMe/HDD percentages hardcoded to 0 (Redis cache not yet wired) | `api/system.py` |
 | 8 | Medium | `.glass`, `.glass-subtle`, `.glass-strong` removed from globals.css — multiple components referencing these classes now render with no background | Various components |
 | 9 | Low | Muting docs is UI-only — `mutedIds` in `DocumentBar` never sent to backend | `DocumentBar.tsx` |
-| 10 | Low | Collections API skeleton only — table exists, endpoint returns rows, but create/update/delete not implemented | `api/collections.py` |
-| 11 | Low | `color` column missing from `collections` table — schema has `name` and `created_at` but no `color` field yet | `schema.sql` |
+| 10 | Low | `GET /api/documents` missing `collection_id` filter param and doesn't return `collection_id`/`collection_name` per row — frontend can't show collection assignment | `api/documents.py` |
+| 11 | Low | `POST /api/documents/upload` doesn't accept `collection_id` — can't assign collection at import time | `api/documents.py` |
 
 ---
 
@@ -288,7 +344,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | Phase F1: Design System | ✅ Done | Structural Glass tokens, Slate default, all CSS utility classes |
 | Phase F2: Glass Audit | 0% | 15+ components still reference undefined glass classes |
 | Phase F3: Layout Shell Polish | 0% | AppShell, Sidebar, SystemFooter need token updates |
-| Phase F4: Library View + Collections | 0% | Backend schema ready; frontend two-pane layout not started |
+| Phase F4: Library View + Collections | 20% | Collections backend fully complete; upload modal stage 1 styled; stages 2+3, documents.py collection wiring, and library filter wiring remain |
 | Phase 3: Learning Features | 0% | |
 | Phase 4: Two-Tier Knowledge | 0% | |
 | Phase 5: Research Pipeline | 0% | |
@@ -319,7 +375,8 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | Structural Glass token system (globals.css) | ✅ |
 | Glass audit (component rewrites) | ❌ F2 pending |
 | Library two-pane layout + collections | ❌ F4 pending |
-| 4-stage upload modal | ❌ F4 pending |
+| 4-stage upload modal — Stage 1 | ✅ styled per spec |
+| 4-stage upload modal — Stages 2+3 | ❌ F4 pending |
 | Chat message anatomy update | ❌ F5 pending |
 | System panel (ArcGauge, Sparkline) | ❌ F6 pending |
 | URL ingestion (real, not preview) | ❌ blocked on Crawl4AI shape validation |
@@ -335,4 +392,4 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 ---
 
-*Athena · Codebase Status · 2026-03-11*
+*Athena · Codebase Status · 2026-03-16*

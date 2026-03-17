@@ -256,6 +256,12 @@ body {
 .btn-success { background: var(--green-a); border-color: var(--green-br);  color: var(--green); }
 .btn-danger  { background: var(--red-a);   border-color: var(--red-br);    color: var(--red); }
 
+/* Spec aliases */
+.btn-g { background: var(--raised); border-color: var(--border); color: var(--t2); }
+.btn-g:hover { background: var(--raised-h); color: var(--t1); }
+.btn-p { background: var(--blue); border-color: transparent; color: #fff; }
+.btn-p:hover { background: #2d6be4; }
+
 /* ─────────────────────────────────────────────────────────────
    Progress bars
 ───────────────────────────────────────────────────────────── */
@@ -418,10 +424,43 @@ body {
   background: rgba(7,7,9,0.72);
 }
 .glass-modal {
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--border-s);
   border-radius: 20px;
-  box-shadow: var(--panel-shadow);
+  box-shadow: 0 0 0 1px rgba(128,128,128,0.06), 0 24px 60px rgba(0,0,0,0.5);
+}
+
+/* Input shorthand */
+.inp {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 7px 11px;
+  color: var(--t1);
+  font-size: 13px;
+  font-family: var(--fb);
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+.inp::placeholder { color: var(--t4); }
+.inp:focus { border-color: var(--border-s); }
+
+/* Section label */
+.slabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t4);
+  font-family: var(--fb);
+}
+
+/* Display font utility */
+.df {
+  font-family: var(--fd);
+  font-weight: 800;
+  letter-spacing: -0.025em;
 }
 
 /* ─────────────────────────────────────────────────────────────

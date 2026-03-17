@@ -1,24 +1,40 @@
 # Athena — TODO
 
 Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scoped retrieval, sentence-aware
-chunking, scope bar, full collections CRUD (backend + frontend), and Structural Glass design system all done.
+chunking, scope bar, full collections CRUD (backend + frontend), Structural Glass design system, and upload modal stage 1 all done.
 
 ~~Fix `MAX_RRF_SCORE` NameError~~ ✓ Done
 ~~Fix `httpx` missing import in `main.py`~~ ✓ Done
-~~Collections backend CRUD~~ ✓ Done (all 6 endpoints)
+~~Collections backend CRUD~~ ✓ Done (all 6 endpoints, Pydantic models, response_model)
 ~~Collections frontend~~ ✓ Done (create, rename, delete, selection all wired)
+~~Upload modal stage 1~~ ✓ Done (drop zone, type badges, file size, URL icon, empty state, staggered animation)
+~~Modal shell styling~~ ✓ Done (520px, correct shadow, close button border, scIn animation)
+~~CSS utility classes~~ ✓ Done (.btn-g, .btn-p, .inp, .slabel, .df added to globals.css)
 
 ---
 
 **Next up (in order):**
 
-### Library View — Remaining Wiring (current focus)
-1. **Wire collection filter to DocumentList** — `selectedCollections` is tracked in `DocumentsPanel` but never passed to `DocumentList`. Add `collectionIds: string[]` prop. Backend: add optional `collection_id` query param to `GET /api/documents` with `AND ($n = '' OR collection_id = $n)` filter.
-2. **Wire DocumentTypeSelector tab to DocumentList** — `tab` state set by `handleSelectDocType` but never passed down. Add `fileType: string` prop to `DocumentList`, filter by `file_type` in the backend query.
-3. **Fix "X Documents" header count** — hardcoded string. Add `total: int` to `GET /api/documents` response (separate `COUNT(*)` query). Frontend reads it on fetch.
-4. **Document assign to collection UX** — no way to assign a doc to a collection from the document list. Add "Move to collection" in the document row action menu — calls `POST /api/collections/{id}/documents`. Consider a submenu or small popover listing available collections.
-5. **Remove debug red border** — `DocumentList.tsx` line ~403 has `border-2 border-red-800` left from debugging.
-6. **Remove duplicate `refetchCollections` call** — `DocumentsPanel` calls it at both lines 101 and 167. Delete the duplicate at line 167.
+### Upload Modal — Stages 2 + 3 (current focus)
+
+1. **Stage 2 — Save to Collection** — file summary bar (count + truncated filename + Edit back button), collection pill picker fetched from `GET /api/collections`, "No collection" option, inline `+` New input that creates a collection on Enter and immediately selects it.
+2. **Stage 3 — Indexing** — info banner with spinner + status text + "You can close this" hint, per-file job cards (spinner, filename, percentage, progress bar, phase label: Parsing/Chunking/Generating embeddings), all-done green state when complete.
+3. **Wire `collection_id` to upload** — `POST /api/documents/upload` needs to accept optional `collection_id` form field. `UploadModal` passes selected collection from stage 2 into the upload request.
+
+### documents.py — Collection Support
+
+4. **`GET /api/documents` — add `collection_id` filter** — optional query param `collection_id: str = ""`. SQL: `AND ($n = '' OR d.collection_id = $n)`. Also add `total` to response.
+5. **`GET /api/documents` — return collection fields per row** — add `collection_id`, `collection_name` (via JOIN) to each document row. `DocumentOut` model needs these nullable fields.
+6. **`POST /api/documents/upload` — accept `collection_id`** — optional form field. Write it directly to the `documents` row on INSERT.
+
+### Library View — Remaining Wiring
+
+7. **Wire collection filter to DocumentList** — `selectedCollections` tracked in `DocumentsPanel` but never passed to `DocumentList`. Pass `collectionIds: string[]` prop, send as query param.
+8. **Wire DocumentTypeSelector tab to DocumentList** — `tab` state never passed down. Add `fileType: string` prop, filter by `file_type` in backend query.
+9. **Fix "X Documents" header count** — hardcoded string. Read `total` from `GET /api/documents` response.
+10. **Document assign to collection UX** — "Move to collection" in document row `•••` menu → calls `POST /api/collections/{id}/documents`. Small popover listing available collections.
+11. **Remove debug red border** — `DocumentList.tsx` line ~403 has `border-2 border-red-800`.
+12. **Remove duplicate `refetchCollections` call** — `DocumentsPanel` calls it at lines 101 and 167.
 
 ### RAG Scoring Audit
 - [ ] **Audit RRF score accuracy** — with scoring unblocked, verify numbers are meaningful. With `k=60` and ~20 results, max RRF score is ~2*(1/61) ≈ 0.033 — too small to display raw. Normalize against top result score so displayed scores span `0.0–1.0`. Add debug log of top-5 chunk_ids + scores in `retrieve()` for validation.
@@ -64,9 +80,9 @@ chunking, scope bar, full collections CRUD (backend + frontend), and Structural 
   `sent_tokenize`, 500-token chunks, 50-token sentence-level overlap. PDF hyphenated line breaks normalized.
 - [x] **RAG threshold incompatible with hybrid search** — duplicate of item above; confirmed fixed.
 - [ ] **URL ingestion is a scraper preview, not real ingestion** — `POST /api/documents/url` calls Crawl4AI and returns the raw markdown payload to the frontend. It never creates a `documents` row, never chunks/embeds, never stores in Qdrant. The frontend renders a markdown preview. Nothing is actually ingested. Additionally, the backend doesn't handle the case where `markdown` is an object (`{ raw_markdown, markdown_with_citations }`) — only the string case works.
-- [ ] **`MAX_RRF_SCORE` undefined** — `core/rag.py` references `MAX_RRF_SCORE` but it is never defined. Will raise `NameError` on any hybrid search request that reaches the RRF step. Define it as a constant or remove the reference.
-- [ ] **`httpx` not imported in `main.py`** — lifespan model warmup block uses `httpx.AsyncClient` but `httpx` is not imported at the top of the file. Warmup silently fails on every boot (caught by bare `except`). Add `import httpx`.
-- [ ] **`collections` table missing `color` column** — `schema.sql` defines `collections` with `name` and `created_at` but no `color` field. The current API and frontend don't use color yet, but the original spec required it. Add `color VARCHAR(20) NOT NULL DEFAULT '#3b7cf4'` when wiring rename (the PUT endpoint will need to accept it).
+- [x] **`MAX_RRF_SCORE` undefined** — removed reference. Fixed.
+- [x] **`httpx` not imported in `main.py`** — added import. Fixed.
+- [x] **`collections` color column** — decided no color field. Removed from spec entirely.
 - [ ] **No deduplication in RAG** — can return near-identical chunks from the same document. Add a
   minimum chunk distance check or a per-document chunk cap before returning sources.
 - [x] **RAG sources not persisting across page reload** — `save_message` never stored `rag_sources`;

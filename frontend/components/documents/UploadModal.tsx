@@ -1,11 +1,55 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { FileIcon, Upload } from 'lucide-react';
+import { Link2, Upload, X } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
-import { cn } from '@/utils/cn';
 
 export type UploadStage = 1 | 2 | 3 | 4;
+
+export type QueuedItem =
+  | { type: 'file'; id: string; file: File }
+  | { type: 'url'; id: string; url: string };
+
+function normalizeUrl(u: string): string {
+  try {
+    const parsed = new URL(u.trim());
+    return `${parsed.origin}${parsed.pathname.replace(/\/$/, '')}${parsed.search}`;
+  } catch {
+    return u.trim().toLowerCase();
+  }
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getTypeMeta(filename: string): { label: string; bg: string; border: string; color: string } {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  if (ext === 'pdf') return { label: 'PDF', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.22)', color: 'var(--red)' };
+  if (ext === 'md' || ext === 'markdown') return { label: 'MD', bg: 'rgba(59,124,244,0.1)', border: 'rgba(59,124,244,0.22)', color: 'var(--blue)' };
+  if (ext === 'docx') return { label: 'DOC', bg: 'rgba(167,139,250,0.1)', border: 'rgba(167,139,250,0.22)', color: 'var(--purple)' };
+  if (ext === 'txt') return { label: 'TXT', bg: 'rgba(52,211,153,0.1)', border: 'rgba(52,211,153,0.22)', color: 'var(--green)' };
+  if (ext === 'csv') return { label: 'CSV', bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.22)', color: 'var(--amber)' };
+  return { label: ext.toUpperCase().slice(0, 3) || 'FILE', bg: 'var(--raised-a)', border: 'var(--border)', color: 'var(--t3)' };
+}
+
+function TypeBadge({ filename }: { filename: string }) {
+  const { label, bg, border, color } = getTypeMeta(filename);
+  return (
+    <div style={{ width: 28, height: 28, borderRadius: 7, background: bg, border: `1px solid ${border}`, color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <span style={{ fontSize: '8.5px', fontWeight: 700, fontFamily: 'var(--fm)', letterSpacing: '0.04em' }}>{label}</span>
+    </div>
+  );
+}
+
+const STAGE_TITLES: Record<UploadStage, string> = {
+  1: 'Add Files',
+  2: 'Save to Collection',
+  3: 'Indexing…',
+  4: 'Import Complete',
+};
 
 interface UploadModalProps {
   open: boolean;
@@ -14,46 +58,59 @@ interface UploadModalProps {
 
 export function UploadModal({ open, onClose }: UploadModalProps) {
   const [stage, setStage] = useState<UploadStage>(1);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [items, setItems] = useState<QueuedItem[]>([]);
+  const [url, setUrl] = useState('');
+  const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [url, setUrl] = useState<string>('');
 
   const handleClose = () => {
     setStage(1);
-    setSelectedFiles([]);
+    setItems([]);
+    setUrl('');
+    setIsDragOver(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     onClose();
   };
 
   const addFiles = (files: File[]) => {
     if (!files.length) return;
-    setSelectedFiles((prev) => {
-      const existing = new Set(prev.map((f) => `${f.name}:${f.size}`));
-      const deduplicated = files.filter((f) => !existing.has(`${f.name}:${f.size}`));
-      return [...prev, ...deduplicated];
+    setItems((prev) => {
+      const existingKeys = new Set(
+        prev.filter((i): i is QueuedItem & { type: 'file' } => i.type === 'file').map((i) => `${i.file.name}:${i.file.size}`)
+      );
+      const deduped = files.filter((f) => !existingKeys.has(`${f.name}:${f.size}`));
+      return [...prev, ...deduped.map((file) => ({ type: 'file' as const, id: crypto.randomUUID(), file }))];
     });
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files?.length) addFiles(Array.from(files));
+  const handleAddUrl = () => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    try { new URL(withProtocol); } catch { return; }
+    const normalized = normalizeUrl(withProtocol);
+    setItems((prev) => {
+      const existingUrls = new Set(
+        prev.filter((i): i is QueuedItem & { type: 'url' } => i.type === 'url').map((i) => normalizeUrl(i.url))
+      );
+      if (existingUrls.has(normalized)) return prev;
+      return [...prev, { type: 'url', id: crypto.randomUUID(), url: withProtocol }];
+    });
+    setUrl('');
   };
 
-  const triggerFileInput = () => fileInputRef.current?.click();
+  const removeItem = (id: string) => setItems((prev) => prev.filter((i) => i.id !== id));
+  const clearAll = () => { setItems([]); setUrl(''); if (fileInputRef.current) fileInputRef.current.value = ''; };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    addFiles(Array.from(e.dataTransfer.files));
-  };
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(true); };
+  const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); setIsDragOver(false); };
+  const handleDrop = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(false); addFiles(Array.from(e.dataTransfer.files)); };
 
-  const handleAddURL = () => {
-    console.log('add URL');
+  const footerStatusText = () => {
+    if (stage === 1) return items.length === 0 ? 'Add files to continue' : `${items.length} file(s) ready`;
+    if (stage === 2) return 'Save to collection';
+    if (stage === 3) return 'Indexing continues in the background';
+    return 'Done — files added to library';
   };
 
   return (
@@ -61,133 +118,204 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
       open={open}
       onClose={handleClose}
       title={
-        <div className="flex items-center gap-3 w-full">
-          <span>Upload</span>
-          <div className="flex gap-1 flex-1" aria-label={`Step ${stage} of 4`}>
+        <div>
+          <p className="df" style={{ fontSize: 15, color: 'var(--t1)' }}>
+            {STAGE_TITLES[stage]}
+          </p>
+          <div style={{ display: 'flex', gap: 6, marginTop: 5 }}>
             {([1, 2, 3, 4] as const).map((s) => (
               <div
                 key={s}
-                className={cn(
-                  'h-1 flex-1 rounded-full transition-colors duration-200',
-                  s <= stage ? 'bg-[var(--blue)]' : 'bg-[var(--border)]'
-                )}
+                style={{
+                  height: 3,
+                  width: 28,
+                  borderRadius: 2,
+                  background: s <= stage ? 'var(--blue)' : 'var(--border)',
+                  transition: 'background 0.3s',
+                }}
               />
             ))}
           </div>
         </div>
       }
-      maxWidth="max-w-lg"
       footer={
-        <div className="flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={handleClose}
-            className="px-3 py-1.5 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-[var(--raised)] transition-colors"
-          >
-            Cancel
-          </button>
-          <div className="flex gap-2">
-            {stage > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: '11.5px', color: 'var(--t4)', fontFamily: 'var(--fb)' }}>
+            {footerStatusText()}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {stage < 3 && (
               <button
                 type="button"
-                onClick={() => setStage((prev) => (prev - 1) as UploadStage)}
-                className="px-3 py-1.5 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-[var(--raised)] transition-colors"
+                className="btn btn-g"
+                onClick={stage === 1 ? handleClose : () => setStage((prev) => (prev - 1) as UploadStage)}
               >
-                Back
+                {stage === 1 ? 'Cancel' : 'Back'}
               </button>
             )}
             {stage < 4 ? (
               <button
                 type="button"
+                className="btn btn-p"
+                style={stage === 1 && items.length === 0 ? { opacity: 0.45, pointerEvents: 'none' } : {}}
                 onClick={() => setStage((prev) => (prev + 1) as UploadStage)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${selectedFiles.length > 0 || url.length > 0 ? 'bg-[var(--blue)]' : 'bg-[var(--border)]'} text-white hover:opacity-90 transition-opacity`}
               >
-                Next
+                {stage === 1 ? 'Next' : stage === 2 ? 'Start Import' : 'Close'}
               </button>
             ) : (
-              <button
-                type="button"
-                onClick={handleClose}
-                className="px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--blue)] text-white hover:opacity-90 transition-opacity"
-              >
-                View in Library
-              </button>
+              <button type="button" className="btn btn-p" onClick={handleClose}>Close</button>
             )}
           </div>
         </div>
       }
     >
-      <div className="p-4">
-        {/* Stage 1 — Drop */}
+      <div style={{ padding: '16px 20px' }}>
+
+        {/* ── Stage 1 — Add Files ── */}
         {stage === 1 && (
-          <div className="space-y-4">
+          <div>
             <input
               ref={fileInputRef}
               type="file"
               multiple
-              onChange={handleFileChange}
+              onChange={(e) => { if (e.target.files?.length) addFiles(Array.from(e.target.files)); }}
               className="hidden"
-              accept=".pdf,.md,.markdown,.txt,text/plain,text/markdown,application/pdf"
+              accept=".pdf,.md,.markdown,.txt,.docx,.csv,text/plain,text/markdown,application/pdf"
             />
-            <button
-              type="button"
-              onClick={triggerFileInput}
+
+            {/* Drop zone */}
+            <div
               onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              className={cn(
-                'w-full border-2 border-dashed rounded-xl p-4 text-center transition-colors cursor-pointer flex',
-                'border-[var(--border)] hover:border-[var(--blue-br)] bg-[var(--raised)]/30'
-              )}
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                border: `2px dashed ${isDragOver ? 'var(--blue)' : 'var(--border-s)'}`,
+                borderRadius: 12,
+                padding: '18px 20px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 14,
+                cursor: 'pointer',
+                marginBottom: 12,
+                background: isDragOver ? 'var(--blue-b)' : 'transparent',
+                transition: 'all 0.15s',
+              }}
             >
-              <div className="flex items-center justify-center w-10 h-10 border rounded-lg">
-                <Upload className=" text-[var(--t3)]" />
+              {/* Icon box */}
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--raised-h)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Upload size={16} strokeWidth={1.8} style={{ color: 'var(--t2)' }} />
               </div>
-              <div className="flex flex-col gap-2 items-start">
-                <p className="text-sm text-[var(--t1)]">Drop files here or click to browse</p>
-                <div className="flex flex-wrap gap-2">
-                  {['PDF', 'Markdown', 'TXT', 'Web'].map((fmt) => (
-                    <span
-                      key={fmt}
-                      className="px-2.5 py-1 rounded-full text-xs font-medium border border-[var(--border)] text-[var(--t2)] bg-[var(--raised)]"
-                    >
+
+              {/* Label + format pills */}
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--t1)', fontFamily: 'var(--fb)', marginBottom: 6 }}>
+                  Drop files here
+                </p>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {['PDF', 'MD', 'DOCX', 'TXT'].map((fmt) => (
+                    <span key={fmt} style={{ fontSize: '10px', padding: '1px 6px', borderRadius: 4, background: 'var(--raised-a)', border: '1px solid var(--border)', color: 'var(--t4)', fontFamily: 'var(--fm)' }}>
                       {fmt}
                     </span>
                   ))}
                 </div>
               </div>
 
-            </button>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Or paste a URL..."
-                className= "w-full px-3 py-2 rounded-lg bg-[var(--raised)] border border-[var(--border)] text-sm text-[var(--t1)] placeholder:text-[var(--t3)] outline-none focus:border-[var(--blue-br)]"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-              />
+              {/* Browse button */}
               <button
                 type="button"
-                onClick={handleAddURL}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${url.length > 0 ? 'bg-[var(--blue)]' : 'bg-[var(--border)]'} text-white hover:opacity-90 transition-opacity`}
+                className="btn btn-g"
+                style={{ fontSize: 12, padding: '6px 13px', flexShrink: 0 }}
+                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
               >
+                Browse
+              </button>
+            </div>
+
+            {/* URL row */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <Link2 size={12} strokeWidth={2} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--t4)', pointerEvents: 'none' }} />
+                <input
+                  type="text"
+                  placeholder="Paste a URL…"
+                  className="inp"
+                  style={{ paddingLeft: 28 }}
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddUrl())}
+                />
+              </div>
+              <button type="button" className="btn btn-g" style={{ fontSize: 12, flexShrink: 0 }} onClick={handleAddUrl}>
                 Add
               </button>
             </div>
 
-            {selectedFiles.length > 0 && (
+            {/* File queue — empty */}
+            {items.length === 0 && (
+              <p style={{ textAlign: 'center', padding: '18px 0 4px', color: 'var(--t4)', fontSize: '12.5px', fontFamily: 'var(--fb)' }}>
+                No files added yet
+              </p>
+            )}
+
+            {/* File queue — populated */}
+            {items.length > 0 && (
               <div>
-                <div className="flex items-center justify-between py-2">
-                  <span className="block text-xs font-medium text-[var(--t3)] uppercase tracking-wider">
-                    {selectedFiles.length} file(s) queued 
-                  </span>
-                  <button type="button" className="text-xs font-medium text-[var(--t3)] uppercase tracking-wider">Clear all</button>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span className="slabel">{items.length} item(s) queued</span>
+                  <button type="button" onClick={clearAll} style={{ fontSize: 11, color: 'var(--t4)', fontFamily: 'var(--fb)', background: 'none', border: 'none', cursor: 'pointer' }}>
+                    Clear all
+                  </button>
                 </div>
-                <div className="flex flex-col gap-2">
-                  {selectedFiles.map((file) => (
-                    <span key={file.name} className="px-2.5 py-1 rounded-md text-xs font-medium border border-[var(--border)] text-[var(--t2)] bg-[var(--raised)]">
-                      <FileIcon className="w-4 h-4 mr-1" />
-                      {file.name}
-                    </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 180, overflowY: 'auto' }}>
+                  {items.map((item, i) => (
+                    <div
+                      key={item.id}
+                      className="animate-fade-up"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '8px 12px',
+                        background: 'var(--raised)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 9,
+                        animationDelay: `${i * 0.04}s`,
+                      }}
+                    >
+                      {item.type === 'file' ? (
+                        <>
+                          <TypeBadge filename={item.file.name} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: '12.5px', color: 'var(--t1)', fontWeight: 500, fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {item.file.name}
+                            </p>
+                            <p style={{ fontFamily: 'var(--fm)', fontSize: 11, color: 'var(--t3)', marginTop: 1 }}>
+                              {formatSize(item.file.size)}
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div style={{ width: 28, height: 28, borderRadius: 7, background: 'rgba(59,124,244,0.1)', border: '1px solid rgba(59,124,244,0.22)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <Link2 size={12} />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: '12.5px', color: 'var(--t1)', fontWeight: 500, fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {item.url}
+                            </p>
+                            <p style={{ fontFamily: 'var(--fm)', fontSize: 11, color: 'var(--t3)', marginTop: 1 }}>URL</p>
+                          </div>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeItem(item.id)}
+                        style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--t4)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -195,36 +323,29 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
           </div>
         )}
 
-        {/* Stage 2 — Files */}
+        {/* ── Stage 2 — Save to Collection (placeholder) ── */}
         {stage === 2 && (
-          <div className="space-y-4">
-            <p className="text-sm text-[var(--t2)]">File list with type badge and remove. Collection picker. Auto-tag / Summary / Chunking toggles.</p>
-            <div className="rounded-lg border border-[var(--border)] p-4 bg-[var(--raised)]/30 min-h-[120px]">
-              <p className="text-xs text-[var(--t3)] font-mono">(No files staged — flow only)</p>
-            </div>
+          <div style={{ minHeight: 120 }}>
+            <p style={{ fontSize: 13, color: 'var(--t2)', fontFamily: 'var(--fb)' }}>Collection picker — coming soon.</p>
           </div>
         )}
 
-        {/* Stage 3 — Processing */}
+        {/* ── Stage 3 — Indexing (placeholder) ── */}
         {stage === 3 && (
-          <div className="space-y-4">
-            <p className="text-sm text-[var(--t2)]">Per-file progress bars. Parsing → Chunking → Embeddings.</p>
-            <div className="rounded-lg border border-[var(--border)] p-4 bg-[var(--raised)]/30 min-h-[120px]">
-              <p className="text-xs text-[var(--t3)] font-mono">(Processing placeholder)</p>
-            </div>
+          <div style={{ minHeight: 120 }}>
+            <p style={{ fontSize: 13, color: 'var(--t2)', fontFamily: 'var(--fb)' }}>Indexing — coming soon.</p>
           </div>
         )}
 
-        {/* Stage 4 — Done */}
+        {/* ── Stage 4 — Done ── */}
         {stage === 4 && (
-          <div className="space-y-4 text-center py-4">
-            <div className="w-12 h-12 rounded-full bg-[var(--green-a)] border border-[var(--green-br)] flex items-center justify-center mx-auto text-[var(--green)]">
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-            <p className="text-sm font-medium text-[var(--t1)]">Upload complete</p>
-            <p className="text-xs text-[var(--t3)] font-mono">Files listed with chunk counts</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, background: 'var(--green-a)', border: '1px solid var(--green-br)', borderRadius: 10, justifyContent: 'center' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            <span style={{ fontSize: 13, color: 'var(--green)', fontFamily: 'var(--fb)', fontWeight: 500 }}>
+              All documents added to library
+            </span>
           </div>
         )}
       </div>
