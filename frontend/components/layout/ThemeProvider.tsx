@@ -8,7 +8,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.toggle('light', colorMode === 'light');
+    if (colorMode === 'light') {
+      root.setAttribute('data-theme', 'light');
+    } else {
+      root.removeAttribute('data-theme');
+    }
     root.setAttribute('data-bg', bgTheme);
   }, [colorMode, bgTheme]);
 

@@ -7,23 +7,28 @@ export interface PillProps {
   children: React.ReactNode;
   active?: boolean;
   className?: string;
-  /** When provided, an X appears on the right; click runs this function */
+  /** Optional click handler for interactive pills */
+  onClick?: () => void;
   onDelete?: () => void;
+  fontSize?: number;
 }
 
-export function Pill({ children, active = false, className, onDelete }: PillProps) {
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm transition-colors border border-[var(--border)]',
-        'hover:bg-[var(--raised)]',
-        active
-          ? 'bg-[var(--blue-b)] text-[var(--blue)] hover:bg-[var(--blue-a)]'
-          : 'text-[var(--t2)] hover:text-[var(--t1)]',
-        onDelete && 'pr-1',
-        className
-      )}
-    >
+export function Pill({ children, active = false, className, onDelete, onClick, fontSize = 10 }: PillProps) {
+  const isInteractive = typeof onClick === 'function';
+  const pillClassName = cn(
+    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 transition-colors border border-[var(--border)]',
+    'hover:bg-[var(--raised)]',
+    active
+      ? 'bg-[var(--blue-b)] text-[var(--blue)] hover:bg-[var(--blue-a)]'
+      : 'text-[var(--t2)] hover:text-[var(--t1)]',
+    isInteractive && 'cursor-pointer',
+    onDelete && 'pr-1',
+    className
+  );
+  const pillStyle = { fontSize };
+
+  const content = (
+    <>
       <span className="min-w-0">{children}</span>
       {onDelete && (
         <button
@@ -38,6 +43,20 @@ export function Pill({ children, active = false, className, onDelete }: PillProp
           <X className="w-3 h-3" />
         </button>
       )}
+    </>
+  );
+
+  if (isInteractive) {
+    return (
+      <button type="button" className={pillClassName} style={pillStyle} onClick={onClick}>
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <span className={pillClassName} style={pillStyle}>
+      {content}
     </span>
   );
 }

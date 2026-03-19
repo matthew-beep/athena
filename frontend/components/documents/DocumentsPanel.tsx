@@ -9,7 +9,7 @@ import { FilePlusIcon } from 'lucide-react';
 import { DocumentSideBar } from './DocumentSideBar';
 import { DocumentTypeSelector } from './DocumentTypeSelector';
 import { UploadModal } from './UploadModal';
-import type { CollectionItem, CollectionsListResponse } from '@/types';
+import type { CollectionItem, CollectionMutateResponse, CollectionsListResponse } from '@/types';
 import { Pill } from '@/components/ui/Pill';
 import { useAuthStore } from '@/stores/auth.store';
 
@@ -117,6 +117,13 @@ export function DocumentsPanel() {
   const removeSelectedCollection = (collectionId: string) => {
     setSelectedCollections((prev) => prev.filter((c) => c.collection_id !== collectionId));
   };
+
+  const createCollection = useCallback(async (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    await apiClient.post<CollectionMutateResponse>('/collections', { name: trimmed });
+    await refetchCollections();
+  }, [refetchCollections]);
 
   // refetch collections on mount and on changes
   useEffect(() => {
@@ -228,6 +235,7 @@ export function DocumentsPanel() {
             onSelectCollection={handleSelectCollection}
             onCollectionDeleted={(id) => setSelectedCollections((prev) => prev.filter((c) => c.collection_id !== id))}
             refetchCollections={refetchCollections}
+            onCreateCollection={createCollection}
           />
           <div className="flex flex-col w-full">
 
@@ -246,7 +254,7 @@ export function DocumentsPanel() {
         </div>
       </div>
 
-      <UploadModal open={uploadModalOpen} onClose={() => setUploadModalOpen(false)} />
+      <UploadModal open={uploadModalOpen} onClose={() => setUploadModalOpen(false)} collections={collections} onCreateCollection={createCollection}/>
     </div>
   );
 }

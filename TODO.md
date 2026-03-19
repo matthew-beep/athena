@@ -98,15 +98,47 @@ chunking, scope bar, full collections CRUD (backend + frontend), Structural Glas
 
 - [x] **Sentence-aware chunking** — `chunk_text()` in `ingestion.py` uses nltk `sent_tokenize`.
   500-token chunks, 50-token sentence-level overlap, PDF hyphen normalization. `nltk>=3.9` in requirements.
-- [ ] **Replace pypdf + python-docx with Docling** — current `extract_text()` in `core/ingestion.py`
-  uses `pypdf` for PDFs (loses layout, fails on scanned/image-only PDFs, requires manual hyphen
-  normalization) and `python-docx` for DOCX (loses tables, heading hierarchy, structured content).
-  Replace both with `docling` — unified extraction for PDF, DOCX, PPTX, HTML, and images. Outputs
-  structured markdown so tables/headings/lists survive extraction intact. Built-in OCR handles
-  scanned PDFs that pypdf silently returns empty. The `chunk_text()` function and everything
-  downstream is unchanged — Docling just produces better input. Remove `pypdf` and `python-docx`
-  from `requirements.txt`, add `docling`. Note: Docling is compute-heavy; ensure it still runs
-  inside `asyncio.to_thread` as the current extraction does.
+
+- [ ] **Replace pypdf + python-docx with Docling** — `extract_text()` in `core/ingestion.py` uses
+  `pypdf` (loses layout, fails on scanned PDFs) and `python-docx` (loses tables/heading hierarchy).
+  Replace both with `docling` — unified extraction for PDF, DOCX, PPTX, HTML, images. Outputs
+  structured markdown so tables/headings/lists survive intact. Built-in OCR handles scanned PDFs.
+  `chunk_text()` and everything downstream is unchanged — Docling just produces better input.
+  - Remove `pypdf` and `python-docx` from `requirements.txt`, add `docling`
+  - Keep extraction inside `asyncio.to_thread` — Docling is compute-heavy
+  - Test against: scanned PDF, DOCX with tables, markdown file, plain text
+
+- [ ] **Migrate BM25 to `pg_search` (ParadeDB)** — current `rank_bm25` Python lib is a whitespace
+  tokenizer with no stemming, no fuzzy matching, O(N) in-memory scoring, and ~150 lines of manual
+  cache/rebuild plumbing. `pg_search` (formerly `pg_bm25`) is a Rust/Tantivy Postgres extension
+  with a real inverted index, true BM25 (TF saturation + IDF + length norm), fuzzy matching, and
+  automatic index maintenance on INSERT/UPDATE/DELETE. No Python deps, no cache layer, no manual rebuilds.
+
+  **Migration order:**
+  1. Swap `postgres:16-alpine` → `paradedb/paradedb:16` in both `docker-compose.yml` and
+     `docker-compose.mac.yml`. Drop-in replacement — same env vars, volumes, ports, health check.
+  2. Add `CREATE EXTENSION IF NOT EXISTS pg_search;` to init SQL or new migration.
+  3. Add `filename_normalized` column to `document_chunks` if not already present; backfill from `documents`.
+  4. Write migration: drop `bm25_indexes` table, create BM25 index:
+     ```sql
+     CREATE INDEX document_chunks_search_idx ON document_chunks
+     USING bm25 (chunk_id, text, filename_normalized)
+     WITH (key_field = 'chunk_id');
+     ```
+  5. Rewrite `bm25_search()` in `core/rag.py` — SQL query replaces Python scoring:
+     ```python
+     WHERE text @@@ $1 OR filename_normalized @@@ paradedb.boost(4.0, $1)
+     ORDER BY paradedb.score(chunk_id) DESC LIMIT $2
+     ```
+  6. Test hybrid search end-to-end, compare RRF output vs baseline.
+  7. Delete old BM25 plumbing: `bm25_indexes` table, `_bm25_cache`, `get_or_build_bm25()`,
+     `invalidate_bm25_cache()`, `update_bm25_index()`, `rebuild_bm25_for_tag()`.
+  8. Remove `rank-bm25` from `requirements.txt`.
+  9. Update `find_referenced_document()` — replace exact substring match with `rapidfuzz.fuzz.partial_ratio()`
+     threshold ~75, or drop it entirely and rely on `filename_normalized` field boosting in the BM25 query.
+
+  **What stays the same:** `reciprocal_rank_fusion()`, `hybrid_search()` orchestration, Qdrant vector
+  leg, `asyncpg` connection, all ingestion code.
 - [ ] **Migrate document processing to Celery** — currently using FastAPI `BackgroundTasks`. Move
   `_process_document` into a Celery task in `tasks/ingestion.py`. API returns task ID immediately.
   Requires Redis broker and Celery worker added to Docker Compose.

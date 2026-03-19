@@ -3,7 +3,7 @@
 import { Loader2, PlusIcon, CheckIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { apiClient } from '@/api/client';
-import type { CollectionMutateResponse, CollectionItem } from '@/types';
+import type { CollectionItem } from '@/types';
 import { CollectionsList } from './CollectionsList';
 import { Modal } from '@/components/ui/Modal';
 
@@ -14,10 +14,11 @@ interface DocumentSideBarProps {
   onSelectCollection: (collection: CollectionItem) => void;
   onCollectionDeleted?: (collectionId: string) => void;
   loadingCollections: boolean;
-  refetchCollections: () => void;
+  refetchCollections: () => Promise<void>;
+  onCreateCollection: (name: string) => Promise<void>;
 }
 
-export function DocumentSideBar({ collections, selectedCollections, onSelectCollection, onCollectionDeleted, loadingCollections, refetchCollections }: DocumentSideBarProps) {
+export function DocumentSideBar({ collections, selectedCollections, onSelectCollection, onCollectionDeleted, loadingCollections, refetchCollections, onCreateCollection }: DocumentSideBarProps) {
 
   const [creatingCollection, setCreatingCollection] = useState<boolean>(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -38,10 +39,8 @@ export function DocumentSideBar({ collections, selectedCollections, onSelectColl
     if (!name) return;
   
     try {
-      await apiClient.post<CollectionMutateResponse>('/collections', { name });
+      await onCreateCollection(name);
       setNewCollectionName('');
-      setCreatingCollection(false);
-      await refetchCollections();
     } catch (error) {
       console.error(error);
     } finally {

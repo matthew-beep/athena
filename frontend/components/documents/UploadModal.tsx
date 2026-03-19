@@ -3,6 +3,8 @@
 import { useState, useRef } from 'react';
 import { Link2, Upload, X } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
+import type { CollectionItem } from '@/types';
+import { Pill } from '@/components/ui/Pill';
 
 export type UploadStage = 1 | 2 | 3 | 4;
 
@@ -54,14 +56,18 @@ const STAGE_TITLES: Record<UploadStage, string> = {
 interface UploadModalProps {
   open: boolean;
   onClose: () => void;
+  collections: CollectionItem[];
+  onCreateCollection: (name: string) => Promise<void>;
 }
 
-export function UploadModal({ open, onClose }: UploadModalProps) {
+export function UploadModal({ open, onClose, collections, onCreateCollection }: UploadModalProps) {
   const [stage, setStage] = useState<UploadStage>(1);
   const [items, setItems] = useState<QueuedItem[]>([]);
   const [url, setUrl] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedCollection, setSelectedCollection] = useState<string>("");
+  
 
   const handleClose = () => {
     setStage(1);
@@ -71,6 +77,16 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
     if (fileInputRef.current) fileInputRef.current.value = '';
     onClose();
   };
+
+  const handleCreateCollection = async (name: string) => {
+    try {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      await onCreateCollection(trimmed);
+    } catch (error) {
+      console.error(error);
+    }
+  }
 
   const addFiles = (files: File[]) => {
     if (!files.length) return;
@@ -108,10 +124,11 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
 
   const footerStatusText = () => {
     if (stage === 1) return items.length === 0 ? 'Add files to continue' : `${items.length} file(s) ready`;
-    if (stage === 2) return 'Save to collection';
+    if (stage === 2) return `Saving to: ${selectedCollection ? collections.find((c) => c.collection_id === selectedCollection)?.name : '-'}`;
     if (stage === 3) return 'Indexing continues in the background';
     return 'Done — files added to library';
   };
+  
 
   return (
     <Modal
@@ -214,9 +231,9 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
                 </p>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {['PDF', 'MD', 'DOCX', 'TXT'].map((fmt) => (
-                    <span key={fmt} style={{ fontSize: '10px', padding: '1px 6px', borderRadius: 4, background: 'var(--raised-a)', border: '1px solid var(--border)', color: 'var(--t4)', fontFamily: 'var(--fm)' }}>
+                    <Pill key={fmt}>
                       {fmt}
-                    </span>
+                    </Pill>
                   ))}
                 </div>
               </div>
@@ -249,7 +266,7 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
               <button type="button" className="btn btn-g" style={{ fontSize: 12, flexShrink: 0 }} onClick={handleAddUrl}>
                 Add
               </button>
-            </div>
+            </div> 
 
             {/* File queue — empty */}
             {items.length === 0 && (
@@ -325,8 +342,49 @@ export function UploadModal({ open, onClose }: UploadModalProps) {
 
         {/* ── Stage 2 — Save to Collection (placeholder) ── */}
         {stage === 2 && (
-          <div style={{ minHeight: 120 }}>
-            <p style={{ fontSize: 13, color: 'var(--t2)', fontFamily: 'var(--fb)' }}>Collection picker — coming soon.</p>
+          <div style={{ minHeight: 120 }} className="flex flex-col gap-4">
+            <div className="flex gap-2 bg-[var(--raised)] border border-[var(--border)] rounded-lg p-4 justify-between items-center">
+              <h4 className="text-xs font-medium text-[var(--t1)]">{items.length} items for ingestion</h4>
+              <button 
+                className="text-xs text-[var(--t3)] font-medium"
+                onClick={() => {
+                  setStage(1)
+                }}
+              >
+                Edit
+              </button>
+            </div>
+            <div className="flex flex-col gap-2">
+              <h4 className="slabel">Save to collection</h4>
+            {collections ? (
+              <div>
+                <div className="flex gap-2 flex-wrap">
+                  {collections.map((collection) => (
+                    <Pill
+                      key={collection.collection_id}
+                      fontSize={12}
+                      active={selectedCollection === collection.collection_id}
+                      onClick={() => {
+
+                        if (selectedCollection === collection.collection_id) {
+                          setSelectedCollection("")
+                        } else {  
+                          setSelectedCollection(collection.collection_id)
+                        }
+                      }}
+                    >
+                      <span>{collection.name}</span>
+                    </Pill>
+                  ))}
+                  <Pill fontSize={12} onClick={() => setSelectedCollection("")}>
+                    <span>+</span>
+                  </Pill>
+                </div>
+              </div>
+            ) : (
+                <p>No collections found</p>
+              )}
+            </div>
           </div>
         )}
 
