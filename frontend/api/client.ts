@@ -62,6 +62,17 @@ export const apiClient = {
     }).then((r) => handleResponse<T>(r));
   },
 
+  postForm<T>(path: string, body: FormData): Promise<T> {
+    const token = useAuthStore.getState().token;
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return fetch(`${BASE_URL}${path}`, {
+      method: 'POST',
+      headers,
+      body,
+    }).then((r) => handleResponse<T>(r));
+  },
+
   postStream(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
     const token = useAuthStore.getState().token;
     const headers: Record<string, string> = {

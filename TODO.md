@@ -1,7 +1,7 @@
 # Athena — TODO
 
 Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scoped retrieval, sentence-aware
-chunking, scope bar, full collections CRUD (backend + frontend), Structural Glass design system, and upload modal stage 1 all done.
+chunking, scope bar, full collections CRUD (backend + frontend), Structural Glass design system, upload modal stages 1+2 styled, glass audit (Phase F2) complete, upload modal wired to real API (collection_id atomic, postForm added to apiClient).
 
 ~~Fix `MAX_RRF_SCORE` NameError~~ ✓ Done
 ~~Fix `httpx` missing import in `main.py`~~ ✓ Done
@@ -10,22 +10,40 @@ chunking, scope bar, full collections CRUD (backend + frontend), Structural Glas
 ~~Upload modal stage 1~~ ✓ Done (drop zone, type badges, file size, URL icon, empty state, staggered animation)
 ~~Modal shell styling~~ ✓ Done (520px, correct shadow, close button border, scIn animation)
 ~~CSS utility classes~~ ✓ Done (.btn-g, .btn-p, .inp, .slabel, .df added to globals.css)
+~~Upload modal stage 2 styling~~ ✓ Done (file summary bar, collection pill picker with color dots, inline +New input)
+~~Upload modal stage 3 styling~~ ✓ Done (blue status banner, per-file spinner cards, progress bar shell)
+~~Glass Audit Phase F2~~ ✓ Done (GlassCard, GlassButton, ChatWindow, MessageList, MessageInput, Message, DevModeOverlay, DocumentBar, Sidebar, SystemFooter, MobileHeader, BottomNav, DocumentList, SettingsPanel all migrated off glass-subtle/glass-strong)
+~~Fix `/progress/active` route ordering bug~~ ✓ Done (moved above `/{document_id}/progress` so FastAPI doesn't swallow "progress" as a document_id)
+~~Wire `collection_id` to upload API~~ ✓ Done (`Form(None)` param on `POST /api/documents/upload`, written to INSERT, `collection_id or None` ensures NULL in DB)
+~~`apiClient.postForm` method~~ ✓ Done (added to `frontend/api/client.ts` — sends FormData without setting Content-Type so browser sets multipart boundary automatically)
+~~`runImportFromQueue` two-step workaround removed~~ ✓ Done (collection_id now sent atomically in upload FormData; second `POST /collections/{id}/documents` call eliminated)
 
 ---
 
 **Next up (in order):**
 
-### Upload Modal — Stages 2 + 3 (current focus)
+### Upload Modal — Stage 3 + 4 Wiring (current focus)
 
-1. **Stage 2 — Save to Collection** — file summary bar (count + truncated filename + Edit back button), collection pill picker fetched from `GET /api/collections`, "No collection" option, inline `+` New input that creates a collection on Enter and immediately selects it.
-2. **Stage 3 — Indexing** — info banner with spinner + status text + "You can close this" hint, per-file job cards (spinner, filename, percentage, progress bar, phase label: Parsing/Chunking/Generating embeddings), all-done green state when complete.
-3. **Wire `collection_id` to upload** — `POST /api/documents/upload` needs to accept optional `collection_id` form field. `UploadModal` passes selected collection from stage 2 into the upload request.
+1. **Wire `importResult` into Stage 3** — Stage 3 currently renders `items` (the queue). Replace with `importResult.fileResults`. Failed uploads (`ok: false`) should show an error state immediately instead of a spinner. Successful uploads show their filename from `importResult`.
+2. **Poll `/progress/active` in Stage 3** — on stage 3 mount, start polling `GET /api/documents/progress/active` every 800ms using the `document_ids` from `importResult.documentIds`. Map `{ stage, done, total }` to progress bar % and phase label (`Extracting → Chunking → Embedding`). Stop polling when all document_ids have disappeared from the response.
+3. **Fix Stage 3 footer button** — "Close" on stage 3 currently advances to stage 4 via `handlePrimaryStageAction`. It should close the modal (`handleClose`) while indexing continues in background. Remove stage 3 from the `stage < 4` primary button block and add a standalone Close button.
+4. **Wire Stage 4 to show real results** — Stage 4 currently shows a generic "All documents added" banner. Render per-file outcomes from `importResult`: filename + chunk count (from `GET /api/documents/{id}` or passed from completion detection) + error message for failed files.
+5. **Auto-select new collection after creation** — in stage 2, after `handleCreateCollection` resolves, set `selectedCollection` to the new collection's `collection_id`. Currently the user creates it but it isn't selected.
+~~6. **Wire `collection_id` to upload API**~~ ✓ Done — `Form(None)` param added, INSERT updated, two-step workaround removed from `runImportFromQueue`.
+
+### Collection Colors
+
+1. **Backend: add `color` column to `collections` table** — migration: `ALTER TABLE collections ADD COLUMN color VARCHAR(20) NOT NULL DEFAULT 'var(--blue)'`. Auto-assign from a preset palette on CREATE (cycle through blue/purple/green/amber/red/slate by existing row count). Return `color` in `GET /api/collections`, `POST /api/collections`, `PUT /api/collections/{id}` responses.
+2. **Backend: update Pydantic models** — add `color: str` to `CollectionItem` and `CollectionMutateResponse` in `models/collections.py`. Add `color` to the SELECT in `get_collections` query.
+3. **Backend: `PUT /api/collections/{id}` accepts color** — add optional `color: str | None` to `CollectionNameRequest` (or a new `CollectionUpdateRequest`). Update SQL to set color if provided.
+4. **Frontend: add `color` to `CollectionItem` type** — `frontend/types/index.ts`. Remove `COLLECTION_COLORS` array and the index-based `collectionColor()` fallback from `UploadModal.tsx`. Use `c.color` directly everywhere a collection color is needed.
+5. **Frontend: wire color into `CollectionsList`** — any component rendering collection pills/dots should read `c.color` from the API response, not derive it locally.
 
 ### documents.py — Collection Support
 
 4. **`GET /api/documents` — add `collection_id` filter** — optional query param `collection_id: str = ""`. SQL: `AND ($n = '' OR d.collection_id = $n)`. Also add `total` to response.
 5. **`GET /api/documents` — return collection fields per row** — add `collection_id`, `collection_name` (via JOIN) to each document row. `DocumentOut` model needs these nullable fields.
-6. **`POST /api/documents/upload` — accept `collection_id`** — optional form field. Write it directly to the `documents` row on INSERT.
+~~6. **`POST /api/documents/upload` — accept `collection_id`**~~ ✓ Done — see Upload Modal item 6 above.
 
 ### Library View — Remaining Wiring
 
@@ -82,13 +100,14 @@ chunking, scope bar, full collections CRUD (backend + frontend), Structural Glas
 - [ ] **URL ingestion is a scraper preview, not real ingestion** — `POST /api/documents/url` calls Crawl4AI and returns the raw markdown payload to the frontend. It never creates a `documents` row, never chunks/embeds, never stores in Qdrant. The frontend renders a markdown preview. Nothing is actually ingested. Additionally, the backend doesn't handle the case where `markdown` is an object (`{ raw_markdown, markdown_with_citations }`) — only the string case works.
 - [x] **`MAX_RRF_SCORE` undefined** — removed reference. Fixed.
 - [x] **`httpx` not imported in `main.py`** — added import. Fixed.
-- [x] **`collections` color column** — decided no color field. Removed from spec entirely.
+- [ ] **`collections` color column** — reopened. Add `color VARCHAR(20)` to the `collections` table. See Collection Colors section under Next Up.
 - [ ] **No deduplication in RAG** — can return near-identical chunks from the same document. Add a
   minimum chunk distance check or a per-document chunk cap before returning sources.
 - [x] **RAG sources not persisting across page reload** — `save_message` never stored `rag_sources`;
   `get_messages` SELECT didn't include the column; `MessageOut` had no field. Fixed: added
   `rag_sources JSONB` column (migration 003), updated `context.py`, `models/chat.py`, `api/chat.py`.
 - [x] **RAG scores always 0** — fixed. `vector_scores` map built from Qdrant hits before RRF. Pre-fusion cosine score passed through to each source's `score` field.
+- [x] **`/progress/active` route shadowed by `/{document_id}/progress`** — FastAPI was matching `GET /documents/progress/active` against the parameterized route, treating `"progress"` as a `document_id`. Fixed by moving `GET /progress/active` above `GET /{document_id}/progress` in `documents.py`.
 
 ---
 
@@ -445,32 +464,32 @@ The old `.glass`, `.glass-subtle`, `.glass-strong` classes are no longer defined
 - Nothing — replaces glass on sidebar/nav (floor color, hover only)
 
 **UI primitives — update these first, everything else depends on them:**
-- [ ] **`GlassCard.tsx`** — CRITICAL. Remap variants: default → `bg-[var(--raised)] border border-[var(--border)] rounded-[12px]`, strong → `bg-[var(--surface-2)] border border-[var(--border-s)] rounded-[14px]`. Remove `backdrop-filter` from all variants.
-- [ ] **`GlassButton.tsx`** — replace glass variant references with `.btn-ghost` / `.btn-primary` from globals.css. Remove file entirely if all usages can migrate to the `.btn` classes directly.
-- [ ] **`Modal.tsx`** — replace `.glass-strong` with `.glass-overlay` on backdrop + `.glass-modal` on card. Already close to spec.
+- [x] **`GlassCard.tsx`** — variants remapped: default/subtle → `bg-[var(--raised)] border border-[var(--border)]`, strong → `bg-[var(--surface-2)] border border-[var(--border-s)]`. `glass-hover` → `hover:bg-[var(--raised-h)]`.
+- [x] **`GlassButton.tsx`** — ghost variant: `glass-subtle hover:glass` → `bg-[var(--raised)] border border-[var(--border)] text-[var(--t2)] hover:bg-[var(--raised-h)]`.
+- [ ] **`Modal.tsx`** — already using `.glass-overlay` / `.glass-modal` correctly. No change needed.
 
 **Layout:**
-- [ ] **`AppShell.tsx`** — sidebar div: `background: var(--floor)`, no radius, no shadow, no ceiling-light gradient. Main content: `flex-1 m-[10px] ml-0 bg-[var(--surface)] rounded-[22px] shadow-[var(--panel-shadow)]`.
-- [ ] **`Sidebar.tsx`** — apply `.wordmark` class to "Athena" text. Nav items already use `.nav-item` — verify active state is `bg-[var(--raised-a)] text-[var(--t1)]` not the old foreground/background inversion. Remove any remaining `bg-white/5` or `text-muted-foreground` Tailwind classes.
-- [ ] **`SystemFooter.tsx`** — remove `.glass-subtle`. `background: var(--floor)`, `border-top: 1px solid var(--border)]`. Stat labels → `color: var(--t3)`. Values → `font-family: var(--fm)`. Progress bars → `.prog-bar` / `.prog-fill` classes.
-- [ ] **`MobileHeader.tsx`** — remove `.glass-subtle`. `background: var(--surface)`, `border-bottom: 1px solid var(--border)`.
-- [ ] **`BottomNav.tsx`** — remove `.glass-strong`. `background: var(--surface)`, `border-top: 1px solid var(--border)`.
+- [x] **`AppShell.tsx`** — no glass classes present. Already correct.
+- [x] **`Sidebar.tsx`** — all `hover:bg-white/5` → `hover:bg-[var(--raised-h)]`, active conversation `bg-white/5` → `bg-[var(--raised-h)]`.
+- [x] **`SystemFooter.tsx`** — `glass-subtle` → `bg-[var(--floor)] border-t border-[var(--border)]`.
+- [x] **`MobileHeader.tsx`** — `glass-subtle` → `bg-[var(--surface)] border-b border-[var(--border)]`. `hover:bg-white/5` → `hover:bg-[var(--raised-h)]`.
+- [x] **`BottomNav.tsx`** — `glass-strong` → `bg-[var(--surface)] border-t border-[var(--border)]`.
 
 **Chat:**
-- [ ] **`ChatWindow.tsx`** — remove `.glass-strong` from wrapper. Panel already handled by AppShell `.panel` class — ChatWindow itself should be `h-full flex flex-col` with no background of its own.
-- [ ] **`MessageList.tsx`** — remove `.glass-subtle` from streaming bubble. Streaming state uses `.msg-ai` class.
-- [ ] **`MessageInput.tsx`** — remove `.glass` from input container. Replace with `bg-[var(--raised)] border border-[var(--border)] rounded-[9px]`. Search-all toggle: replace `bg-white/10` with `bg-[var(--raised-h)]`.
-- [ ] **`Message.tsx`** — AI bubble: remove `.glass-subtle`, apply `.msg-ai`. User bubble: apply `.msg-user`. Both defined in globals.css with correct asymmetric border-radius.
-- [ ] **`DocumentBar.tsx`** — replace all `white/X` opacity Tailwind classes (`bg-white/5`, `text-white/30`, etc.) with proper `--t*` tokens. Use `var(--t2)`, `var(--t3)`, `var(--raised)`, `var(--border)`.
-- [ ] **`DevModeOverlay.tsx`** — remove `.glass-subtle`. Replace with `bg-[var(--surface-2)] border border-[var(--border)]`.
+- [x] **`ChatWindow.tsx`** — `glass-strong shadow-glass` removed from chat panel wrapper.
+- [x] **`MessageList.tsx`** — streaming + typing bubbles: `glass-subtle rounded-xl` → `.msg-ai`. Inner prose → `.message-content`.
+- [x] **`MessageInput.tsx`** — `glass` → `bg-[var(--raised)]`. `bg-white/10` → `bg-[var(--raised-h)]`.
+- [x] **`Message.tsx`** — AI bubble → `.msg-ai`, user bubble → `.msg-user`. Inner prose → `.message-content`.
+- [x] **`DocumentBar.tsx`** — all `white/X` opacity classes replaced with `--t3/t4/border/blue/green` tokens.
+- [x] **`DevModeOverlay.tsx`** — `glass-subtle` → `bg-[var(--surface-2)] border border-[var(--border)]`.
 
 **Documents:**
-- [ ] **`UploadZone.tsx`** — remove `.glass`. Drop zone: `bg-[var(--raised)] border border-dashed border-[var(--border-s)]`. Dragover: `border-[var(--blue-br)] bg-[var(--blue-b)]`.
-- [ ] **`DocumentList.tsx`** — remove `.glass` from document item cards. Migrate to `.trow` row pattern. Status badges → `.status-badge .status-complete/.status-processing/.status-error`.
+- [ ] **`UploadZone.tsx`** — still has `.glass`. Drop zone: `bg-[var(--raised)] border border-dashed border-[var(--border-s)]`. Dragover: `border-[var(--blue-br)] bg-[var(--blue-b)]`. (Low priority — UploadZone is largely superseded by UploadModal)
+- [x] **`DocumentList.tsx`** — row cards, icon box, Chat button: `glass`/`glass-subtle` → `bg-[var(--raised/raised-h)] border border-[var(--border)]`.
 
 **Other:**
-- [ ] **`SettingsPanel.tsx`** — remove `.glass-subtle` from color mode buttons. Use `.btn-ghost` or `bg-[var(--raised)]`.
-- [ ] **`LoginPage.tsx`** — remove `GlassCard variant="strong"`. Replace with `bg-[var(--surface-2)] border border-[var(--border-s)] rounded-[20px] shadow-[var(--panel-shadow)]`.
+- [x] **`SettingsPanel.tsx`** — all 4 color mode buttons: `glass-subtle` → `bg-[var(--raised)] border-[var(--border)] text-[var(--t2)]`.
+- [ ] **`LoginPage.tsx`** — uses `GlassCard variant="strong"` which now correctly renders `bg-[var(--surface-2)] border border-[var(--border-s)]` via the fixed GlassCard. No further change needed unless visual polish is wanted.
 
 ---
 

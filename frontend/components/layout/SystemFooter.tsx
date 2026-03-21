@@ -39,7 +39,7 @@ export function SystemFooter({ className }: { className?: string }) {
   const gpuPct = (s.gpu_used_gb / s.gpu_total_gb) * 100;
 
   return (
-    <div className={cn('glass-subtle border-t border-border/30 px-4 py-2 flex items-center gap-5 flex-shrink-0 relative z-10', className)}>
+    <div className={cn('bg-[var(--floor)] border-t border-[var(--border)] px-4 py-2 flex items-center gap-5 flex-shrink-0 relative z-10', className)}>
       <div className="flex items-center gap-2">
         <span className="font-mono text-[10px] text-muted-foreground">NVMe</span>
         <PrecisionBar value={s.nvme_used_pct} color="hsl(217 91% 60%)" />

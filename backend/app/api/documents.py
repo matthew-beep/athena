@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from loguru import logger
 
@@ -197,6 +197,7 @@ async def list_documents(current_user: dict = Depends(get_current_user)):
 async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    collection_id: str | None = Form(None),
     current_user: dict = Depends(get_current_user),
 ):
     filename = file.filename or ""
@@ -221,9 +222,9 @@ async def upload_document(
     file_type = _MIME_TO_TYPE.get(mime, "unknown")
 
     await postgres.execute(
-        """INSERT INTO documents (document_id, filename, file_type, processing_status, word_count, user_id)
-           VALUES ($1, $2, $3, 'processing', 0, $4)""",
-        document_id, filename, file_type, current_user["id"],
+        """INSERT INTO documents (document_id, filename, file_type, processing_status, word_count, user_id, collection_id)
+           VALUES ($1, $2, $3, 'processing', 0, $4, $5)""",
+        document_id, filename, file_type, current_user["id"], collection_id or None,
     )
 
     background_tasks.add_task(_process_document, document_id, body, mime, filename, file_type, current_user["id"])
@@ -275,19 +276,6 @@ async def ingest_url(body: dict, current_user: dict = Depends(get_current_user))
         )
 
 
-@router.get("/{document_id}/progress")
-async def get_document_progress(document_id: str, current_user: dict = Depends(get_current_user)):
-    prog = _progress.get(document_id)
-    if prog is not None:
-        return {**prog, "active": True}
-    # Not actively processing — return DB status as fallback
-    row = await postgres.fetch_one(
-        "SELECT processing_status FROM documents WHERE document_id = $1 AND user_id = $2", document_id, current_user["id"],
-    )
-    if not row:
-        return JSONResponse(status_code=404, content={"detail": "Document not found."})
-    return {"stage": row["processing_status"], "done": 0, "total": 0, "active": False}
-
 @router.get("/progress/active")
 async def get_active_progress(current_user: dict = Depends(get_current_user)):
     rows = await postgres.fetch_all(
@@ -304,6 +292,19 @@ async def get_active_progress(current_user: dict = Depends(get_current_user)):
             # In DB as processing but not in memory — server restarted mid-ingest
             result[doc_id] = {"stage": "processing", "done": 0, "total": 0, "active": False}
     return result
+
+@router.get("/{document_id}/progress")
+async def get_document_progress(document_id: str, current_user: dict = Depends(get_current_user)):
+    prog = _progress.get(document_id)
+    if prog is not None:
+        return {**prog, "active": True}
+    # Not actively processing — return DB status as fallback
+    row = await postgres.fetch_one(
+        "SELECT processing_status FROM documents WHERE document_id = $1 AND user_id = $2", document_id, current_user["id"],
+    )
+    if not row:
+        return JSONResponse(status_code=404, content={"detail": "Document not found."})
+    return {"stage": row["processing_status"], "done": 0, "total": 0, "active": False}
 
 
 

@@ -96,7 +96,7 @@ export function SettingsPanel() {
                   'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border',
                   colorMode === 'dark'
                     ? 'bg-foreground text-background border-foreground'
-                    : 'glass-subtle border-border/40 text-muted-foreground hover:text-foreground'
+                    : 'bg-[var(--raised)] border-[var(--border)] text-[var(--t2)] hover:text-[var(--t1)] hover:bg-[var(--raised-h)]'
                 )}
               >
                 <Moon size={14} />
@@ -108,7 +108,7 @@ export function SettingsPanel() {
                   'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border',
                   colorMode === 'light'
                     ? 'bg-foreground text-background border-foreground'
-                    : 'glass-subtle border-border/40 text-muted-foreground hover:text-foreground'
+                    : 'bg-[var(--raised)] border-[var(--border)] text-[var(--t2)] hover:text-[var(--t1)] hover:bg-[var(--raised-h)]'
                 )}
               >
                 <Sun size={14} />
@@ -163,7 +163,7 @@ export function SettingsPanel() {
                   'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border',
                   colorMode === 'dark'
                     ? 'bg-foreground text-background border-foreground'
-                    : 'glass-subtle border-border/40 text-muted-foreground hover:text-foreground'
+                    : 'bg-[var(--raised)] border-[var(--border)] text-[var(--t2)] hover:text-[var(--t1)] hover:bg-[var(--raised-h)]'
                 )}
               >
                 <Moon size={14} />
@@ -175,7 +175,7 @@ export function SettingsPanel() {
                   'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border',
                   colorMode === 'light'
                     ? 'bg-foreground text-background border-foreground'
-                    : 'glass-subtle border-border/40 text-muted-foreground hover:text-foreground'
+                    : 'bg-[var(--raised)] border-[var(--border)] text-[var(--t2)] hover:text-[var(--t1)] hover:bg-[var(--raised-h)]'
                 )}
               >
                 <Sun size={14} />

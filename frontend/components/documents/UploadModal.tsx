@@ -1,16 +1,103 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { Link2, Upload, X } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { Link2, Upload, X, FileText } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import type { CollectionItem } from '@/types';
 import { Pill } from '@/components/ui/Pill';
+import { apiClient } from '@/api/client';
 
 export type UploadStage = 1 | 2 | 3 | 4;
 
 export type QueuedItem =
   | { type: 'file'; id: string; file: File }
   | { type: 'url'; id: string; url: string };
+
+/** Per-file outcome after POST /api/documents/upload */
+export type ImportFileResult =
+  | { queueItemId: string; ok: true; documentId: string; filename: string }
+  | { queueItemId: string; ok: false; filename: string; error: string };
+
+/** URL rows are not ingested until a URL→document backend exists */
+export type ImportUrlResult = {
+  queueItemId: string;
+  ok: false;
+  url: string;
+  error: string;
+};
+
+export type ImportBatchResult = {
+  fileResults: ImportFileResult[];
+  urlResults: ImportUrlResult[];
+  /** document_ids from successful file uploads */
+  documentIds: string[];
+  /** true if collectionId was set and assignment API succeeded */
+  assignedToCollection: boolean;
+};
+
+/**
+ * Upload all queued files, optionally assign them to a collection, and report URL rows as skipped.
+ * Call this from the stage-2 "Start Import" action (not wired to UI here).
+ */
+export async function runImportFromQueue(options: {
+  items: QueuedItem[];
+  /** collections[].collection_id, or "" to skip assignment */
+  collectionId: string;
+}): Promise<ImportBatchResult> {
+
+  const fileResults: ImportFileResult[] = [];
+  const urlResults: ImportUrlResult[] = [];
+  const documentIds: string[] = [];
+
+  for (const item of options.items) {
+    if (item.type === 'url') {
+      urlResults.push({
+        queueItemId: item.id,
+        ok: false,
+        url: item.url,
+        error: 'URL ingestion is not implemented yet (backend has no document create from URL).',
+      });
+      continue;
+    }
+
+    const formData = new FormData();
+    formData.append('file', item.file);
+    if (options.collectionId) {
+      formData.append('collection_id', options.collectionId);
+    }
+
+    try {
+      const data = await apiClient.postForm<{ document_id?: string }>('/documents/upload', formData);
+      if (!data.document_id) {
+        fileResults.push({
+          queueItemId: item.id,
+          ok: false,
+          filename: item.file.name,
+          error: 'Missing document_id in response',
+        });
+        continue;
+      }
+      documentIds.push(data.document_id);
+      fileResults.push({
+        queueItemId: item.id,
+        ok: true,
+        documentId: data.document_id,
+        filename: item.file.name,
+      });
+    } catch (e) {
+      fileResults.push({
+        queueItemId: item.id,
+        ok: false,
+        filename: item.file.name,
+        error: e instanceof Error ? e.message : 'Upload failed',
+      });
+    }
+  }
+
+  const assignedToCollection = !!(options.collectionId && documentIds.length > 0);
+
+  return { fileResults, urlResults, documentIds, assignedToCollection };
+}
 
 function normalizeUrl(u: string): string {
   try {
@@ -46,6 +133,11 @@ function TypeBadge({ filename }: { filename: string }) {
   );
 }
 
+const COLLECTION_COLORS = [
+  'var(--blue)', 'var(--purple)', 'var(--green)', 'var(--amber)',
+  '#f87171', '#34d399', '#a78bfa', '#fb923c',
+];
+
 const STAGE_TITLES: Record<UploadStage, string> = {
   1: 'Add Files',
   2: 'Save to Collection',
@@ -67,16 +159,59 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedCollection, setSelectedCollection] = useState<string>("");
-  
+  const [addingNewCol, setAddingNewCol] = useState(false);
+  const [newColName, setNewColName] = useState('');
+  const newColInputRef = useRef<HTMLInputElement>(null);
+  const [importResult, setImportResult] = useState<ImportBatchResult | null>(null);
+  const [importInProgress, setImportInProgress] = useState(false);
+
+  useEffect(() => {
+    if (addingNewCol) newColInputRef.current?.focus();
+  }, [addingNewCol]);
+
 
   const handleClose = () => {
     setStage(1);
     setItems([]);
     setUrl('');
     setIsDragOver(false);
+    setImportResult(null);
+    setImportInProgress(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     onClose();
   };
+
+  /**
+   * Primary footer action: Next (1→2), Start Import (2→3 + uploads), advance indexing UI (3→4).
+   */
+  const handlePrimaryStageAction = useCallback(async () => {
+    if (stage === 1) {
+      if (items.length === 0) return;
+      setStage(2);
+      return;
+    }
+    if (stage === 2) {
+      if (importInProgress) return;
+      setImportInProgress(true);
+      setImportResult(null);
+      try {
+        const result = await runImportFromQueue({
+          items,
+          collectionId: selectedCollection,
+        });
+        setImportResult(result);
+        setStage(3);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setImportInProgress(false);
+      }
+      return;
+    }
+    if (stage === 3) {
+      setStage(4);
+    }
+  }, [stage, items, selectedCollection, importInProgress]);
 
   const handleCreateCollection = async (name: string) => {
     try {
@@ -174,10 +309,15 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
               <button
                 type="button"
                 className="btn btn-p"
-                style={stage === 1 && items.length === 0 ? { opacity: 0.45, pointerEvents: 'none' } : {}}
-                onClick={() => setStage((prev) => (prev + 1) as UploadStage)}
+                style={
+                  (stage === 1 && items.length === 0) || (stage === 2 && importInProgress)
+                    ? { opacity: 0.45, pointerEvents: 'none' }
+                    : {}
+                }
+                disabled={stage === 2 && importInProgress}
+                onClick={() => void handlePrimaryStageAction()}
               >
-                {stage === 1 ? 'Next' : stage === 2 ? 'Start Import' : 'Close'}
+                {stage === 1 ? 'Next' : stage === 2 ? (importInProgress ? 'Importing…' : 'Start Import') : 'Close'}
               </button>
             ) : (
               <button type="button" className="btn btn-p" onClick={handleClose}>Close</button>
@@ -340,58 +480,168 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
           </div>
         )}
 
-        {/* ── Stage 2 — Save to Collection (placeholder) ── */}
+        {/* ── Stage 2 — Save to Collection ── */}
         {stage === 2 && (
-          <div style={{ minHeight: 120 }} className="flex flex-col gap-4">
-            <div className="flex gap-2 bg-[var(--raised)] border border-[var(--border)] rounded-lg p-4 justify-between items-center">
-              <h4 className="text-xs font-medium text-[var(--t1)]">{items.length} items for ingestion</h4>
-              <button 
-                className="text-xs text-[var(--t3)] font-medium"
-                onClick={() => {
-                  setStage(1)
-                }}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* File summary */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--raised)', border: '1px solid var(--border)', borderRadius: 10 }}>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--blue-a)', border: '1px solid var(--blue-br)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <FileText size={15} strokeWidth={1.8} style={{ color: 'var(--blue)' }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', fontWeight: 500 }}>
+                  {items.length} file{items.length !== 1 ? 's' : ''} ready to import
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--t3)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {items.map((i) => (i.type === 'file' ? i.file.name : i.url)).join(', ')}
+                </div>
+              </div>
+              <button
+                type="button"
+                style={{ fontSize: 11, color: 'var(--blue)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--fb)', whiteSpace: 'nowrap' }}
+                onClick={() => setStage(1)}
               >
                 Edit
               </button>
             </div>
-            <div className="flex flex-col gap-2">
-              <h4 className="slabel">Save to collection</h4>
-            {collections ? (
-              <div>
-                <div className="flex gap-2 flex-wrap">
-                  {collections.map((collection) => (
-                    <Pill
-                      key={collection.collection_id}
-                      fontSize={12}
-                      active={selectedCollection === collection.collection_id}
-                      onClick={() => {
 
-                        if (selectedCollection === collection.collection_id) {
-                          setSelectedCollection("")
-                        } else {  
-                          setSelectedCollection(collection.collection_id)
+            {/* Collection picker */}
+            <div>
+              <div className="slabel" style={{ marginBottom: 8 }}>Save to collection</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {collections.map((c, i) => {
+                  const color = COLLECTION_COLORS[i % COLLECTION_COLORS.length];
+                  const sel = selectedCollection === c.collection_id;
+                  return (
+                    <button
+                      key={c.collection_id}
+                      type="button"
+                      className={`pill pill-collection${sel ? ' pill-collection--selected' : ''}`}
+                      style={{
+                        borderColor: sel ? color : '',
+                        background: sel ? color + '22' : '',
+                        color: sel ? color : '',
+                        gap: 5,
+                      }}
+                      onClick={() => setSelectedCollection(sel ? '' : c.collection_id)}
+                    >
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: color, flexShrink: 0, display: 'inline-block' }} />
+                      {c.name}
+                    </button>
+                  );
+                })}
+                {addingNewCol ? (
+                  <div
+                    className="pill pill-collection pill-collection--dashed"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      borderStyle: 'dashed',
+                      borderColor: 'var(--blue-br)',
+                      padding: '2px 4px 2px 10px',
+                      maxWidth: 200,
+                    }}
+                  >
+                    <input
+                      ref={newColInputRef}
+                      value={newColName}
+                      onChange={(e) => setNewColName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newColName.trim()) {
+                          handleCreateCollection(newColName.trim());
+                          setNewColName('');
+                          setAddingNewCol(false);
+                        }
+                        if (e.key === 'Escape') {
+                          setAddingNewCol(false);
+                          setNewColName('');
                         }
                       }}
+                      onBlur={() => {
+                        setAddingNewCol(false);
+                        setNewColName('');
+                      }}
+                      placeholder="Collection name"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--t1)',
+                        fontSize: 11,
+                        fontFamily: 'var(--fb)',
+                        outline: 'none',
+                        flex: 1,
+                        minWidth: 0,
+                        width: 100,
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="pill-collection-dismiss"
+                      aria-label="Cancel new collection"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setAddingNewCol(false);
+                        setNewColName('');
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        width: 22,
+                        height: 22,
+                        borderRadius: '50%',
+                        border: 'none',
+                        background: 'transparent',
+                        color: 'var(--t3)',
+                        cursor: 'pointer',
+                        padding: 0,
+                        transition: 'color 0.15s ease, background 0.15s ease',
+                      }}
                     >
-                      <span>{collection.name}</span>
-                    </Pill>
-                  ))}
-                  <Pill fontSize={12} onClick={() => setSelectedCollection("")}>
-                    <span>+</span>
-                  </Pill>
-                </div>
+                      <X size={12} strokeWidth={2} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="pill pill-collection pill-collection--dashed"
+                    style={{ borderStyle: 'dashed' }}
+                    onClick={() => setAddingNewCol(true)}
+                  >
+                    + New
+                  </button>
+                )}
               </div>
-            ) : (
-                <p>No collections found</p>
-              )}
             </div>
           </div>
         )}
 
-        {/* ── Stage 3 — Indexing (placeholder) ── */}
+        {/* ── Stage 3 — Indexing ── */}
         {stage === 3 && (
-          <div style={{ minHeight: 120 }}>
-            <p style={{ fontSize: 13, color: 'var(--t2)', fontFamily: 'var(--fb)' }}>Indexing — coming soon.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--blue-a)', border: '1px solid var(--blue-br)', borderRadius: 10 }}>
+              <div className="animate-spin" style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--blue-br)', borderTop: '2px solid var(--blue)', flexShrink: 0 }} />
+              <span style={{ flex: 1, fontSize: 13, color: 'var(--t1)', fontFamily: 'var(--fb)' }}>
+                Indexing {items.length} document{items.length !== 1 ? 's' : ''}…
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--blue)', fontFamily: 'var(--fb)' }}>You can close this</span>
+            </div>
+            {items.map((item) => (
+              <div key={item.id} style={{ padding: '10px 12px', background: 'var(--raised)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <div className="animate-spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid var(--border-s)', borderTop: '2px solid var(--blue)', flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {item.type === 'file' ? item.file.name : item.url}
+                  </span>
+                </div>
+                <div style={{ height: 3, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: '0%', background: 'var(--blue)', borderRadius: 2 }} />
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--t3)', fontFamily: 'var(--fb)', marginTop: 4 }}>Queued for processing</div>
+              </div>
+            ))}
           </div>
         )}
 

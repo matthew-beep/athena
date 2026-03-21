@@ -77,8 +77,8 @@ function WorkingMemoryCard({
                 className={cn(
                   'group flex items-center gap-2 px-2 py-1.5 rounded-md border transition-colors',
                   isSynthetic
-                    ? 'bg-primary/5 border-primary/20'
-                    : 'bg-foreground/[0.03] border-border/20'
+                    ? 'bg-[var(--blue-a)] border-[var(--blue-br)]'
+                    : 'bg-[var(--raised)] border-[var(--border)]'
                 )}
                 title={doc.filename}
               >
@@ -356,39 +356,39 @@ export function DocumentBar() {
       )}
 
       
-          <div className="border-t border-white/5 px-3 py-3 mt-auto space-y-2">                                                                    
+          <div className="border-t border-[var(--border)] px-3 py-3 mt-auto space-y-2">
             {/* Model + live indicator */}
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono text-white/40 truncate">{modelStats ? modelStats.name : '—'}</span>
+              <span className="text-[10px] font-mono text-[var(--t3)] truncate">{modelStats ? modelStats.name : '—'}</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-mono text-white/25">{modelStats ? modelStats.size_gb : '—'}GB</span>
-                <div className="h-1 w-1 rounded-full bg-emerald-500/40 animate-pulse" />
+                <span className="text-[10px] font-mono text-[var(--t4)]">{modelStats ? modelStats.size_gb : '—'}GB</span>
+                <div className="h-1 w-1 rounded-full animate-pulse" style={{ background: 'var(--green)' }} />
               </div>
             </div>
 
             {/* GPU utilization bar */}
-            <div className="h-[2px] w-full bg-white/5 overflow-hidden rounded-full">
-              <div className="h-full bg-white/30 transition-all duration-700" style={{ width: `${modelStats ? modelStats.gpu_pct : 0}%` }} />
+            <div className="h-[2px] w-full overflow-hidden rounded-full bg-[var(--border)]">
+              <div className="h-full transition-all duration-700 bg-[var(--t3)]" style={{ width: `${modelStats ? modelStats.gpu_pct : 0}%` }} />
             </div>
             {/* RAM utilization bar */}
-            <div className="h-[2px] w-full bg-white/5 overflow-hidden rounded-full">
-              <div className="h-full bg-cyan-500/50 transition-all duration-700" style={{ width: `${modelStats ? modelStats.ram_pct : 0}%` }} />
+            <div className="h-[2px] w-full overflow-hidden rounded-full bg-[var(--border)]">
+              <div className="h-full transition-all duration-700 bg-[var(--blue)]" style={{ width: `${modelStats ? modelStats.ram_pct : 0}%` }} />
             </div>
             {/* Legend */}
-            <div className="flex items-center gap-2 text-[9px] font-mono text-white/30">
+            <div className="flex items-center gap-2 text-[9px] font-mono text-[var(--t3)]">
               <span className="flex items-center gap-1">
-                <span className="inline-block h-1 w-1.5 rounded-sm bg-cyan-500/60" aria-hidden />
+                <span className="inline-block h-1 w-1.5 rounded-sm bg-[var(--blue)]" aria-hidden />
                 RAM
               </span>
-              <span className="text-white/20">/</span>
+              <span className="text-[var(--t4)]">/</span>
               <span className="flex items-center gap-1">
-                <span className="inline-block h-1 w-1.5 rounded-sm bg-white/40" aria-hidden />
+                <span className="inline-block h-1 w-1.5 rounded-sm bg-[var(--t3)]" aria-hidden />
                 GPU
               </span>
             </div>
 
             {/* Stats row */}
-            <div className="flex justify-between text-[9px] font-mono text-white/25 tabular-nums">
+            <div className="flex justify-between text-[9px] font-mono text-[var(--t4)] tabular-nums">
               <span>
                 {requestStartedAt != null ? `${(waitingElapsedMs / 1000).toFixed(2)}s`
                   : firstTokenReachedMs != null ? `${(firstTokenReachedMs / 1000).toFixed(2)}s`

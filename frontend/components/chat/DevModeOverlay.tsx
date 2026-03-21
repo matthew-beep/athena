@@ -48,7 +48,7 @@ export function DevModeOverlay() {
 
   return (
     <div
-      className="fixed bottom-14 right-3 z-50 w-52 rounded-sm border border-border/40 glass-subtle"
+      className="fixed bottom-14 right-3 z-50 w-52 rounded-sm bg-[var(--surface-2)] border border-[var(--border)]"
       style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', lineHeight: '1.6' }}
     >
       {/* Header */}

@@ -1,5 +1,5 @@
 # Athena — Codebase Status
-## 2026-03-16
+## 2026-03-21
 
 ---
 
@@ -40,6 +40,45 @@
 | `models/auth.py` | ~18 | Token, UserOut |
 | `models/system.py` | ~21 | ResourceStats, HealthResponse |
 | `models/collections.py` | ~60 | CollectionNameRequest, CollectionDocumentsRequest, CollectionItem, CollectionsListResponse, CollectionMutateResponse, CollectionDocumentsMutateResponse |
+
+---
+
+## What Was Worked On This Session (2026-03-21)
+
+### Upload Modal — API Wiring
+
+**`frontend/api/client.ts` — `postForm` method added:**
+- New method sends `FormData` without setting `Content-Type` — browser sets `multipart/form-data; boundary=...` automatically
+- Auth header still applied from `useAuthStore.getState().token`
+- Error handling via shared `handleResponse` (401 → logout, non-2xx → throw)
+- Why this was needed: existing `apiClient.post` hardcodes `Content-Type: application/json`, which overrides the boundary and breaks multipart parsing
+
+**`backend/app/api/documents.py` — `collection_id` form field:**
+- Added `from fastapi import Form` to imports
+- Added `collection_id: str | None = Form(None)` param to `upload_document`
+- Updated INSERT to include `collection_id` column, passes `collection_id or None` to ensure empty string becomes NULL in Postgres
+
+**`frontend/components/documents/UploadModal.tsx` — two-step workaround removed:**
+- `runImportFromQueue` now appends `collection_id` to FormData before upload (only if set)
+- Second API call `POST /api/collections/{id}/documents` removed — collection assignment is now atomic
+- Switched from raw `fetch` to `apiClient.postForm` — auth handled centrally, manual `useAuthStore` import removed
+- `assignedToCollection` derived from `!!(options.collectionId && documentIds.length > 0)` — no longer depends on a second API call succeeding
+
+### Collection Colors — Added to TODO
+
+- Reopened old "decided no color field" closed bug
+- Added 5-item "Collection Colors" section to Next Up in TODO.md covering: DB migration, Pydantic model updates, PUT endpoint recolor, frontend `CollectionItem` type, remove static `COLLECTION_COLORS` array
+
+### Glass Audit (Phase F2) — Completed (carried from 2026-03-21 session)
+
+All components migrated off `.glass-subtle`/`.glass-strong`/`.glass`:
+- `GlassCard.tsx`, `GlassButton.tsx`, `ChatWindow.tsx`, `MessageList.tsx`, `MessageInput.tsx`
+- `Message.tsx`, `DevModeOverlay.tsx`, `DocumentBar.tsx`, `Sidebar.tsx`
+- `SystemFooter.tsx`, `MobileHeader.tsx`, `BottomNav.tsx`, `DocumentList.tsx`, `SettingsPanel.tsx`
+
+### Route Ordering Fix (carried from 2026-03-21 session)
+
+- `GET /api/documents/progress/active` moved above `GET /api/documents/{document_id}/progress` in `documents.py` — FastAPI was matching `/progress/active` with `document_id="progress"` and returning 404
 
 ---
 
@@ -303,17 +342,19 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 | # | Severity | Description | File |
 |---|---|---|---|
-| 1 | High | `httpx` used in `main.py` lifespan (model warmup) but not imported at module level — warmup silently fails on every boot | `main.py` |
-| 2 | High | `MAX_RRF_SCORE` referenced in `rag.py` but never defined — will cause `NameError` on any hybrid search request | `core/rag.py` |
+| 1 | ~~High~~ | ~~`httpx` not imported in `main.py`~~ | ✅ Fixed |
+| 2 | ~~High~~ | ~~`MAX_RRF_SCORE` undefined in `rag.py`~~ | ✅ Fixed |
 | 3 | Medium | Summarization in hot path — `_generate_and_cache_summary()` blocks the next user request | `core/context.py` |
 | 4 | Medium | No Celery/Redis — background processing uses FastAPI `BackgroundTasks`; no retries, no persistence across restarts | `api/documents.py` |
 | 5 | Medium | Context window display broken — (a) `contextBudget` hardcoded 4096 in store; (b) `context_debug` tokens held until `done`, not applied immediately; (c) `token_count` never returned by conversations API | `chat.store.ts`, `useSSEChat.ts`, `api/chat.py` |
 | 6 | Medium | URL ingestion non-functional — `POST /api/documents/url` returns Crawl4AI raw payload, creates no DB record, nothing enters Qdrant | `api/documents.py`, `UploadZone.tsx` |
 | 7 | Medium | Storage stats return 0.0 — `/api/system/resources` NVMe/HDD percentages hardcoded to 0 (Redis cache not yet wired) | `api/system.py` |
-| 8 | Medium | `.glass`, `.glass-subtle`, `.glass-strong` removed from globals.css — multiple components referencing these classes now render with no background | Various components |
+| 8 | ~~Medium~~ | ~~`.glass`/`.glass-subtle`/`.glass-strong` class references on multiple components~~ | ✅ Fixed (F2 complete) |
 | 9 | Low | Muting docs is UI-only — `mutedIds` in `DocumentBar` never sent to backend | `DocumentBar.tsx` |
 | 10 | Low | `GET /api/documents` missing `collection_id` filter param and doesn't return `collection_id`/`collection_name` per row — frontend can't show collection assignment | `api/documents.py` |
-| 11 | Low | `POST /api/documents/upload` doesn't accept `collection_id` — can't assign collection at import time | `api/documents.py` |
+| 11 | ~~Low~~ | ~~`POST /api/documents/upload` doesn't accept `collection_id`~~ | ✅ Fixed |
+| 12 | Low | `collections` table has no `color` column — collection pills use static index-based color array, colors shift when collections are deleted/reordered | `api/collections.py`, `UploadModal.tsx` |
+| 13 | Low | `/progress/active` route was shadowed by `/{document_id}/progress` — FastAPI treated "progress" as a document_id | ✅ Fixed |
 
 ---
 
@@ -339,12 +380,12 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 | Phase | Status | Notes |
 |---|---|---|
-| Phase 1: Foundation | ~95% | Core chat, RAG, ingestion, auth all working. Missing: Celery/Redis, httpx import bug, MAX_RRF_SCORE bug |
-| Phase 2: Document Processing | ~20% | URL ingestion wired but non-functional; collections table exists, API skeleton only |
+| Phase 1: Foundation | ~97% | Core chat, RAG, ingestion, auth all working. Missing: Celery/Redis |
+| Phase 2: Document Processing | ~25% | URL ingestion non-functional; collections fully wired (collection_id on upload atomic) |
 | Phase F1: Design System | ✅ Done | Structural Glass tokens, Slate default, all CSS utility classes |
-| Phase F2: Glass Audit | 0% | 15+ components still reference undefined glass classes |
+| Phase F2: Glass Audit | ✅ Done | All 14 components migrated off glass-subtle/glass-strong |
 | Phase F3: Layout Shell Polish | 0% | AppShell, Sidebar, SystemFooter need token updates |
-| Phase F4: Library View + Collections | 20% | Collections backend fully complete; upload modal stage 1 styled; stages 2+3, documents.py collection wiring, and library filter wiring remain |
+| Phase F4: Library View + Collections | 30% | Collections backend fully complete; upload modal stages 1+2 styled + wired; stage 3 wiring, collection colors, documents.py collection filter, library view layout remain |
 | Phase 3: Learning Features | 0% | |
 | Phase 4: Two-Tier Knowledge | 0% | |
 | Phase 5: Research Pipeline | 0% | |
@@ -373,10 +414,12 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | Scope bar (doc chips + search-all pill) | ✅ |
 | Pin/attach button on RAG source cards | ✅ |
 | Structural Glass token system (globals.css) | ✅ |
-| Glass audit (component rewrites) | ❌ F2 pending |
+| Glass audit (component rewrites) | ✅ F2 complete |
 | Library two-pane layout + collections | ❌ F4 pending |
 | 4-stage upload modal — Stage 1 | ✅ styled per spec |
-| 4-stage upload modal — Stages 2+3 | ❌ F4 pending |
+| 4-stage upload modal — Stage 2 | ✅ styled + wired (collection picker, runImportFromQueue, collection_id atomic) |
+| 4-stage upload modal — Stage 3 | ⚠️ styled shell only — needs importResult wiring + progress polling |
+| 4-stage upload modal — Stage 4 | ⚠️ generic banner only — needs per-file outcomes |
 | Chat message anatomy update | ❌ F5 pending |
 | System panel (ArcGauge, Sparkline) | ❌ F6 pending |
 | URL ingestion (real, not preview) | ❌ blocked on Crawl4AI shape validation |
@@ -392,4 +435,4 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 ---
 
-*Athena · Codebase Status · 2026-03-16*
+*Athena · Codebase Status · 2026-03-21*

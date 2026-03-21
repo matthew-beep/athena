@@ -63,7 +63,7 @@ export function ChatWindow() {
         </button>
       </div>
       <div className="flex-1 min-h-0 w-full flex gap-5">
-        <div className="flex-1 min-h-0 min-w-0 flex flex-col glass-strong shadow-glass animate-scale-in rounded-lg">
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col animate-scale-in rounded-lg">
           <MessageList conversationId={activeConversationId} />
           <ScopeBar />
           <MessageInput />

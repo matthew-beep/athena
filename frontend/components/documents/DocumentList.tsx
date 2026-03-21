@@ -298,7 +298,7 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
       <li
         key={doc.id}
         className={cn(
-          'group glass rounded-sm px-3 py-2.5 transition-opacity',
+          'group bg-[var(--raised)] border border-[var(--border)] rounded-sm px-3 py-2.5 transition-opacity',
           doc.isLive && 'border-primary/20',
           isDeleting && 'opacity-40 pointer-events-none'
         )}
@@ -306,7 +306,7 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
         <div className="flex items-start gap-3">
           {/* File type icon */}
           <div className={cn(
-            'w-8 h-8 rounded-sm glass-subtle flex items-center justify-center flex-shrink-0 mt-0.5 border border-border/20',
+            'w-8 h-8 rounded-sm bg-[var(--raised-h)] border border-[var(--border)] flex items-center justify-center flex-shrink-0 mt-0.5',
             doc.isLive ? 'text-primary' : 'text-muted-foreground'
           )}>
             {TYPE_ICON[doc.type] || <FileText size={14} />}
@@ -339,7 +339,7 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
           {/* Date + delete */}
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
-              className="flex items-center gap-1 text-xs px-2 py-1 rounded-sm glass-subtle text-muted-foreground hover:text-foreground transition-all border border-border/20 hover:border-border"
+              className="flex items-center gap-1 text-xs px-2 py-1 rounded-sm bg-[var(--raised-h)] border border-[var(--border)] text-[var(--t2)] hover:text-[var(--t1)] transition-all"
               onClick={() => handleChat(doc.id)}
               >
               <MessageSquare size={12} />

@@ -53,7 +53,7 @@ export const GlassButton = forwardRef<HTMLButtonElement, GlassButtonProps>(
       primary:
         'bg-foreground text-background font-semibold hover:bg-foreground/90 transition-colors',
       ghost:
-        'glass-subtle hover:glass text-foreground/80 hover:text-foreground transition-all',
+        'bg-[var(--raised)] border border-[var(--border)] text-[var(--t2)] hover:bg-[var(--raised-h)] hover:text-[var(--t1)] transition-all',
       danger:
         'bg-destructive/20 border border-destructive/30 text-destructive hover:bg-destructive/30 transition-all',
     };

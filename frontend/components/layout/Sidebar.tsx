@@ -107,14 +107,14 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
           {isMobileDrawer && (
             <button
               onClick={onClose}
-              className="ml-auto p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/5 transition-all"
+              className="ml-auto p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-[var(--raised-h)] transition-all"
             >
               <X size={16} />
             </button>
           )}
           <button
             onClick={toggleSidebarCollapsed}
-            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/5 transition-all"
+            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-[var(--raised-h)] transition-all"
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             <PanelLeft
@@ -185,7 +185,7 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
                 className={cn(
                   'w-full text-left px-3 py-2 rounded-lg text-xs transition-all flex items-start gap-2',
                   activeConversationId === conv.conversation_id
-                    ? 'text-foreground bg-white/5'
+                    ? 'text-foreground bg-[var(--raised-h)]'
                     : 'text-muted-foreground hover:text-foreground'
                 )}
               >
@@ -205,7 +205,7 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
           <button
             onClick={handleNewChat}
             title="New conversation"
-            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/5 transition-all"
+            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-[var(--raised-h)] transition-all"
           >
             <Plus size={14} />
           </button>
@@ -225,7 +225,7 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
           )}
           <button
             onClick={logout}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/5 transition-all"
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-[var(--raised-h)] transition-all"
             title="Logout"
           >
             <LogOut size={13} />

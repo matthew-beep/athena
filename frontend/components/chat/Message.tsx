@@ -143,18 +143,11 @@ export function Message({ message }: MessageProps) {
           isUser ? 'items-end' : 'items-start'
         } flex flex-col gap-1`}
       >
-        <div
-          className={`px-4 py-3 text-sm ${
-            isUser
-              ? 'rounded-2xl bg-foreground/8 border border-foreground/10 text-foreground'
-              : 'rounded-xl glass-subtle text-foreground'
-          }`}
-          style={isUser ? { background: 'hsl(var(--glass-bg)/0.08)' } : undefined}
-        >
+        <div className={isUser ? 'msg-user' : 'msg-ai'}>
           {isUser ? (
             <span className="whitespace-pre-wrap">{message.content}</span>
           ) : (
-            <div className="prose prose-invert prose-sm max-w-none prose-headings:text-white/90 prose-p:text-white/80 prose-code:text-blue-300 prose-pre:bg-white/5 prose-strong:text-white">
+            <div className="message-content">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {message.content}
               </ReactMarkdown>

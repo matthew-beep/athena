@@ -15,10 +15,10 @@ export const GlassCard = forwardRef<HTMLDivElement, GlassCardProps>(
   ) => {
     const base =
       variant === 'subtle'
-        ? 'glass-subtle'
+        ? 'bg-[var(--raised)] border border-[var(--border)]'
         : variant === 'strong'
-        ? 'glass-strong'
-        : 'glass';
+        ? 'bg-[var(--surface-2)] border border-[var(--border-s)]'
+        : 'bg-[var(--raised)] border border-[var(--border)]';
 
     return (
       <div
@@ -26,7 +26,7 @@ export const GlassCard = forwardRef<HTMLDivElement, GlassCardProps>(
         className={cn(
           base,
           'rounded-xl',
-          hoverable && 'glass-hover cursor-pointer',
+          hoverable && 'hover:bg-[var(--raised-h)] cursor-pointer',
           className
         )}
         {...props}

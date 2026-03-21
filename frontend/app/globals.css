@@ -233,6 +233,37 @@ body {
   color: var(--blue);
 }
 
+/* Upload modal — collection row (inline pills) */
+.pill-collection {
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    filter 0.15s ease;
+}
+
+button.pill-collection:not(.pill-collection--selected):hover:not(:disabled) {
+  background: var(--raised-h);
+  border-color: var(--border-s);
+  color: var(--t1);
+}
+
+button.pill-collection--selected:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+/* Dashed “+ New” and new-collection input shell */
+.pill-collection--dashed:hover {
+  background: var(--blue-b);
+  border-color: var(--blue-br);
+}
+
+.pill-collection--dashed .pill-collection-dismiss:hover {
+  color: var(--t1);
+  background: var(--raised-h);
+}
+
 /* ─────────────────────────────────────────────────────────────
    Buttons
 ───────────────────────────────────────────────────────────── */

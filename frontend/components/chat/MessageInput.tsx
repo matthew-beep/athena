@@ -94,7 +94,7 @@ export function MessageInput() {
       )}
       <div
         className={cn(
-          'glass rounded-2xl border flex items-center justify-between gap-2 px-4 py-2 focus-within:border-border transition-colors',
+          'bg-[var(--raised)] rounded-2xl border flex items-center justify-between gap-2 px-4 py-2 focus-within:border-border transition-colors',
           isOverWarn ? 'border-yellow-500/40' : 'border-border/50'
         )}
       >
@@ -104,7 +104,7 @@ export function MessageInput() {
           className={cn(
             'p-1.5 rounded-lg transition-all flex-shrink-0',
             isSearchAll
-              ? 'text-foreground bg-white/10'
+              ? 'text-foreground bg-[var(--raised-h)]'
               : 'text-muted-foreground hover:text-foreground'
           )}
         >

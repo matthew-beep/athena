@@ -61,8 +61,8 @@ export function MessageList({ conversationId }: MessageListProps) {
           <div className="w-6 h-6 rounded-lg flex-shrink-0 flex items-center justify-center text-xs font-bold font-display bg-foreground/5 border border-foreground/10 text-muted-foreground">
             A
           </div>
-          <div className="glass-subtle rounded-xl px-4 py-3 text-sm max-w-[80%] text-foreground">
-            <div className="prose prose-invert prose-sm max-w-none prose-headings:text-white/90 prose-p:text-white/80 prose-code:text-blue-300 prose-pre:bg-white/5 prose-strong:text-white">
+          <div className="msg-ai">
+            <div className="message-content">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingContent}</ReactMarkdown>
             </div>
             <span className="inline-block w-0.5 h-3.5 bg-muted-foreground ml-0.5 animate-pulse align-middle" aria-hidden />
@@ -76,7 +76,7 @@ export function MessageList({ conversationId }: MessageListProps) {
           <div className="w-6 h-6 rounded-lg flex-shrink-0 flex items-center justify-center text-xs font-bold font-display bg-foreground/5 border border-foreground/10 text-muted-foreground">
             A
           </div>
-          <div className="glass-subtle rounded-xl px-4 py-3 flex items-center gap-1.5">
+          <div className="msg-ai flex items-center gap-1.5">
             <div className="typing-dot" />
             <div className="typing-dot" />
             <div className="typing-dot" />
