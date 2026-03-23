@@ -11,16 +11,6 @@ import { apiClient } from '@/api/client';
 import { Modal } from '@/components/ui/Modal';
 import type { Message } from '@/types';
 
-export interface ProcessingDocDisplay {
-  document_id: string;
-  filename: string;
-  mime_type?: string;
-  status: string;
-  progress: number;
-  chunks: number;
-  concepts: number;
-}
-
 interface Document {
   document_id: string;
   filename: string;
@@ -78,11 +68,10 @@ interface DocumentConversation {
 
 interface DocumentListProps {
   refreshKey?: number;
-  processingDocs?: ProcessingDocDisplay[];
   search: string;
 }
 
-export function DocumentList({ refreshKey, processingDocs = [], search ="" }: DocumentListProps) {
+export function DocumentList({ refreshKey, search = "" }: DocumentListProps) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -223,25 +212,7 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
     router.push('/chat');
   };
 
-  const processingIds = new Set(processingDocs.map((d) => d.document_id));
-
-  // Processing documents (upload placeholders while file is still transferring)
-  const processingItems = processingDocs.map((d) => ({
-    id: d.document_id,
-    name: d.filename,
-    status: d.status,
-    progress: d.progress,
-    done: 0,
-    total: 0,
-    chunks: d.chunks,
-    type: getDocType(d.filename, d.mime_type),
-    date: 'Just now',
-    isLive: true,
-    error: undefined as string | undefined,
-  }));
-
-  // Uploaded documents (real DB documents, excluding upload placeholders)
-  const uploadedItems = documents.filter((d) => !processingIds.has(d.document_id)).map((d) => {
+  const uploadedItems = documents.map((d) => {
     const prog = progressMap[d.document_id];
     const isActive = d.processing_status === 'processing' && !!prog?.active;
     return {
@@ -260,7 +231,7 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
     };
   });
 
-  if (loading && documents.length === 0 && processingDocs.length === 0) {
+  if (loading && documents.length === 0) {
     return (
       <div className="flex items-center justify-center py-10 gap-2 text-muted-foreground">
         <Loader2 size={15} className="animate-spin" />
@@ -278,7 +249,7 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
     );
   }
 
-  if (processingItems.length === 0 && uploadedItems.length === 0) {
+  if (uploadedItems.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 gap-3">
         <div className="w-10 h-10 rounded-sm bg-muted/30 border border-border flex items-center justify-center">
@@ -402,29 +373,9 @@ export function DocumentList({ refreshKey, processingDocs = [], search ="" }: Do
   return (
     <div className="border-2 border-red-800">
       <div>
-        <div className="space-y-4">
-          {/* Processing Documents Section */}
-          {processingItems.length > 0 && (
-            <div>
-              <h3 className="text-xs font-medium text-muted-foreground mb-2 px-1">Processing</h3>
-              <ul className="space-y-1.5">
-                {processingItems.map(renderDocItem)}
-              </ul>
-            </div>
-          )}
-
-          {/* Uploaded Documents Section */}
-          {uploadedItems.length > 0 && (
-            <div>
-              {processingItems.length > 0 && (
-                <h3 className="text-xs font-medium text-muted-foreground mb-2 px-1">Uploaded</h3>
-              )}
-              <ul className="space-y-1.5">
-                {uploadedItems.filter(file => file.searchName.indexOf(search.toLowerCase()) > -1).map(renderDocItem)}
-              </ul>
-            </div>
-          )}
-        </div>
+        <ul className="space-y-1.5">
+          {uploadedItems.filter(file => file.searchName.indexOf(search.toLowerCase()) > -1).map(renderDocItem)}
+        </ul>
 
         {/* Conversations modal — pick existing or start new */}
         <Modal

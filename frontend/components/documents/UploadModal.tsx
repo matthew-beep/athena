@@ -13,89 +13,91 @@ export type QueuedItem =
   | { type: 'file'; id: string; file: File }
   | { type: 'url'; id: string; url: string };
 
-/** Per-file outcome after POST /api/documents/upload */
 export type ImportFileResult =
   | { queueItemId: string; ok: true; documentId: string; filename: string }
   | { queueItemId: string; ok: false; filename: string; error: string };
 
-/** URL rows are not ingested until a URL→document backend exists */
-export type ImportUrlResult = {
-  queueItemId: string;
-  ok: false;
-  url: string;
-  error: string;
-};
+export type ImportUrlResult =
+  | { queueItemId: string; ok: true; documentId: string; url: string }
+  | { queueItemId: string; ok: false; url: string; error: string };
 
 export type ImportBatchResult = {
   fileResults: ImportFileResult[];
   urlResults: ImportUrlResult[];
-  /** document_ids from successful file uploads */
+  /** document_ids from all successful items (files + urls) */
   documentIds: string[];
-  /** true if collectionId was set and assignment API succeeded */
   assignedToCollection: boolean;
 };
 
+/** Shape of each item in the backend /upload response */
+type UploadResultItem = {
+  type: 'file' | 'url';
+  ok: boolean;
+  document_id?: string;
+  filename?: string;
+  url?: string;
+  file_type?: string;
+  status?: string;
+  error?: string;
+};
+
 /**
- * Upload all queued files, optionally assign them to a collection, and report URL rows as skipped.
- * Call this from the stage-2 "Start Import" action (not wired to UI here).
+ * Batch upload all queued files and URLs in a single request.
+ * Files are processed immediately; URLs get a DB record with status='pending' (crawling not yet implemented).
  */
 export async function runImportFromQueue(options: {
   items: QueuedItem[];
-  /** collections[].collection_id, or "" to skip assignment */
   collectionId: string;
 }): Promise<ImportBatchResult> {
+  const fileItems = options.items.filter((i): i is QueuedItem & { type: 'file' } => i.type === 'file');
+  const urlItems = options.items.filter((i): i is QueuedItem & { type: 'url' } => i.type === 'url');
+
+  const formData = new FormData();
+  for (const item of fileItems) formData.append('files', item.file);
+  for (const item of urlItems) formData.append('urls', item.url);
+  if (options.collectionId) formData.append('collection_id', options.collectionId);
+
+  const data = await apiClient.postForm<{ results: UploadResultItem[] }>('/documents/upload', formData);
 
   const fileResults: ImportFileResult[] = [];
   const urlResults: ImportUrlResult[] = [];
   const documentIds: string[] = [];
 
-  for (const item of options.items) {
-    if (item.type === 'url') {
-      urlResults.push({
-        queueItemId: item.id,
-        ok: false,
-        url: item.url,
-        error: 'URL ingestion is not implemented yet (backend has no document create from URL).',
-      });
+  // Match backend results back to queue items by order (files first, then urls — mirrors backend loop order)
+  const backendFileResults = data.results.filter((r) => r.type === 'file');
+  const backendUrlResults = data.results.filter((r) => r.type === 'url');
+
+  for (let i = 0; i < fileItems.length; i++) {
+    const item = fileItems[i];
+    const result = backendFileResults[i];
+    if (!result) {
+      fileResults.push({ queueItemId: item.id, ok: false, filename: item.file.name, error: 'No response from server' });
       continue;
     }
-
-    const formData = new FormData();
-    formData.append('file', item.file);
-    if (options.collectionId) {
-      formData.append('collection_id', options.collectionId);
+    if (result.ok && result.document_id) {
+      documentIds.push(result.document_id);
+      fileResults.push({ queueItemId: item.id, ok: true, documentId: result.document_id, filename: item.file.name });
+    } else {
+      fileResults.push({ queueItemId: item.id, ok: false, filename: item.file.name, error: result.error ?? 'Upload failed' });
     }
+  }
 
-    try {
-      const data = await apiClient.postForm<{ document_id?: string }>('/documents/upload', formData);
-      if (!data.document_id) {
-        fileResults.push({
-          queueItemId: item.id,
-          ok: false,
-          filename: item.file.name,
-          error: 'Missing document_id in response',
-        });
-        continue;
-      }
-      documentIds.push(data.document_id);
-      fileResults.push({
-        queueItemId: item.id,
-        ok: true,
-        documentId: data.document_id,
-        filename: item.file.name,
-      });
-    } catch (e) {
-      fileResults.push({
-        queueItemId: item.id,
-        ok: false,
-        filename: item.file.name,
-        error: e instanceof Error ? e.message : 'Upload failed',
-      });
+  for (let i = 0; i < urlItems.length; i++) {
+    const item = urlItems[i];
+    const result = backendUrlResults[i];
+    if (!result) {
+      urlResults.push({ queueItemId: item.id, ok: false, url: item.url, error: 'No response from server' });
+      continue;
+    }
+    if (result.ok && result.document_id) {
+      documentIds.push(result.document_id);
+      urlResults.push({ queueItemId: item.id, ok: true, documentId: result.document_id, url: item.url });
+    } else {
+      urlResults.push({ queueItemId: item.id, ok: false, url: item.url, error: result.error ?? 'URL queuing failed' });
     }
   }
 
   const assignedToCollection = !!(options.collectionId && documentIds.length > 0);
-
   return { fileResults, urlResults, documentIds, assignedToCollection };
 }
 
@@ -260,7 +262,7 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
   const footerStatusText = () => {
     if (stage === 1) return items.length === 0 ? 'Add files to continue' : `${items.length} file(s) ready`;
     if (stage === 2) return `Saving to: ${selectedCollection ? collections.find((c) => c.collection_id === selectedCollection)?.name : '-'}`;
-    if (stage === 3) return 'Indexing continues in the background';
+    if (stage === 3) return 'Indexing continues after you close';
     return 'Done — files added to library';
   };
   
@@ -305,7 +307,11 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
                 {stage === 1 ? 'Cancel' : 'Back'}
               </button>
             )}
-            {stage < 4 ? (
+            {stage === 3 ? (
+              <button type="button" className="btn btn-p" onClick={handleClose}>
+                Close
+              </button>
+            ) : stage < 4 ? (
               <button
                 type="button"
                 className="btn btn-p"
@@ -317,7 +323,7 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
                 disabled={stage === 2 && importInProgress}
                 onClick={() => void handlePrimaryStageAction()}
               >
-                {stage === 1 ? 'Next' : stage === 2 ? (importInProgress ? 'Importing…' : 'Start Import') : 'Close'}
+                {stage === 1 ? 'Next' : importInProgress ? 'Importing…' : 'Start Import'}
               </button>
             ) : (
               <button type="button" className="btn btn-p" onClick={handleClose}>Close</button>
@@ -618,32 +624,114 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
           </div>
         )}
 
-        {/* ── Stage 3 — Indexing ── */}
-        {stage === 3 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--blue-a)', border: '1px solid var(--blue-br)', borderRadius: 10 }}>
-              <div className="animate-spin" style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--blue-br)', borderTop: '2px solid var(--blue)', flexShrink: 0 }} />
-              <span style={{ flex: 1, fontSize: 13, color: 'var(--t1)', fontFamily: 'var(--fb)' }}>
-                Indexing {items.length} document{items.length !== 1 ? 's' : ''}…
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--blue)', fontFamily: 'var(--fb)' }}>You can close this</span>
+        {/* ── Stage 3 — Indexing (from importResult, not raw items) ── */}
+        {stage === 3 && (() => {
+          const fileResults = importResult?.fileResults ?? [];
+          const urlResults = importResult?.urlResults ?? [];
+          const okFiles = fileResults.filter((r): r is ImportFileResult & { ok: true } => r.ok);
+          const okUrls = urlResults.filter((r): r is ImportUrlResult & { ok: true } => r.ok);
+          const indexingCount = okFiles.length + okUrls.length;
+          const hasIndexing = indexingCount > 0;
+          const hasRows = fileResults.length + urlResults.length > 0;
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {!importResult ? (
+                <p style={{ fontSize: 13, color: 'var(--t3)', fontFamily: 'var(--fb)' }}>No import data.</p>
+              ) : (
+                <>
+                  {hasIndexing ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--blue-a)', border: '1px solid var(--blue-br)', borderRadius: 10 }}>
+                      <div className="animate-spin" style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--blue-br)', borderTop: '2px solid var(--blue)', flexShrink: 0 }} />
+                      <span style={{ flex: 1, fontSize: 13, color: 'var(--t1)', fontFamily: 'var(--fb)' }}>
+                        Indexing {indexingCount} document{indexingCount !== 1 ? 's' : ''}…
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--blue)', fontFamily: 'var(--fb)' }}>You can close this</span>
+                    </div>
+                  ) : hasRows ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.35)', borderRadius: 10 }}>
+                      <span style={{ flex: 1, fontSize: 13, color: 'var(--t1)', fontFamily: 'var(--fb)' }}>
+                        No files started indexing — fix errors below or go back to retry.
+                      </span>
+                    </div>
+                  ) : null}
+
+                  {fileResults.map((r) =>
+                    r.ok ? (
+                      <div key={r.queueItemId} style={{ padding: '10px 12px', background: 'var(--raised)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <div className="animate-spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid var(--border-s)', borderTop: '2px solid var(--blue)', flexShrink: 0 }} />
+                          <FileText size={14} style={{ color: 'var(--t3)', flexShrink: 0 }} />
+                          <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {r.filename}
+                          </span>
+                        </div>
+                        <div style={{ height: 3, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: '0%', background: 'var(--blue)', borderRadius: 2 }} />
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--t3)', fontFamily: 'var(--fb)', marginTop: 4 }}>Queued for processing</div>
+                      </div>
+                    ) : (
+                      <div
+                        key={r.queueItemId}
+                        style={{
+                          padding: '10px 12px',
+                          background: 'rgba(248,113,113,0.08)',
+                          border: '1px solid rgba(248,113,113,0.28)',
+                          borderRadius: 10,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <X size={14} style={{ color: 'var(--red)', flexShrink: 0 }} />
+                          <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {r.filename}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--red)', fontFamily: 'var(--fb)', marginLeft: 22, lineHeight: 1.35 }}>{r.error}</div>
+                      </div>
+                    )
+                  )}
+
+                  {urlResults.map((r) =>
+                    r.ok ? (
+                      <div key={r.queueItemId} style={{ padding: '10px 12px', background: 'var(--raised)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <div className="animate-spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid var(--border-s)', borderTop: '2px solid var(--blue)', flexShrink: 0 }} />
+                          <Link2 size={14} style={{ color: 'var(--t3)', flexShrink: 0 }} />
+                          <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {r.url}
+                          </span>
+                        </div>
+                        <div style={{ height: 3, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: '0%', background: 'var(--blue)', borderRadius: 2 }} />
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--t3)', fontFamily: 'var(--fb)', marginTop: 4 }}>Queued for processing</div>
+                      </div>
+                    ) : (
+                      <div
+                        key={r.queueItemId}
+                        style={{
+                          padding: '10px 12px',
+                          background: 'rgba(248,113,113,0.08)',
+                          border: '1px solid rgba(248,113,113,0.28)',
+                          borderRadius: 10,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <Link2 size={14} style={{ color: 'var(--red)', flexShrink: 0 }} />
+                          <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {r.url}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--red)', fontFamily: 'var(--fb)', marginLeft: 22, lineHeight: 1.35 }}>{r.error}</div>
+                      </div>
+                    )
+                  )}
+                </>
+              )}
             </div>
-            {items.map((item) => (
-              <div key={item.id} style={{ padding: '10px 12px', background: 'var(--raised)', border: '1px solid var(--border)', borderRadius: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <div className="animate-spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid var(--border-s)', borderTop: '2px solid var(--blue)', flexShrink: 0 }} />
-                  <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {item.type === 'file' ? item.file.name : item.url}
-                  </span>
-                </div>
-                <div style={{ height: 3, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: '0%', background: 'var(--blue)', borderRadius: 2 }} />
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--t3)', fontFamily: 'var(--fb)', marginTop: 4 }}>Queued for processing</div>
-              </div>
-            ))}
-          </div>
-        )}
+          );
+        })()}
 
         {/* ── Stage 4 — Done ── */}
         {stage === 4 && (

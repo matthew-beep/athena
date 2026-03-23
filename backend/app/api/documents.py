@@ -194,51 +194,81 @@ async def list_documents(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/upload")
-async def upload_document(
+async def upload_documents(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
+    files: list[UploadFile] = File([]),
+    urls: list[str] = Form([]),
     collection_id: str | None = Form(None),
     current_user: dict = Depends(get_current_user),
 ):
-    filename = file.filename or ""
-    mime = _resolve_mime(file.content_type or "", filename)
+    results = []
 
-    if mime not in ALLOWED_TYPES:
-        return JSONResponse(
-            status_code=415,
-            content={"detail": f"Unsupported file type: {file.content_type!r}."},
+    for file in files:
+        filename = file.filename or ""
+        mime = _resolve_mime(file.content_type or "", filename)
+
+        if mime not in ALLOWED_TYPES:
+            results.append({
+                "type": "file",
+                "filename": filename,
+                "ok": False,
+                "error": f"Unsupported file type: {file.content_type!r}.",
+            })
+            continue
+
+        try:
+            body = await file.read()
+        except Exception as e:
+            logger.warning("Failed to read upload body for {}: {}", filename, e)
+            results.append({"type": "file", "filename": filename, "ok": False, "error": "Failed to read file."})
+            continue
+
+        if not body:
+            results.append({"type": "file", "filename": filename, "ok": False, "error": "Empty file."})
+            continue
+
+        document_id = f"doc_{uuid.uuid4().hex[:12]}"
+        file_type = _MIME_TO_TYPE.get(mime, "unknown")
+
+        await postgres.execute(
+            """INSERT INTO documents (document_id, filename, file_type, processing_status, word_count, user_id, collection_id)
+               VALUES ($1, $2, $3, 'processing', 0, $4, $5)""",
+            document_id, filename, file_type, current_user["id"], collection_id or None,
         )
 
-    try:
-        body = await file.read()
-    except Exception as e:
-        logger.warning("Failed to read upload body for {}: {}", filename, e)
-        return JSONResponse(status_code=400, content={"detail": "Failed to read uploaded file."})
+        background_tasks.add_task(_process_document, document_id, body, mime, filename, file_type, current_user["id"])
+        logger.info("Upload accepted: {} → {}", filename, document_id)
 
-    if not body:
-        return JSONResponse(status_code=400, content={"detail": "Empty file."})
-
-    document_id = f"doc_{uuid.uuid4().hex[:12]}"
-    file_type = _MIME_TO_TYPE.get(mime, "unknown")
-
-    await postgres.execute(
-        """INSERT INTO documents (document_id, filename, file_type, processing_status, word_count, user_id, collection_id)
-           VALUES ($1, $2, $3, 'processing', 0, $4, $5)""",
-        document_id, filename, file_type, current_user["id"], collection_id or None,
-    )
-
-    background_tasks.add_task(_process_document, document_id, body, mime, filename, file_type, current_user["id"])
-    logger.info("Upload accepted: {} → {}", filename, document_id)
-
-    return JSONResponse(
-        status_code=202,
-        content={
+        results.append({
+            "type": "file",
             "document_id": document_id,
             "filename": filename,
             "file_type": file_type,
+            "ok": True,
             "status": "processing",
-        },
-    )
+        })
+
+    for url in urls:
+        url = url.strip()
+        if not url:
+            continue
+        document_id = f"doc_{uuid.uuid4().hex[:12]}"
+        await postgres.execute(
+            """INSERT INTO documents (document_id, filename, file_type, processing_status, word_count, user_id, collection_id)
+               VALUES ($1, $2, 'web', 'pending', 0, $3, $4)""",
+            document_id, url, current_user["id"], collection_id or None,
+        )
+        logger.info("URL queued (not yet crawled): {} → {}", url, document_id)
+        results.append({
+            "type": "url",
+            "document_id": document_id,
+            "url": url,
+            "file_type": "web",
+            "ok": True,
+            "status": "pending",
+        })
+
+    return JSONResponse(status_code=202, content={"results": results})
 
 
 @router.post("/url")

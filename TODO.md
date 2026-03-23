@@ -1,7 +1,6 @@
 # Athena — TODO
 
-Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scoped retrieval, sentence-aware
-chunking, scope bar, full collections CRUD (backend + frontend), Structural Glass design system, upload modal stages 1+2 styled, glass audit (Phase F2) complete, upload modal wired to real API (collection_id atomic, postForm added to apiClient).
+Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scoped retrieval, sentence-aware chunking, scope bar, full collections CRUD (backend + frontend), Structural Glass design system, upload modal stages 1–3 styled + partially wired, glass audit (Phase F2) complete, batch upload endpoint (files + URLs in one request), collection_id atomic on upload.
 
 ~~Fix `MAX_RRF_SCORE` NameError~~ ✓ Done
 ~~Fix `httpx` missing import in `main.py`~~ ✓ Done
@@ -17,33 +16,29 @@ chunking, scope bar, full collections CRUD (backend + frontend), Structural Glas
 ~~Wire `collection_id` to upload API~~ ✓ Done (`Form(None)` param on `POST /api/documents/upload`, written to INSERT, `collection_id or None` ensures NULL in DB)
 ~~`apiClient.postForm` method~~ ✓ Done (added to `frontend/api/client.ts` — sends FormData without setting Content-Type so browser sets multipart boundary automatically)
 ~~`runImportFromQueue` two-step workaround removed~~ ✓ Done (collection_id now sent atomically in upload FormData; second `POST /collections/{id}/documents` call eliminated)
+~~Batch upload endpoint~~ ✓ Done (`POST /api/documents/upload` now accepts `files: list[UploadFile]` + `urls: list[str]` — one request for the whole queue, per-item errors don't fail the batch)
+~~URL queue on upload~~ ✓ Done (URLs get a `documents` row with `processing_status='pending'`, `file_type='web'` — no crawling yet, but they have a real `document_id` and appear in progress tracking)
+~~Stage 3 renders from `importResult`~~ ✓ Done (file + URL results from batch response, error state for failed items, spinner for successful ones)
+~~Stage 3 footer fix~~ ✓ Done ("Close" calls `handleClose` directly, indexing continues in background)
 
 ---
 
 **Next up (in order):**
 
-### Upload Modal — Stage 3 + 4 Wiring (current focus)
+### Upload Modal — Remaining Wiring
 
-1. **Wire `importResult` into Stage 3** — Stage 3 currently renders `items` (the queue). Replace with `importResult.fileResults`. Failed uploads (`ok: false`) should show an error state immediately instead of a spinner. Successful uploads show their filename from `importResult`.
-2. **Poll `/progress/active` in Stage 3** — on stage 3 mount, start polling `GET /api/documents/progress/active` every 800ms using the `document_ids` from `importResult.documentIds`. Map `{ stage, done, total }` to progress bar % and phase label (`Extracting → Chunking → Embedding`). Stop polling when all document_ids have disappeared from the response.
-3. **Fix Stage 3 footer button** — "Close" on stage 3 currently advances to stage 4 via `handlePrimaryStageAction`. It should close the modal (`handleClose`) while indexing continues in background. Remove stage 3 from the `stage < 4` primary button block and add a standalone Close button.
-4. **Wire Stage 4 to show real results** — Stage 4 currently shows a generic "All documents added" banner. Render per-file outcomes from `importResult`: filename + chunk count (from `GET /api/documents/{id}` or passed from completion detection) + error message for failed files.
-5. **Auto-select new collection after creation** — in stage 2, after `handleCreateCollection` resolves, set `selectedCollection` to the new collection's `collection_id`. Currently the user creates it but it isn't selected.
-~~6. **Wire `collection_id` to upload API**~~ ✓ Done — `Form(None)` param added, INSERT updated, two-step workaround removed from `runImportFromQueue`.
-
-### Collection Colors
-
-1. **Backend: add `color` column to `collections` table** — migration: `ALTER TABLE collections ADD COLUMN color VARCHAR(20) NOT NULL DEFAULT 'var(--blue)'`. Auto-assign from a preset palette on CREATE (cycle through blue/purple/green/amber/red/slate by existing row count). Return `color` in `GET /api/collections`, `POST /api/collections`, `PUT /api/collections/{id}` responses.
-2. **Backend: update Pydantic models** — add `color: str` to `CollectionItem` and `CollectionMutateResponse` in `models/collections.py`. Add `color` to the SELECT in `get_collections` query.
-3. **Backend: `PUT /api/collections/{id}` accepts color** — add optional `color: str | None` to `CollectionNameRequest` (or a new `CollectionUpdateRequest`). Update SQL to set color if provided.
-4. **Frontend: add `color` to `CollectionItem` type** — `frontend/types/index.ts`. Remove `COLLECTION_COLORS` array and the index-based `collectionColor()` fallback from `UploadModal.tsx`. Use `c.color` directly everywhere a collection color is needed.
-5. **Frontend: wire color into `CollectionsList`** — any component rendering collection pills/dots should read `c.color` from the API response, not derive it locally.
+1. **Stage 3 progress polling** — on stage 3 mount, start polling `GET /api/documents/progress/active` every 800ms using `importResult.documentIds`. Store per-doc progress in `docProgress` state: `Record<string, { stage, done, total, complete }>`. Map `stage` → label (`"extracting"` → `"Extracting"`, `"chunking"` → `"Chunking"`, `"embedding"` → `"Embedding N/M"`). For embedding: `(done/total)*100` width; for extracting/chunking: indeterminate pulse. Doc missing from response = complete (green check, 100%). Stop interval when all doc IDs are complete. Build `docId → filename` lookup from `importResult.fileResults` for display. Clean up interval in `useEffect` return.
+2. **Stage 4 per-item outcomes** — map `importResult.fileResults` + `importResult.urlResults`: `ok: true` → green check + filename + chunk count (read from `docProgress` when polling detects completion, or fetch `GET /api/documents/{id}`); `ok: false` → red X + filename + error. Summary line: "X of Y imported successfully". Buttons: "Close" → `handleClose`, "Import more" → reset to stage 1.
+3. **Auto-select new collection** — change `onCreateCollection` prop signature in `DocumentsPanel` from `Promise<void>` to `Promise<string>` (returns new `collection_id`). After it resolves in `handleCreateCollection`, call `setSelectedCollection(newId)`.
 
 ### documents.py — Collection Support
 
 4. **`GET /api/documents` — add `collection_id` filter** — optional query param `collection_id: str = ""`. SQL: `AND ($n = '' OR d.collection_id = $n)`. Also add `total` to response.
 5. **`GET /api/documents` — return collection fields per row** — add `collection_id`, `collection_name` (via JOIN) to each document row. `DocumentOut` model needs these nullable fields.
-~~6. **`POST /api/documents/upload` — accept `collection_id`**~~ ✓ Done — see Upload Modal item 6 above.
+
+### Infrastructure (quick wins before Celery)
+
+6. **Startup cleanup for stuck docs** — in `main.py` lifespan after DB connect, reset any `processing_status='processing'` docs to `error` with message `'Server restarted during processing'`. 3 lines, prevents docs stuck in processing forever after a restart.
 
 ### Library View — Remaining Wiring
 
@@ -53,6 +48,15 @@ chunking, scope bar, full collections CRUD (backend + frontend), Structural Glas
 10. **Document assign to collection UX** — "Move to collection" in document row `•••` menu → calls `POST /api/collections/{id}/documents`. Small popover listing available collections.
 11. **Remove debug red border** — `DocumentList.tsx` line ~403 has `border-2 border-red-800`.
 12. **Remove duplicate `refetchCollections` call** — `DocumentsPanel` calls it at lines 101 and 167.
+
+### Collection Colors
+
+1. **Backend: add `color` column to `collections` table** — migration: `ALTER TABLE collections ADD COLUMN color VARCHAR(20) NOT NULL DEFAULT 'var(--blue)'`. Auto-assign from a preset palette on CREATE (cycle through blue/purple/green/amber/red/slate by existing row count). Return `color` in `GET /api/collections`, `POST /api/collections`, `PUT /api/collections/{id}` responses.
+2. **Backend: update Pydantic models** — add `color: str` to `CollectionItem` and `CollectionMutateResponse` in `models/collections.py`. Add `color` to the SELECT in `get_collections` query.
+3. **Backend: `PUT /api/collections/{id}` accepts color** — add optional `color: str | None` to `CollectionNameRequest` (or a new `CollectionUpdateRequest`). Update SQL to set color if provided.
+4. **Frontend: add `color` to `CollectionItem` type** — `frontend/types/index.ts`. Remove `COLLECTION_COLORS` array and the index-based `collectionColor()` fallback from `UploadModal.tsx`. Use `c.color` directly everywhere a collection color is needed.
+5. **Frontend: wire color into `CollectionsList`** — any component rendering collection pills/dots should read `c.color` from the API response, not derive it locally.
+
 
 ### RAG Scoring Audit
 - [ ] **Audit RRF score accuracy** — with scoring unblocked, verify numbers are meaningful. With `k=60` and ~20 results, max RRF score is ~2*(1/61) ≈ 0.033 — too small to display raw. Normalize against top result score so displayed scores span `0.0–1.0`. Add debug log of top-5 chunk_ids + scores in `retrieve()` for validation.
@@ -70,7 +74,16 @@ chunking, scope bar, full collections CRUD (backend + frontend), Structural Glas
 ### Infrastructure
 - [ ] **Fix context window tracking** — expose `conversations.token_count` in `GET /api/chat/conversations`. Pre-populate `contextTokens[convId]` on load. Apply `context_debug` tokens immediately on SSE event. Fix `contextBudget` hardcoded `4096` in `DevModeOverlay.tsx`.
 - [ ] **Add SearXNG to Docker Compose** — self-hosted search, same sidecar pattern as Crawl4AI.
-- [ ] **Redis + Celery** — migrate document processing from `BackgroundTasks` to Celery once ingestion paths are stable. Enables retries and progress from a real task queue.
+- [ ] **Redis + Celery** — migrate document processing from `BackgroundTasks` to Celery once ingestion paths are stable. Enables retries, parallelism, and survival across restarts. Do this before URL ingestion goes live — URL crawling + file ingestion running concurrently is where sequential BackgroundTasks becomes a real problem.
+- [ ] **Document cancel** — add `_cancelled: set[str]` module-level in `documents.py`. `POST /api/documents/{id}/cancel` adds to set. `_process_document` checks at each stage boundary and calls cleanup (DELETE documents row → cascades chunks, delete Qdrant points). Not immediate — stops at next checkpoint. Low priority until Celery (which gives `revoke(terminate=True)` for free).
+
+### pg_search Migration (do before URL ingestion goes live)
+
+- [ ] **Swap Docker image** — `postgres:16-alpine` → `paradedb/paradedb:latest` in both compose files. Drop-in replacement.
+- [ ] **Migration `005_pg_search.sql`** — `CREATE EXTENSION IF NOT EXISTS pg_search;`, drop `bm25_indexes` table, create BM25 index on `document_chunks` (key: `chunk_id`, fields: `text` + `filename_normalized` boosted 4×). Verify `filename_normalized` column exists on `document_chunks` — it's in Qdrant payload but may need adding to the table.
+- [ ] **Rewrite `bm25_search()` in `core/rag.py`** — replace Python `rank_bm25` scoring with SQL: `WHERE text @@@ $1 ORDER BY paradedb.score(chunk_id) DESC`. Scoped path adds `AND document_id = ANY($2)`, search_all path adds `AND user_id = $2`.
+- [ ] **Delete old BM25 plumbing** — remove `core/bm25.py`, remove `build_bm25_index` call from `_process_document`, remove `_bm25_cache` + helpers from `rag.py`, remove `rank-bm25` from `requirements.txt`.
+- [ ] **Test** — upload a doc, ask a question, verify hybrid search + RRF still returns results.
 
 ---
 
