@@ -1,13 +1,13 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Link2, Upload, X, FileText } from 'lucide-react';
+import { Link2, Upload, X, FileText, CheckCircle2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
-import type { CollectionItem } from '@/types';
+import type { CollectionItem, ProgressMap } from '@/types';
 import { Pill } from '@/components/ui/Pill';
 import { apiClient } from '@/api/client';
 
-export type UploadStage = 1 | 2 | 3 | 4;
+export type UploadStage = 1 | 2 | 3;
 
 export type QueuedItem =
   | { type: 'file'; id: string; file: File }
@@ -144,17 +144,18 @@ const STAGE_TITLES: Record<UploadStage, string> = {
   1: 'Add Files',
   2: 'Save to Collection',
   3: 'Indexing…',
-  4: 'Import Complete',
 };
 
 interface UploadModalProps {
   open: boolean;
   onClose: () => void;
   collections: CollectionItem[];
-  onCreateCollection: (name: string) => Promise<void>;
+  onCreateCollection: (name: string) => Promise<string>;
+  onImportComplete?: () => void;
+  progressMap?: ProgressMap | null;
 }
 
-export function UploadModal({ open, onClose, collections, onCreateCollection }: UploadModalProps) {
+export function UploadModal({ open, onClose, collections, onCreateCollection, onImportComplete, progressMap = null }: UploadModalProps) {
   const [stage, setStage] = useState<UploadStage>(1);
   const [items, setItems] = useState<QueuedItem[]>([]);
   const [url, setUrl] = useState('');
@@ -203,6 +204,7 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
         });
         setImportResult(result);
         setStage(3);
+        onImportComplete?.();
       } catch (e) {
         console.error(e);
       } finally {
@@ -210,16 +212,14 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
       }
       return;
     }
-    if (stage === 3) {
-      setStage(4);
-    }
   }, [stage, items, selectedCollection, importInProgress]);
 
   const handleCreateCollection = async (name: string) => {
     try {
       const trimmed = name.trim();
       if (!trimmed) return;
-      await onCreateCollection(trimmed);
+      const newId = await onCreateCollection(trimmed);
+      setSelectedCollection(newId);
     } catch (error) {
       console.error(error);
     }
@@ -262,8 +262,7 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
   const footerStatusText = () => {
     if (stage === 1) return items.length === 0 ? 'Add files to continue' : `${items.length} file(s) ready`;
     if (stage === 2) return `Saving to: ${selectedCollection ? collections.find((c) => c.collection_id === selectedCollection)?.name : '-'}`;
-    if (stage === 3) return 'Indexing continues after you close';
-    return 'Done — files added to library';
+    return 'Indexing continues after you close';
   };
   
 
@@ -277,7 +276,7 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
             {STAGE_TITLES[stage]}
           </p>
           <div style={{ display: 'flex', gap: 6, marginTop: 5 }}>
-            {([1, 2, 3, 4] as const).map((s) => (
+            {([1, 2, 3] as const).map((s) => (
               <div
                 key={s}
                 style={{
@@ -311,7 +310,7 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
               <button type="button" className="btn btn-p" onClick={handleClose}>
                 Close
               </button>
-            ) : stage < 4 ? (
+            ) : (
               <button
                 type="button"
                 className="btn btn-p"
@@ -325,8 +324,6 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
               >
                 {stage === 1 ? 'Next' : importInProgress ? 'Importing…' : 'Start Import'}
               </button>
-            ) : (
-              <button type="button" className="btn btn-p" onClick={handleClose}>Close</button>
             )}
           </div>
         </div>
@@ -630,9 +627,29 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
           const urlResults = importResult?.urlResults ?? [];
           const okFiles = fileResults.filter((r): r is ImportFileResult & { ok: true } => r.ok);
           const okUrls = urlResults.filter((r): r is ImportUrlResult & { ok: true } => r.ok);
-          const indexingCount = okFiles.length + okUrls.length;
+          const okDocIds = [...okFiles.map((r) => r.documentId), ...okUrls.map((r) => r.documentId)];
+          const indexingCount = okDocIds.length;
           const hasIndexing = indexingCount > 0;
           const hasRows = fileResults.length + urlResults.length > 0;
+          const allDone = progressMap !== null && okDocIds.length > 0 && okDocIds.every((id) => !progressMap[id]);
+          const doneCount = progressMap !== null ? okDocIds.filter((id) => !progressMap[id]).length : 0;
+
+          const getProgressInfo = (docId: string) => {
+            const prog = progressMap?.[docId];
+            const isDone = progressMap !== null && !prog;
+            const progStage = prog?.stage ?? null;
+            const pct = progStage === 'embedding' && prog && prog.total > 0
+              ? Math.round((prog.done / prog.total) * 100)
+              : null;
+            const label = isDone
+              ? 'Complete'
+              : progStage === 'extracting' ? 'Extracting text…'
+              : progStage === 'chunking' ? 'Splitting into chunks…'
+              : progStage === 'embedding'
+                ? (prog && prog.total > 0 ? `Embedding chunk ${prog.done} / ${prog.total}…` : 'Embedding…')
+              : 'Queued…';
+            return { isDone, pct, label, isIndeterminate: !isDone && pct === null };
+          };
 
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -641,13 +658,22 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
               ) : (
                 <>
                   {hasIndexing ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--blue-a)', border: '1px solid var(--blue-br)', borderRadius: 10 }}>
-                      <div className="animate-spin" style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--blue-br)', borderTop: '2px solid var(--blue)', flexShrink: 0 }} />
-                      <span style={{ flex: 1, fontSize: 13, color: 'var(--t1)', fontFamily: 'var(--fb)' }}>
-                        Indexing {indexingCount} document{indexingCount !== 1 ? 's' : ''}…
-                      </span>
-                      <span style={{ fontSize: 11, color: 'var(--blue)', fontFamily: 'var(--fb)' }}>You can close this</span>
-                    </div>
+                    allDone ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--green-a)', border: '1px solid var(--green-br)', borderRadius: 10 }}>
+                        <CheckCircle2 size={14} style={{ color: 'var(--green)', flexShrink: 0 }} />
+                        <span style={{ flex: 1, fontSize: 13, color: 'var(--t1)', fontFamily: 'var(--fb)' }}>
+                          {indexingCount} document{indexingCount !== 1 ? 's' : ''} indexed
+                        </span>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--blue-a)', border: '1px solid var(--blue-br)', borderRadius: 10 }}>
+                        <div className="animate-spin" style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--blue-br)', borderTop: '2px solid var(--blue)', flexShrink: 0 }} />
+                        <span style={{ flex: 1, fontSize: 13, color: 'var(--t1)', fontFamily: 'var(--fb)' }}>
+                          {progressMap !== null ? `${doneCount} / ${indexingCount}` : `0 / ${indexingCount}`} indexed…
+                        </span>
+                        <span style={{ fontSize: 11, color: 'var(--blue)', fontFamily: 'var(--fb)' }}>You can close this</span>
+                      </div>
+                    )
                   ) : hasRows ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.35)', borderRadius: 10 }}>
                       <span style={{ flex: 1, fontSize: 13, color: 'var(--t1)', fontFamily: 'var(--fb)' }}>
@@ -656,94 +682,81 @@ export function UploadModal({ open, onClose, collections, onCreateCollection }: 
                     </div>
                   ) : null}
 
-                  {fileResults.map((r) =>
-                    r.ok ? (
-                      <div key={r.queueItemId} style={{ padding: '10px 12px', background: 'var(--raised)', border: '1px solid var(--border)', borderRadius: 10 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                          <div className="animate-spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid var(--border-s)', borderTop: '2px solid var(--blue)', flexShrink: 0 }} />
-                          <FileText size={14} style={{ color: 'var(--t3)', flexShrink: 0 }} />
-                          <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {r.filename}
-                          </span>
-                        </div>
-                        <div style={{ height: 3, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: '0%', background: 'var(--blue)', borderRadius: 2 }} />
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--t3)', fontFamily: 'var(--fb)', marginTop: 4 }}>Queued for processing</div>
-                      </div>
-                    ) : (
-                      <div
-                        key={r.queueItemId}
-                        style={{
-                          padding: '10px 12px',
-                          background: 'rgba(248,113,113,0.08)',
-                          border: '1px solid rgba(248,113,113,0.28)',
-                          borderRadius: 10,
-                        }}
-                      >
+                  {fileResults.map((r) => {
+                    if (!r.ok) return (
+                      <div key={r.queueItemId} style={{ padding: '10px 12px', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.28)', borderRadius: 10 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                           <X size={14} style={{ color: 'var(--red)', flexShrink: 0 }} />
-                          <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {r.filename}
-                          </span>
+                          <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.filename}</span>
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--red)', fontFamily: 'var(--fb)', marginLeft: 22, lineHeight: 1.35 }}>{r.error}</div>
                       </div>
-                    )
-                  )}
-
-                  {urlResults.map((r) =>
-                    r.ok ? (
-                      <div key={r.queueItemId} style={{ padding: '10px 12px', background: 'var(--raised)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                    );
+                    const { isDone, pct, label, isIndeterminate } = getProgressInfo(r.documentId);
+                    return (
+                      <div key={r.queueItemId} style={{ padding: '10px 12px', background: 'var(--raised)', border: `1px solid ${isDone ? 'var(--green-br)' : 'var(--border)'}`, borderRadius: 10 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                          <div className="animate-spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid var(--border-s)', borderTop: '2px solid var(--blue)', flexShrink: 0 }} />
-                          <Link2 size={14} style={{ color: 'var(--t3)', flexShrink: 0 }} />
-                          <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {r.url}
-                          </span>
+                          {isDone
+                            ? <CheckCircle2 size={12} style={{ color: 'var(--green)', flexShrink: 0 }} />
+                            : <div className="animate-spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid var(--border-s)', borderTop: '2px solid var(--blue)', flexShrink: 0 }} />
+                          }
+                          <FileText size={14} style={{ color: 'var(--t3)', flexShrink: 0 }} />
+                          <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.filename}</span>
                         </div>
                         <div style={{ height: 3, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: '0%', background: 'var(--blue)', borderRadius: 2 }} />
+                          <div style={{
+                            height: '100%',
+                            borderRadius: 2,
+                            background: isDone ? 'var(--green)' : 'var(--blue)',
+                            width: isDone ? '100%' : pct !== null ? `${pct}%` : '100%',
+                            ...(isIndeterminate && !isDone ? { animation: 'shimmerPulse 1.5s ease-in-out infinite' } : { transition: 'width 0.3s ease' }),
+                          }} />
                         </div>
-                        <div style={{ fontSize: 11, color: 'var(--t3)', fontFamily: 'var(--fb)', marginTop: 4 }}>Queued for processing</div>
+                        <div style={{ fontSize: 11, color: isDone ? 'var(--green)' : 'var(--t3)', fontFamily: 'var(--fb)', marginTop: 4 }}>{label}</div>
                       </div>
-                    ) : (
-                      <div
-                        key={r.queueItemId}
-                        style={{
-                          padding: '10px 12px',
-                          background: 'rgba(248,113,113,0.08)',
-                          border: '1px solid rgba(248,113,113,0.28)',
-                          borderRadius: 10,
-                        }}
-                      >
+                    );
+                  })}
+
+                  {urlResults.map((r) => {
+                    if (!r.ok) return (
+                      <div key={r.queueItemId} style={{ padding: '10px 12px', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.28)', borderRadius: 10 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                          <Link2 size={14} style={{ color: 'var(--red)', flexShrink: 0 }} />
-                          <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {r.url}
-                          </span>
+                          <X size={14} style={{ color: 'var(--red)', flexShrink: 0 }} />
+                          <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.url}</span>
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--red)', fontFamily: 'var(--fb)', marginLeft: 22, lineHeight: 1.35 }}>{r.error}</div>
                       </div>
-                    )
-                  )}
+                    );
+                    const { isDone, pct, label, isIndeterminate } = getProgressInfo(r.documentId);
+                    return (
+                      <div key={r.queueItemId} style={{ padding: '10px 12px', background: 'var(--raised)', border: `1px solid ${isDone ? 'var(--green-br)' : 'var(--border)'}`, borderRadius: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          {isDone
+                            ? <CheckCircle2 size={12} style={{ color: 'var(--green)', flexShrink: 0 }} />
+                            : <div className="animate-spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid var(--border-s)', borderTop: '2px solid var(--blue)', flexShrink: 0 }} />
+                          }
+                          <Link2 size={14} style={{ color: 'var(--t3)', flexShrink: 0 }} />
+                          <span style={{ flex: 1, fontSize: 12, color: 'var(--t1)', fontFamily: 'var(--fb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.url}</span>
+                        </div>
+                        <div style={{ height: 3, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
+                          <div style={{
+                            height: '100%',
+                            borderRadius: 2,
+                            background: isDone ? 'var(--green)' : 'var(--blue)',
+                            width: isDone ? '100%' : pct !== null ? `${pct}%` : '100%',
+                            ...(isIndeterminate && !isDone ? { animation: 'shimmerPulse 1.5s ease-in-out infinite' } : { transition: 'width 0.3s ease' }),
+                          }} />
+                        </div>
+                        <div style={{ fontSize: 11, color: isDone ? 'var(--green)' : 'var(--t3)', fontFamily: 'var(--fb)', marginTop: 4 }}>{label}</div>
+                      </div>
+                    );
+                  })}
                 </>
               )}
             </div>
           );
         })()}
 
-        {/* ── Stage 4 — Done ── */}
-        {stage === 4 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, background: 'var(--green-a)', border: '1px solid var(--green-br)', borderRadius: 10, justifyContent: 'center' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            <span style={{ fontSize: 13, color: 'var(--green)', fontFamily: 'var(--fb)', fontWeight: 500 }}>
-              All documents added to library
-            </span>
-          </div>
-        )}
       </div>
     </Modal>
   );

@@ -53,6 +53,10 @@ async def lifespan(app: FastAPI):
                 raise
 
     await seed_admin_user()
+    await postgres.execute(
+        "UPDATE documents SET processing_status='error', error_message='Server restarted during processing' WHERE processing_status='processing'"
+    )
+    logger.info("Reset any stuck processing documents to error")
 
     try:
         await qdrant.ensure_collection()

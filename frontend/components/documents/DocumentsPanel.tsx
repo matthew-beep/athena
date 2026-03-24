@@ -2,44 +2,71 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { DocumentList } from './DocumentList';
+import type { DocumentItem } from './DocumentList';
 import { apiClient } from '@/api/client';
 import { FilePlusIcon } from 'lucide-react';
 import { DocumentSideBar } from './DocumentSideBar';
 import { DocumentTypeSelector } from './DocumentTypeSelector';
 import { UploadModal } from './UploadModal';
-import type { CollectionItem, CollectionMutateResponse, CollectionsListResponse } from '@/types';
+import type { CollectionItem, CollectionMutateResponse, CollectionsListResponse, ProgressMap } from '@/types';
 import { Pill } from '@/components/ui/Pill';
 import { useAuthStore } from '@/stores/auth.store';
 
 export function DocumentsPanel() {
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [docCount, setDocCount] = useState<number>(0);
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(true);
+  const [docsError, setDocsError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [progressMap, setProgressMap] = useState<ProgressMap | null>(null);
+  const [isPollingProgress, setIsPollingProgress] = useState(false);
 
   const [selectedCollections, setSelectedCollections] = useState<CollectionItem[]>([]);
-  const [docTypes, setDocTypes] = useState<string[]>(["PDF", "TXT", "Markdown"]);
+  const [docTypes] = useState<string[]>(["PDF", "TXT", "Markdown"]);
   const [tab, setTab] = useState<string>("all");
   const [collections, setCollections] = useState<CollectionItem[]>([]);
   const [loadingCollections, setLoadingCollections] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchDocuments = () => {
+  const fetchDocuments = useCallback(() => {
     const token = useAuthStore.getState().token;
-    return fetch('/api/documents', {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    return fetch('/api/documents', { headers })
       .then((r) => r.json())
-      .then((data) => { 
-        setDocuments(data.documents ?? []); 
-        setDocCount(data.doc_count ?? 0); 
-        setError(null); 
+      .then((data) => {
+        setDocuments(data.documents ?? []);
+        setDocsError(null);
       })
-      .catch(() => setError('Failed to load documents'));
-  };
+      .catch(() => setDocsError('Failed to load documents'));
+  }, []);
 
+  // Poll /progress/active while isPollingProgress is true
+  useEffect(() => {
+    if (!isPollingProgress) return;
+
+    const token = useAuthStore.getState().token;
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const poll = () => {
+      fetch('/api/documents/progress/active', { headers })
+        .then((r) => r.json())
+        .then((data: ProgressMap) => {
+          setProgressMap(data);
+          if (Object.keys(data).length === 0) {
+            setIsPollingProgress(false);
+            fetchDocuments();
+          }
+        })
+        .catch(() => {});
+    };
+
+    poll();
+    const t = setInterval(poll, 800);
+    return () => clearInterval(t);
+  }, [isPollingProgress, fetchDocuments]);
+
+  const handleDeleteDocument = useCallback((documentId: string) => {
+    setDocuments((prev) => prev.filter((d) => d.document_id !== documentId));
+  }, []);
 
   const handleSelectCollection = (collection: CollectionItem) => {
     setSelectedCollections((prev) =>
@@ -49,12 +76,8 @@ export function DocumentsPanel() {
     );
   };
 
-  const handleSelectDocType = (docType: string) => {
-    setTab(docType);
-  };
-
   const refetchCollections = useCallback(async () => {
-    try{
+    try {
       setLoadingCollections(true);
       const response = await apiClient.get<CollectionsListResponse>("/collections");
       setCollections(response.collections);
@@ -63,26 +86,31 @@ export function DocumentsPanel() {
     } finally {
       setLoadingCollections(false);
     }
-  }, [])
+  }, []);
 
   const removeSelectedCollection = (collectionId: string) => {
     setSelectedCollections((prev) => prev.filter((c) => c.collection_id !== collectionId));
   };
 
-  const createCollection = useCallback(async (name: string) => {
+  const createCollection = useCallback(async (name: string): Promise<string> => {
     const trimmed = name.trim();
-    if (!trimmed) return;
-    await apiClient.post<CollectionMutateResponse>('/collections', { name: trimmed });
+    const res = await apiClient.post<CollectionMutateResponse>('/collections', { name: trimmed });
     await refetchCollections();
+    return res.collection_id;
   }, [refetchCollections]);
+
+  const handleImportComplete = useCallback(() => {
+    setIsPollingProgress(true);
+  }, []);
 
   useEffect(() => {
     refetchCollections();
   }, [refetchCollections]);
 
   useEffect(() => {
-    fetchDocuments();
-  }, []);
+    setLoadingDocs(true);
+    fetchDocuments().finally(() => setLoadingDocs(false));
+  }, [fetchDocuments]);
 
   return (
     <div className="h-full overflow-y-auto flex flex-col">
@@ -91,12 +119,17 @@ export function DocumentsPanel() {
           <div className="flex flex-col items-start justify-between">
             <h2 className="text-base font-display font-semibold tracking-tight">Library</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              {docCount} Documents - {collections.length} Collections
+              {collections.length} Collections
             </p>
           </div>
           <div className="flex items-center justify-between gap-2">
-            <input type="text" placeholder="Search documents" className="border-[var(--border)] border w-full bg-transparent outline-none p-2 rounded-md" value={search} onChange={(e) => setSearch(e.target.value)} />
-
+            <input
+              type="text"
+              placeholder="Search documents"
+              className="border-[var(--border)] border w-full bg-transparent outline-none p-2 rounded-md"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
             <button
               type="button"
               onClick={() => setUploadModalOpen(true)}
@@ -119,7 +152,6 @@ export function DocumentsPanel() {
             onCreateCollection={createCollection}
           />
           <div className="flex flex-col w-full">
-
             {selectedCollections.length > 0 && (
               <div className="flex items-center gap-2 px-4 py-2">
                 {selectedCollections.map((c) => (
@@ -128,14 +160,30 @@ export function DocumentsPanel() {
               </div>
             )}
             <div className="px-4 py-2 border-b border-b-[var(--border)]">
-              <DocumentTypeSelector docTypes={docTypes} onSelectDocType={handleSelectDocType} tab={tab} />
+              <DocumentTypeSelector docTypes={docTypes} onSelectDocType={setTab} tab={tab} />
             </div>
-            <DocumentList refreshKey={refreshKey} search={search} />
+            <DocumentList
+              documents={documents}
+              loading={loadingDocs}
+              error={docsError}
+              progressMap={progressMap}
+              search={search}
+              collectionIds={selectedCollections.map((c) => c.collection_id)}
+              fileType={tab}
+              onDelete={handleDeleteDocument}
+            />
           </div>
         </div>
       </div>
 
-      <UploadModal open={uploadModalOpen} onClose={() => setUploadModalOpen(false)} collections={collections} onCreateCollection={createCollection}/>
+      <UploadModal
+        open={uploadModalOpen}
+        onClose={() => setUploadModalOpen(false)}
+        collections={collections}
+        onCreateCollection={createCollection}
+        onImportComplete={handleImportComplete}
+        progressMap={progressMap}
+      />
     </div>
   );
 }

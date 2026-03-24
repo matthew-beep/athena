@@ -1,6 +1,6 @@
 # Athena — TODO
 
-Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scoped retrieval, sentence-aware chunking, scope bar, full collections CRUD (backend + frontend), Structural Glass design system, upload modal stages 1–3 styled + partially wired, glass audit (Phase F2) complete, batch upload endpoint (files + URLs in one request), collection_id atomic on upload.
+Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scoped retrieval, sentence-aware chunking, scope bar, full collections CRUD (backend + frontend), Structural Glass design system, upload modal stages 1–3 fully wired (stage 4 removed), glass audit (Phase F2) complete, batch upload endpoint (files + URLs in one request), collection_id atomic on upload, single polling loop, library view filtering wired, DocumentsPanel owns document fetch.
 
 ~~Fix `MAX_RRF_SCORE` NameError~~ ✓ Done
 ~~Fix `httpx` missing import in `main.py`~~ ✓ Done
@@ -20,34 +20,27 @@ Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scop
 ~~URL queue on upload~~ ✓ Done (URLs get a `documents` row with `processing_status='pending'`, `file_type='web'` — no crawling yet, but they have a real `document_id` and appear in progress tracking)
 ~~Stage 3 renders from `importResult`~~ ✓ Done (file + URL results from batch response, error state for failed items, spinner for successful ones)
 ~~Stage 3 footer fix~~ ✓ Done ("Close" calls `handleClose` directly, indexing continues in background)
+~~Stage 3 progress polling wired~~ ✓ Done (`progressMap` prop threaded from `DocumentsPanel` → `UploadModal`; `getProgressInfo()` maps stage → label; spinners → green `CheckCircle2` on completion; `shimmerPulse` for extracting/chunking, real % bar for embedding)
+~~Stage 4 removed~~ ✓ Done (scrapped — stage 3 already shows completion with green checks; `UploadStage = 1 | 2 | 3`)
+~~Auto-select new collection in UploadModal~~ ✓ Done (`onCreateCollection` returns `Promise<string>` (collection_id); modal calls `setSelectedCollection(newId)` after creation)
+~~Startup cleanup for stuck processing docs~~ ✓ Done (`main.py` lifespan resets any `processing_status='processing'` docs to `error` on boot)
+~~Collapse document polling to one endpoint~~ ✓ Done (`/progress/active` includes `pending` docs + `processing_status` per entry; `DocumentsPanel` drops the 3s `/api/documents` loop; one final `fetchDocuments()` when polling ends)
+~~Wire collection filter to DocumentList~~ ✓ Done (`collectionIds: string[]` prop passed from `DocumentsPanel`, client-side `.filter()` in `DocumentList`)
+~~Wire DocumentTypeSelector tab to DocumentList~~ ✓ Done (`fileType: string` prop, client-side `.filter()` by `fileType === 'all' || d.fileType === fileType.toLowerCase()`)
+~~Remove debug red border in DocumentList~~ ✓ Done
+~~`GET /api/documents` — add `collection_id` filter + return `collection_id` per row~~ ✓ Done (optional `collection_id` and `file_type` query params; `collection_id` included in SELECT)
+~~Lift document fetch to DocumentsPanel~~ ✓ Done (`DocumentList` is now a pure display component; `DocumentsPanel` owns `GET /api/documents`, passes `documents: DocumentItem[]`, `loading`, `error`, `onDelete` down; `handleDeleteDocument` removes from local state)
 
 ---
 
 **Next up (in order):**
 
-### Upload Modal — Remaining Wiring
-
-1. **Stage 3 progress polling** — on stage 3 mount, start polling `GET /api/documents/progress/active` every 800ms using `importResult.documentIds`. Store per-doc progress in `docProgress` state: `Record<string, { stage, done, total, complete }>`. Map `stage` → label (`"extracting"` → `"Extracting"`, `"chunking"` → `"Chunking"`, `"embedding"` → `"Embedding N/M"`). For embedding: `(done/total)*100` width; for extracting/chunking: indeterminate pulse. Doc missing from response = complete (green check, 100%). Stop interval when all doc IDs are complete. Build `docId → filename` lookup from `importResult.fileResults` for display. Clean up interval in `useEffect` return.
-2. **Stage 4 per-item outcomes** — map `importResult.fileResults` + `importResult.urlResults`: `ok: true` → green check + filename + chunk count (read from `docProgress` when polling detects completion, or fetch `GET /api/documents/{id}`); `ok: false` → red X + filename + error. Summary line: "X of Y imported successfully". Buttons: "Close" → `handleClose`, "Import more" → reset to stage 1.
-3. **Auto-select new collection** — change `onCreateCollection` prop signature in `DocumentsPanel` from `Promise<void>` to `Promise<string>` (returns new `collection_id`). After it resolves in `handleCreateCollection`, call `setSelectedCollection(newId)`.
-
-### documents.py — Collection Support
-
-4. **`GET /api/documents` — add `collection_id` filter** — optional query param `collection_id: str = ""`. SQL: `AND ($n = '' OR d.collection_id = $n)`. Also add `total` to response.
-5. **`GET /api/documents` — return collection fields per row** — add `collection_id`, `collection_name` (via JOIN) to each document row. `DocumentOut` model needs these nullable fields.
-
-### Infrastructure (quick wins before Celery)
-
-6. **Startup cleanup for stuck docs** — in `main.py` lifespan after DB connect, reset any `processing_status='processing'` docs to `error` with message `'Server restarted during processing'`. 3 lines, prevents docs stuck in processing forever after a restart.
-
 ### Library View — Remaining Wiring
 
-7. **Wire collection filter to DocumentList** — `selectedCollections` tracked in `DocumentsPanel` but never passed to `DocumentList`. Pass `collectionIds: string[]` prop, send as query param.
-8. **Wire DocumentTypeSelector tab to DocumentList** — `tab` state never passed down. Add `fileType: string` prop, filter by `file_type` in backend query.
-9. **Fix "X Documents" header count** — hardcoded string. Read `total` from `GET /api/documents` response.
-10. **Document assign to collection UX** — "Move to collection" in document row `•••` menu → calls `POST /api/collections/{id}/documents`. Small popover listing available collections.
-11. **Remove debug red border** — `DocumentList.tsx` line ~403 has `border-2 border-red-800`.
-12. **Remove duplicate `refetchCollections` call** — `DocumentsPanel` calls it at lines 101 and 167.
+1. **`GET /api/documents` — return `collection_name` per row** — add JOIN to `collections` table, include `collection_name` nullable in each document row. `DocumentItem` and frontend rendering can then show collection name on each doc.
+2. **Fix "X Collections" → "X Documents" header count** — header currently shows collection count. Switch to total doc count or remove subtitle entirely (revisit when pagination lands).
+3. **Document assign to collection UX** — "Move to collection" popover on document row → `POST /api/collections/{id}/documents`. Needed so users can reorganize docs without re-uploading.
+4. **Remove duplicate `refetchCollections` call** — `DocumentsPanel` calls it at mount and inside `createCollection` — second call may be redundant.
 
 ### Collection Colors
 

@@ -1,3 +1,13 @@
+export interface DocProgress {
+  stage: string;
+  done: number;
+  total: number;
+  active: boolean;
+  processing_status: string;
+}
+
+export type ProgressMap = Record<string, DocProgress>;
+
 export interface User {
   id: number;
   username: string;

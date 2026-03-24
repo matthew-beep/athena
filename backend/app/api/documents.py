@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, Form, Query
 from fastapi.responses import JSONResponse
 from loguru import logger
 
@@ -180,15 +180,31 @@ async def _process_document(
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @router.get("")
-async def list_documents(current_user: dict = Depends(get_current_user)):
+async def list_documents(
+    current_user: dict = Depends(get_current_user),
+    collection_id: str | None = Query(default=None),
+    file_type: str | None = Query(default=None),
+):
+    conditions = ["user_id = $1"]
+    params: list = [current_user["id"]]
+
+    if collection_id:
+        params.append(collection_id)
+        conditions.append(f"collection_id = ${len(params)}")
+
+    if file_type:
+        params.append(file_type.lower())
+        conditions.append(f"LOWER(file_type) = ${len(params)}")
+
+    where = " AND ".join(conditions)
     rows = await postgres.fetch_all(
-        """SELECT document_id, filename, file_type, processing_status,
-                  upload_date, word_count, chunk_count, error_message
+        f"""SELECT document_id, filename, file_type, processing_status,
+                  upload_date, word_count, chunk_count, error_message, collection_id
            FROM documents
-           WHERE user_id = $1
+           WHERE {where}
            ORDER BY upload_date DESC
            LIMIT 50""",
-        current_user["id"],
+        *params,
     )
     return {"documents": [dict(r) for r in rows], "total": len(rows)}
 
@@ -309,18 +325,18 @@ async def ingest_url(body: dict, current_user: dict = Depends(get_current_user))
 @router.get("/progress/active")
 async def get_active_progress(current_user: dict = Depends(get_current_user)):
     rows = await postgres.fetch_all(
-        "SELECT document_id FROM documents WHERE processing_status = 'processing' AND user_id = $1",
+        "SELECT document_id, processing_status FROM documents WHERE processing_status IN ('pending', 'processing') AND user_id = $1",
         current_user["id"],
     )
     result = {}
     for row in rows:
         doc_id = row["document_id"]
+        status = row["processing_status"]
         prog = _progress.get(doc_id)
         if prog is not None:
-            result[doc_id] = {**prog, "active": True}
+            result[doc_id] = {**prog, "active": True, "processing_status": status}
         else:
-            # In DB as processing but not in memory — server restarted mid-ingest
-            result[doc_id] = {"stage": "processing", "done": 0, "total": 0, "active": False}
+            result[doc_id] = {"stage": status, "done": 0, "total": 0, "active": False, "processing_status": status}
     return result
 
 @router.get("/{document_id}/progress")

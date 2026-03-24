@@ -1,5 +1,5 @@
 # Athena — Codebase Status
-## 2026-03-21
+## 2026-03-23
 
 ---
 
@@ -40,6 +40,89 @@
 | `models/auth.py` | ~18 | Token, UserOut |
 | `models/system.py` | ~21 | ResourceStats, HealthResponse |
 | `models/collections.py` | ~60 | CollectionNameRequest, CollectionDocumentsRequest, CollectionItem, CollectionsListResponse, CollectionMutateResponse, CollectionDocumentsMutateResponse |
+
+---
+
+## What Was Worked On This Session (2026-03-23)
+
+### TypeScript HeadersInit Fix
+
+- `Record<string, string>` explicit type annotation added in 4 places in `DocumentsPanel.tsx` and `DocumentList.tsx` — `token ? { Authorization: \`Bearer ${token}\` } : {}` inferred as `{ Authorization: string } | { Authorization?: undefined }`, which is not assignable to `HeadersInit`. Fixed by declaring the variable with `: Record<string, string>`.
+
+### Upload Modal — Stage 3 Fully Wired
+
+**`frontend/components/documents/UploadModal.tsx`:**
+- `UploadStage = 1 | 2 | 3` — stage 4 removed entirely. Stage 3 handles both in-progress and completion state.
+- `progressMap: ProgressMap | null` prop threaded through from `DocumentsPanel`
+- `getProgressInfo(docId)` helper: `null` map = "Queued…", entry exists = active stage + label, entry missing when map is non-null = complete (green check)
+- Per-item: spinner → `CheckCircle2` when complete, border flips from `var(--border)` to `var(--green-br)`
+- Progress bar: `shimmerPulse` animation for extracting/chunking (indeterminate), real `%` width for embedding, solid green 100% when done
+- Header banner: blue spinner → "N documents indexed" when `allDone`
+- `onImportComplete` callback wires into `DocumentsPanel.handleImportComplete` → starts the polling interval
+- `STAGE_TITLES` and progress dots updated from 4 to 3
+
+### Auto-Select New Collection
+
+**`frontend/components/documents/UploadModal.tsx`:**
+- `handleCreateCollection` now calls `setSelectedCollection(newId)` after `onCreateCollection` resolves
+- `onCreateCollection: (name: string) => Promise<string>` — was `Promise<void>`
+
+**`frontend/components/documents/DocumentSideBar.tsx`:**
+- `onCreateCollection` prop updated to match new `Promise<string>` signature
+
+**`frontend/components/documents/DocumentsPanel.tsx`:**
+- `createCollection` callback now returns `res.collection_id` after POST + refetch
+
+### Single Polling Loop (Collapse Two Polls Into One)
+
+**`backend/app/api/documents.py`:**
+- `GET /api/documents/progress/active` query expanded to `WHERE processing_status IN ('pending', 'processing')` — was only `'processing'`
+- Each entry now includes `processing_status` from DB alongside the in-memory `_progress` entry
+- `pending` docs with no in-memory progress get `{ stage: status, done: 0, total: 0, active: False, processing_status: status }`
+
+**`frontend/components/documents/DocumentsPanel.tsx`:**
+- Removed 3s `GET /api/documents` polling loop (was "Loop A")
+- Single 800ms `/progress/active` poll drives all progress state
+- When `progressMap` becomes empty (`Object.keys(data).length === 0`), polling stops and `fetchDocuments()` is called once to sync final state
+- `isPollingProgress` boolean retained for triggering the single loop
+
+**`frontend/types/index.ts`:**
+- `DocProgress` interface gains `processing_status: string`
+
+### Lift Document Fetch to DocumentsPanel
+
+**`frontend/components/documents/DocumentsPanel.tsx`:**
+- Owns the single `GET /api/documents` fetch via `fetchDocuments` callback
+- `documents: DocumentItem[]`, `loadingDocs: boolean`, `docsError: string | null` state all live here
+- `handleDeleteDocument` removes deleted doc from local state optimistically — no refetch needed
+- Passes all four down to `DocumentList` as props
+
+**`frontend/components/documents/DocumentList.tsx`:**
+- `DocumentItem` interface exported for use in `DocumentsPanel`
+- No more internal fetch, no `useEffect` for loading, no `documents` state
+- Props: `documents`, `loading`, `error`, `search`, `progressMap`, `collectionIds`, `fileType`, `onDelete`
+- `handleDelete` calls `onDelete(documentId)` callback
+- All filtering client-side: search → collectionIds → fileType `.filter()` chain
+
+### GET /api/documents — Collection Filter + collection_id Return
+
+**`backend/app/api/documents.py`:**
+- `list_documents` now accepts optional `collection_id: str | None = Query(default=None)` and `file_type: str | None = Query(default=None)`
+- Dynamic WHERE clause built with parameterized queries — no string format SQL
+- `collection_id` column added to SELECT, returned in each document row
+
+### Startup Cleanup for Stuck Docs
+
+**`backend/app/main.py`:**
+- After DB connect in lifespan, runs `UPDATE documents SET processing_status='error', error_message='Server restarted during processing' WHERE processing_status='processing'`
+- Prevents docs stuck in `processing` forever after a crash or restart
+
+### Library View Filtering Wired
+
+**`frontend/components/documents/DocumentList.tsx`:**
+- `collectionIds: string[]` prop — `.filter((d) => collectionIds.length === 0 || collectionIds.includes(d.collectionId ?? ''))`
+- `fileType: string` prop — `.filter((d) => fileType === 'all' || d.fileType === fileType.toLowerCase())`
+- `collection_id` mapped from `DocumentItem` into each item's `collectionId` field
 
 ---
 
@@ -351,7 +434,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | 7 | Medium | Storage stats return 0.0 — `/api/system/resources` NVMe/HDD percentages hardcoded to 0 (Redis cache not yet wired) | `api/system.py` |
 | 8 | ~~Medium~~ | ~~`.glass`/`.glass-subtle`/`.glass-strong` class references on multiple components~~ | ✅ Fixed (F2 complete) |
 | 9 | Low | Muting docs is UI-only — `mutedIds` in `DocumentBar` never sent to backend | `DocumentBar.tsx` |
-| 10 | Low | `GET /api/documents` missing `collection_id` filter param and doesn't return `collection_id`/`collection_name` per row — frontend can't show collection assignment | `api/documents.py` |
+| 10 | Low | `GET /api/documents` returns `collection_id` per row but not `collection_name` — needs JOIN to `collections` table | `api/documents.py` |
 | 11 | ~~Low~~ | ~~`POST /api/documents/upload` doesn't accept `collection_id`~~ | ✅ Fixed |
 | 12 | Low | `collections` table has no `color` column — collection pills use static index-based color array, colors shift when collections are deleted/reordered | `api/collections.py`, `UploadModal.tsx` |
 | 13 | Low | `/progress/active` route was shadowed by `/{document_id}/progress` — FastAPI treated "progress" as a document_id | ✅ Fixed |
@@ -385,7 +468,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | Phase F1: Design System | ✅ Done | Structural Glass tokens, Slate default, all CSS utility classes |
 | Phase F2: Glass Audit | ✅ Done | All 14 components migrated off glass-subtle/glass-strong |
 | Phase F3: Layout Shell Polish | 0% | AppShell, Sidebar, SystemFooter need token updates |
-| Phase F4: Library View + Collections | 30% | Collections backend fully complete; upload modal stages 1+2 styled + wired; stage 3 wiring, collection colors, documents.py collection filter, library view layout remain |
+| Phase F4: Library View + Collections | 45% | Collections backend fully complete; upload modal stages 1–3 fully wired (4 removed); collection filter + file type filter wired in DocumentList; documents.py query params added; collection_name JOIN, document assign UX, collection colors remain |
 | Phase 3: Learning Features | 0% | |
 | Phase 4: Two-Tier Knowledge | 0% | |
 | Phase 5: Research Pipeline | 0% | |
@@ -418,8 +501,8 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | Library two-pane layout + collections | ❌ F4 pending |
 | 4-stage upload modal — Stage 1 | ✅ styled per spec |
 | 4-stage upload modal — Stage 2 | ✅ styled + wired (collection picker, runImportFromQueue, collection_id atomic) |
-| 4-stage upload modal — Stage 3 | ⚠️ styled shell only — needs importResult wiring + progress polling |
-| 4-stage upload modal — Stage 4 | ⚠️ generic banner only — needs per-file outcomes |
+| 3-stage upload modal — Stage 3 | ✅ fully wired — spinners → green checks, shimmerPulse, real % bar, completion banner |
+| Upload modal stage 4 | ✅ Removed (stage 3 handles completion) |
 | Chat message anatomy update | ❌ F5 pending |
 | System panel (ArcGauge, Sparkline) | ❌ F6 pending |
 | URL ingestion (real, not preview) | ❌ blocked on Crawl4AI shape validation |
@@ -435,4 +518,4 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 ---
 
-*Athena · Codebase Status · 2026-03-21*
+*Athena · Codebase Status · 2026-03-23*

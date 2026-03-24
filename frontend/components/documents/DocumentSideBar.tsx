@@ -15,7 +15,7 @@ interface DocumentSideBarProps {
   onCollectionDeleted?: (collectionId: string) => void;
   loadingCollections: boolean;
   refetchCollections: () => Promise<void>;
-  onCreateCollection: (name: string) => Promise<void>;
+  onCreateCollection: (name: string) => Promise<string>;
 }
 
 export function DocumentSideBar({ collections, selectedCollections, onSelectCollection, onCollectionDeleted, loadingCollections, refetchCollections, onCreateCollection }: DocumentSideBarProps) {

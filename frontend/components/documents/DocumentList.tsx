@@ -1,17 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { FileText, FileType, Video, Loader2, CheckCircle2, AlertCircle, Trash2, MessageSquare, Plus } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useChatStore } from '@/stores/chat.store';
 import { cn } from '@/utils/cn';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/api/client';
 import { Modal } from '@/components/ui/Modal';
-import type { Message } from '@/types';
+import type { Message, ProgressMap } from '@/types';
 
-interface Document {
+export interface DocumentItem {
   document_id: string;
   filename: string;
   file_type?: string;
@@ -20,13 +19,7 @@ interface Document {
   word_count?: number;
   chunk_count?: number;
   error_message?: string;
-}
-
-interface Progress {
-  stage: string;
-  done: number;
-  total: number;
-  active: boolean;
+  collection_id?: string;
 }
 
 const STATUS_CONFIG: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
@@ -67,15 +60,26 @@ interface DocumentConversation {
 }
 
 interface DocumentListProps {
-  refreshKey?: number;
+  documents: DocumentItem[];
+  loading: boolean;
+  error: string | null;
   search: string;
+  progressMap?: ProgressMap | null;
+  collectionIds?: string[];
+  fileType?: string;
+  onDelete: (documentId: string) => void;
 }
 
-export function DocumentList({ refreshKey, search = "" }: DocumentListProps) {
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [progressMap, setProgressMap] = useState<Record<string, Progress>>({});
+export function DocumentList({
+  documents,
+  loading,
+  error,
+  search = "",
+  progressMap = null,
+  collectionIds = [],
+  fileType = "all",
+  onDelete,
+}: DocumentListProps) {
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
   const [conversationsModal, setConversationsModal] = useState<{
     open: boolean;
@@ -85,66 +89,15 @@ export function DocumentList({ refreshKey, search = "" }: DocumentListProps) {
   const router = useRouter();
   const { setActiveConversation, setMessages, addConversation, setPendingDocuments } = useChatStore();
 
-  const fetchDocuments = () => {
-    const token = useAuthStore.getState().token;
-    return fetch('/api/documents', {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then((r) => r.json())
-      .then((data) => { setDocuments(data.documents ?? []); setError(null); })
-      .catch(() => setError('Failed to load documents'));
-  };
-
-  // Fetch on mount and on refreshKey change
-  useEffect(() => {
-    setLoading(true);
-    fetchDocuments().finally(() => setLoading(false));
-  }, [refreshKey]);
-
-  // Poll document list every 3s while any are still processing
-  useEffect(() => {
-    const hasPending = documents.some(
-      (d) => d.processing_status === 'processing' || d.processing_status === 'pending'
-    );
-    if (!hasPending) return;
-    const t = setInterval(fetchDocuments, 3000);
-    return () => clearInterval(t);
-  }, [documents]);
-
-  // Poll /progress/active every 800ms — single request for all processing documents
-  useEffect(() => {
-    const hasProcessing = documents.some((d) => d.processing_status === 'processing');
-    if (!hasProcessing) {
-      setProgressMap({});
-      return;
-    }
-    const token = useAuthStore.getState().token;
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
-    const poll = () => {
-      fetch('/api/documents/progress/active', { headers })
-        .then((r) => r.json())
-        .then((data: Record<string, Progress>) => setProgressMap(data))
-        .catch(() => {});
-    };
-
-    poll();
-    const t = setInterval(poll, 800);
-    return () => clearInterval(t);
-  }, [documents]);
-
   const handleDelete = async (documentId: string) => {
     setDeleting((prev) => new Set(prev).add(documentId));
     const token = useAuthStore.getState().token;
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
     try {
-      await fetch(`/api/documents/${documentId}`, {
-        method: 'DELETE',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      setDocuments((prev) => prev.filter((d) => d.document_id !== documentId));
-      setProgressMap((prev) => { const n = { ...prev }; delete n[documentId]; return n; });
+      await fetch(`/api/documents/${documentId}`, { method: 'DELETE', headers });
+      onDelete(documentId);
     } catch {
-      // silently ignore — list will re-sync on next poll
+      // silently ignore — parent will re-sync on next fetch
     } finally {
       setDeleting((prev) => { const n = new Set(prev); n.delete(documentId); return n; });
     }
@@ -159,7 +112,6 @@ export function DocumentList({ refreshKey, search = "" }: DocumentListProps) {
       if (list.length > 0) {
         setConversationsModal({ open: true, documentId, conversations: list });
       } else {
-        // No existing conversations — queue doc to attach after first message creates the conv
         const doc = documents.find((d) => d.document_id === documentId);
         setPendingDocuments(doc ? [{ document_id: doc.document_id, filename: doc.filename ?? documentId, file_type: doc.file_type }] : []);
         setActiveConversation(null);
@@ -181,14 +133,11 @@ export function DocumentList({ refreshKey, search = "" }: DocumentListProps) {
       last_active: conv.last_active,
     });
     try {
-      const msgs = await apiClient.get<Message[]>(
-        `/chat/conversations/${conv.conversation_id}/messages`
-      );
+      const msgs = await apiClient.get<Message[]>(`/chat/conversations/${conv.conversation_id}/messages`);
       setMessages(conv.conversation_id, msgs);
     } catch (e) {
       console.error(e);
     }
-    // Attach the document to this existing conversation if it isn't already
     if (documentId) {
       try {
         await apiClient.post(`/chat/${conv.conversation_id}/documents`, { document_ids: [documentId] });
@@ -202,7 +151,6 @@ export function DocumentList({ refreshKey, search = "" }: DocumentListProps) {
 
   const handleNewChatFromModal = () => {
     const { documentId } = conversationsModal;
-    // Queue doc to attach after the first message creates the new conversation
     if (documentId) {
       const doc = documents.find((d) => d.document_id === documentId);
       setPendingDocuments(doc ? [{ document_id: doc.document_id, filename: doc.filename ?? documentId, file_type: doc.file_type }] : []);
@@ -212,24 +160,30 @@ export function DocumentList({ refreshKey, search = "" }: DocumentListProps) {
     router.push('/chat');
   };
 
-  const uploadedItems = documents.map((d) => {
-    const prog = progressMap[d.document_id];
-    const isActive = d.processing_status === 'processing' && !!prog?.active;
-    return {
-      id: d.document_id,
-      name: d.filename,
-      searchName: d.filename.toLowerCase(),
-      status: isActive ? prog.stage : d.processing_status,
-      progress: isActive && prog.total > 0 ? Math.round((prog.done / prog.total) * 100) : 0,
-      done: prog?.done ?? 0,
-      total: prog?.total ?? 0,
-      chunks: isActive ? prog.done : (d.chunk_count ?? 0),
-      type: getDocType(d.filename, d.file_type),
-      date: formatDate(d.upload_date) ?? '—',
-      isLive: isActive,
-      error: d.error_message,
-    };
-  });
+  const items = documents
+    .map((d) => {
+      const prog = progressMap?.[d.document_id];
+      const isActive = d.processing_status === 'processing' && !!prog?.active;
+      return {
+        id: d.document_id,
+        name: d.filename,
+        searchName: d.filename.toLowerCase(),
+        status: isActive ? prog!.stage : d.processing_status,
+        progress: isActive && prog!.total > 0 ? Math.round((prog!.done / prog!.total) * 100) : 0,
+        done: prog?.done ?? 0,
+        total: prog?.total ?? 0,
+        chunks: isActive ? prog!.done : (d.chunk_count ?? 0),
+        type: getDocType(d.filename, d.file_type),
+        date: formatDate(d.upload_date) ?? '—',
+        isLive: isActive,
+        error: d.error_message,
+        collectionId: d.collection_id ?? null,
+        fileType: getDocType(d.filename, d.file_type),
+      };
+    })
+    .filter((d) => !search || d.searchName.includes(search.toLowerCase()))
+    .filter((d) => collectionIds.length === 0 || collectionIds.includes(d.collectionId ?? ''))
+    .filter((d) => fileType === 'all' || d.fileType === fileType.toLowerCase());
 
   if (loading && documents.length === 0) {
     return (
@@ -249,7 +203,7 @@ export function DocumentList({ refreshKey, search = "" }: DocumentListProps) {
     );
   }
 
-  if (uploadedItems.length === 0) {
+  if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 gap-3">
         <div className="w-10 h-10 rounded-sm bg-muted/30 border border-border flex items-center justify-center">
@@ -261,158 +215,141 @@ export function DocumentList({ refreshKey, search = "" }: DocumentListProps) {
     );
   }
 
-  const renderDocItem = (doc: typeof processingItems[0] | typeof uploadedItems[0]) => {
-    const st = STATUS_CONFIG[doc.status] ?? STATUS_CONFIG.processing;
-    const isDeleting = deleting.has(doc.id);
-
-    return (
-      <li
-        key={doc.id}
-        className={cn(
-          'group bg-[var(--raised)] border border-[var(--border)] rounded-sm px-3 py-2.5 transition-opacity',
-          doc.isLive && 'border-primary/20',
-          isDeleting && 'opacity-40 pointer-events-none'
-        )}
-      >
-        <div className="flex items-start gap-3">
-          {/* File type icon */}
-          <div className={cn(
-            'w-8 h-8 rounded-sm bg-[var(--raised-h)] border border-[var(--border)] flex items-center justify-center flex-shrink-0 mt-0.5',
-            doc.isLive ? 'text-primary' : 'text-muted-foreground'
-          )}>
-            {TYPE_ICON[doc.type] || <FileText size={14} />}
-          </div>
-
-          {/* Name + status */}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-foreground truncate">{doc.name}</p>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className={cn('flex items-center gap-1 text-xs', st.color)}>
-                {st.icon}
-                {st.label}
-                {doc.isLive && doc.status === 'embedding' && doc.total > 0 && (
-                  <span className="text-muted-foreground">
-                    {doc.done} / {doc.total}
-                  </span>
-                )}
-              </span>
-              {!doc.isLive && doc.chunks > 0 && (
-                <span className="text-xs text-muted-foreground font-mono">· {doc.chunks} chunks</span>
-              )}
-              {doc.error && (
-                <span className="text-xs text-red-400/70 font-mono truncate max-w-[200px]" title={doc.error}>
-                  {doc.error}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Date + delete */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button
-              className="flex items-center gap-1 text-xs px-2 py-1 rounded-sm bg-[var(--raised-h)] border border-[var(--border)] text-[var(--t2)] hover:text-[var(--t1)] transition-all"
-              onClick={() => handleChat(doc.id)}
-              >
-              <MessageSquare size={12} />
-              <span className="text-xs">Chat</span>
-            </button>
-            <span className="text-xs text-muted-foreground font-mono">{doc.date}</span>
-            {!doc.isLive && (
-              <button
-                onClick={() => handleDelete(doc.id)}
-                disabled={isDeleting}
-                className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-sm flex items-center justify-center text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-all"
-                title="Delete document"
-              >
-                {isDeleting ? (
-                  <Loader2 size={12} className="animate-spin" />
-                ) : (
-                  <Trash2 size={12} />
-                )}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Progress bar — shown while actively processing */}
-        {doc.isLive && doc.status !== 'complete' && (
-          <div className="mt-2 space-y-1">
-            <div className="h-px rounded-full bg-muted overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{
-                  width: doc.status === 'embedding' && doc.total > 0
-                    ? `${Math.round((doc.done / doc.total) * 100)}%`
-                    : doc.progress > 0 ? `${doc.progress}%` : '15%',
-                  background: 'hsl(var(--primary) / 0.6)',
-                }}
-              />
-            </div>
-            <div className="flex justify-between">
-              <span className="text-[10px] text-muted-foreground font-mono">
-                {doc.status === 'uploading'   && 'Uploading file…'}
-                {doc.status === 'extracting'  && 'Extracting text…'}
-                {doc.status === 'chunking'    && 'Splitting into chunks…'}
-                {doc.status === 'embedding'   && doc.total > 0
-                  ? `Embedding chunk ${doc.done} of ${doc.total}…`
-                  : doc.status === 'embedding' && 'Embedding…'}
-                {doc.status === 'processing'  && 'Processing…'}
-              </span>
-              {doc.status === 'embedding' && doc.total > 0 && (
-                <span className="text-[10px] text-muted-foreground font-mono">
-                  {Math.round((doc.done / doc.total) * 100)}%
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-      </li>
-    );
-  };
-
   return (
-    <div className="border-2 border-red-800">
-      <div>
-        <ul className="space-y-1.5">
-          {uploadedItems.filter(file => file.searchName.indexOf(search.toLowerCase()) > -1).map(renderDocItem)}
-        </ul>
+    <div className="px-4 py-3">
+      <ul className="space-y-1.5">
+        {items.map((doc) => {
+          const st = STATUS_CONFIG[doc.status] ?? STATUS_CONFIG.processing;
+          const isDeleting = deleting.has(doc.id);
 
-        {/* Conversations modal — pick existing or start new */}
-        <Modal
-          open={conversationsModal.open}
-          onClose={() => setConversationsModal((m) => ({ ...m, open: false }))}
-          title="Chats for this document"
-          footer={
-            <button
-              type="button"
-              onClick={handleNewChatFromModal}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-foreground bg-muted/50 hover:bg-muted border border-border/50 transition-colors"
+          return (
+            <li
+              key={doc.id}
+              className={cn(
+                'group bg-[var(--raised)] border border-[var(--border)] rounded-sm px-3 py-2.5 transition-opacity',
+                doc.isLive && 'border-primary/20',
+                isDeleting && 'opacity-40 pointer-events-none'
+              )}
             >
-              <Plus size={14} />
-              Start new chat
-            </button>
-          }
-        >
-          <ul className="max-h-64 overflow-y-auto p-2">
-            {conversationsModal.conversations.map((conv) => (
-              <li key={conv.conversation_id}>
-                <button
-                  type="button"
-                  onClick={() => handlePickConversation(conv)}
-                  className="w-full text-left px-3 py-2.5 rounded-lg text-sm text-foreground hover:bg-muted/50 transition-colors flex flex-col gap-0.5"
-                >
-                  <span className="font-medium truncate">
-                    {conv.title || 'New Conversation'}
-                  </span>
-                  <span className="text-xs text-muted-foreground font-mono">
-                    {formatDate(conv.last_active) ?? conv.last_active}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Modal>
-      </div>
+              <div className="flex items-start gap-3">
+                <div className={cn(
+                  'w-8 h-8 rounded-sm bg-[var(--raised-h)] border border-[var(--border)] flex items-center justify-center flex-shrink-0 mt-0.5',
+                  doc.isLive ? 'text-primary' : 'text-muted-foreground'
+                )}>
+                  {TYPE_ICON[doc.type] || <FileText size={14} />}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{doc.name}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={cn('flex items-center gap-1 text-xs', st.color)}>
+                      {st.icon}
+                      {st.label}
+                      {doc.isLive && doc.status === 'embedding' && doc.total > 0 && (
+                        <span className="text-muted-foreground">{doc.done} / {doc.total}</span>
+                      )}
+                    </span>
+                    {!doc.isLive && doc.chunks > 0 && (
+                      <span className="text-xs text-muted-foreground font-mono">· {doc.chunks} chunks</span>
+                    )}
+                    {doc.error && (
+                      <span className="text-xs text-red-400/70 font-mono truncate max-w-[200px]" title={doc.error}>
+                        {doc.error}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-sm bg-[var(--raised-h)] border border-[var(--border)] text-[var(--t2)] hover:text-[var(--t1)] transition-all"
+                    onClick={() => handleChat(doc.id)}
+                  >
+                    <MessageSquare size={12} />
+                    <span className="text-xs">Chat</span>
+                  </button>
+                  <span className="text-xs text-muted-foreground font-mono">{doc.date}</span>
+                  {!doc.isLive && (
+                    <button
+                      onClick={() => handleDelete(doc.id)}
+                      disabled={isDeleting}
+                      className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-sm flex items-center justify-center text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                      title="Delete document"
+                    >
+                      {isDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {doc.isLive && doc.status !== 'complete' && (
+                <div className="mt-2 space-y-1">
+                  <div className="h-px rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-300"
+                      style={{
+                        width: doc.status === 'embedding' && doc.total > 0
+                          ? `${Math.round((doc.done / doc.total) * 100)}%`
+                          : doc.progress > 0 ? `${doc.progress}%` : '15%',
+                        background: 'hsl(var(--primary) / 0.6)',
+                      }}
+                    />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      {doc.status === 'uploading'  && 'Uploading file…'}
+                      {doc.status === 'extracting' && 'Extracting text…'}
+                      {doc.status === 'chunking'   && 'Splitting into chunks…'}
+                      {doc.status === 'embedding'  && doc.total > 0
+                        ? `Embedding chunk ${doc.done} of ${doc.total}…`
+                        : doc.status === 'embedding' && 'Embedding…'}
+                      {doc.status === 'processing' && 'Processing…'}
+                    </span>
+                    {doc.status === 'embedding' && doc.total > 0 && (
+                      <span className="text-[10px] text-muted-foreground font-mono">
+                        {Math.round((doc.done / doc.total) * 100)}%
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      <Modal
+        open={conversationsModal.open}
+        onClose={() => setConversationsModal((m) => ({ ...m, open: false }))}
+        title="Chats for this document"
+        footer={
+          <button
+            type="button"
+            onClick={handleNewChatFromModal}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-foreground bg-muted/50 hover:bg-muted border border-border/50 transition-colors"
+          >
+            <Plus size={14} />
+            Start new chat
+          </button>
+        }
+      >
+        <ul className="max-h-64 overflow-y-auto p-2">
+          {conversationsModal.conversations.map((conv) => (
+            <li key={conv.conversation_id}>
+              <button
+                type="button"
+                onClick={() => handlePickConversation(conv)}
+                className="w-full text-left px-3 py-2.5 rounded-lg text-sm text-foreground hover:bg-muted/50 transition-colors flex flex-col gap-0.5"
+              >
+                <span className="font-medium truncate">{conv.title || 'New Conversation'}</span>
+                <span className="text-xs text-muted-foreground font-mono">
+                  {formatDate(conv.last_active) ?? conv.last_active}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </Modal>
     </div>
   );
 }
