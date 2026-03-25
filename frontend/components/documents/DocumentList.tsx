@@ -1,14 +1,15 @@
 'use client';
 
-import { useState } from 'react';
-import { FileText, FileType, Video, Loader2, CheckCircle2, AlertCircle, Trash2, MessageSquare, Plus } from 'lucide-react';
+import { useState, useEffect, useId, useRef } from 'react';
+import { FileText, Loader2, CheckCircle2, AlertCircle, MessageSquare, Plus, EllipsisIcon } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useChatStore } from '@/stores/chat.store';
 import { cn } from '@/utils/cn';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/api/client';
 import { Modal } from '@/components/ui/Modal';
-import type { Message, ProgressMap } from '@/types';
+import type { CollectionItem, Message, ProgressMap } from '@/types';
+import { Menu } from '@/components/ui/Menu';
 
 export interface DocumentItem {
   document_id: string;
@@ -20,6 +21,7 @@ export interface DocumentItem {
   chunk_count?: number;
   error_message?: string;
   collection_id?: string;
+  collection_name?: string;
 }
 
 const STATUS_CONFIG: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
@@ -33,12 +35,28 @@ const STATUS_CONFIG: Record<string, { label: string; icon: React.ReactNode; colo
   uploading:  { label: 'Uploading',  icon: <Loader2 size={11} className="animate-spin" />,    color: 'text-primary' },
 };
 
-const TYPE_ICON: Record<string, React.ReactNode> = {
-  pdf:      <FileText size={14} />,
-  video:    <Video size={14} />,
-  markdown: <FileType size={14} />,
-  default:  <FileText size={14} />,
-};
+function TypeBadge({ type }: { type: string }) {
+  const styles: Record<string, { bg: string; border: string; color: string; label: string }> = {
+    pdf:      { bg: 'rgba(248,113,113,0.1)',  border: 'rgba(248,113,113,0.28)', color: 'var(--red)',    label: 'PDF' },
+    video:    { bg: 'rgba(251,191,36,0.1)',   border: 'rgba(251,191,36,0.28)',  color: 'var(--amber)',  label: 'VID' },
+    markdown: { bg: 'var(--blue-a)',          border: 'var(--blue-br)',         color: 'var(--blue)',   label: 'MD'  },
+    default:  { bg: 'var(--blue-a)',          border: 'var(--blue-br)',         color: 'var(--blue)',   label: 'TXT' },
+  };
+  const s = styles[type] ?? styles.default;
+  return (
+    <div
+      className="flex items-center justify-center flex-shrink-0"
+      style={{
+        width: 28, height: 28, borderRadius: 7,
+        background: s.bg, border: `1px solid ${s.border}`,
+        color: s.color, fontSize: 8, fontWeight: 700,
+        letterSpacing: '0.04em', fontFamily: 'var(--fm)',
+      }}
+    >
+      {s.label}
+    </div>
+  );
+}
 
 function getDocType(filename: string, mime?: string): string {
   const ext = filename.split('.').pop()?.toLowerCase() ?? '';
@@ -51,6 +69,102 @@ function getDocType(filename: string, mime?: string): string {
 function formatDate(iso?: string) {
   if (!iso) return null;
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function DocumentMenu({
+  isDeleting,
+  collections,
+  currentCollectionId,
+  onDelete,
+  onMoveToCollection,
+}: {
+  isDeleting: boolean;
+  collections: CollectionItem[];
+  currentCollectionId: string | null;
+  onDelete: () => void;
+  onMoveToCollection: (collectionId: string | null) => void;
+}) {
+  const menuId = useId();
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState<'main' | 'collections'>('main');
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+      setView('main');
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setOpen(false); setView('main'); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open]);
+
+  const close = () => { setOpen(false); setView('main'); };
+
+  return (
+    <div className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        disabled={isDeleting}
+        onClick={() => { setOpen(v => !v); setView('main'); }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
+        className="opacity-0 group-hover:opacity-100 focus:opacity-100 w-6 h-6 rounded-sm flex items-center justify-center text-muted-foreground/50 hover:text-[var(--t1)] hover:bg-[var(--raised-h)] transition-all"
+      >
+        <EllipsisIcon size={12} />
+      </button>
+
+      {open && (
+        <Menu ref={menuRef} id={menuId} className="absolute right-0 top-8 z-50">
+          {view === 'main' ? (
+            <>
+              <Menu.Item onClick={() => setView('collections')}>
+                Move to collection
+              </Menu.Item>
+              <Menu.Item variant="danger" onClick={() => { close(); onDelete(); }}>
+                {isDeleting ? 'Deleting…' : 'Delete'}
+              </Menu.Item>
+            </>
+          ) : (
+            <>
+              <Menu.Item onClick={() => setView('main')}>← Back</Menu.Item>
+              {currentCollectionId && (
+                <Menu.Item onClick={() => { close(); onMoveToCollection(null); }}>
+                  Unassign
+                </Menu.Item>
+              )}
+              {collections.map((c) => (
+                <Menu.Item
+                  key={c.collection_id}
+                  onClick={() => { close(); onMoveToCollection(c.collection_id); }}
+                  className={c.collection_id === currentCollectionId ? 'text-[var(--t1)]' : ''}
+                >
+                  {c.name}
+                </Menu.Item>
+              ))}
+              {collections.length === 0 && (
+                <div className="px-3 py-2 text-xs text-[var(--t4)]">No collections</div>
+              )}
+            </>
+          )}
+        </Menu>
+      )}
+    </div>
+  );
 }
 
 interface DocumentConversation {
@@ -67,7 +181,9 @@ interface DocumentListProps {
   progressMap?: ProgressMap | null;
   collectionIds?: string[];
   fileType?: string;
+  collections?: CollectionItem[];
   onDelete: (documentId: string) => void;
+  onMoveToCollection: (documentId: string, collectionId: string | null) => Promise<void>;
 }
 
 export function DocumentList({
@@ -78,7 +194,9 @@ export function DocumentList({
   progressMap = null,
   collectionIds = [],
   fileType = "all",
+  collections = [],
   onDelete,
+  onMoveToCollection,
 }: DocumentListProps) {
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
   const [conversationsModal, setConversationsModal] = useState<{
@@ -178,6 +296,7 @@ export function DocumentList({
         isLive: isActive,
         error: d.error_message,
         collectionId: d.collection_id ?? null,
+        collectionName: d.collection_name ?? null,
         fileType: getDocType(d.filename, d.file_type),
       };
     })
@@ -216,107 +335,120 @@ export function DocumentList({
   }
 
   return (
-    <div className="px-4 py-3">
-      <ul className="space-y-1.5">
+    <div className="flex flex-col w-full">
+      {/* Column header */}
+      <div
+        className="grid items-center px-5 py-2 border-b border-[var(--border)]"
+        style={{ gridTemplateColumns: '36px 1fr 150px 95px 70px' }}
+      >
+        <div />
+        <div className="slabel">Name</div>
+        <div className="slabel">Collection</div>
+        <div className="slabel">Added</div>
+        <div />
+      </div>
+
+      {/* Rows */}
+      <div className="flex flex-col">
         {items.map((doc) => {
           const st = STATUS_CONFIG[doc.status] ?? STATUS_CONFIG.processing;
           const isDeleting = deleting.has(doc.id);
 
           return (
-            <li
+            <div
               key={doc.id}
               className={cn(
-                'group bg-[var(--raised)] border border-[var(--border)] rounded-sm px-3 py-2.5 transition-opacity',
-                doc.isLive && 'border-primary/20',
-                isDeleting && 'opacity-40 pointer-events-none'
+                'group grid items-center px-5 py-2.5 border-b border-[var(--border)] transition-colors hover:bg-[var(--raised-h)]',
+                isDeleting && 'opacity-40 pointer-events-none',
               )}
+              style={{ gridTemplateColumns: '36px 1fr 150px 95px 70px' }}
             >
-              <div className="flex items-start gap-3">
-                <div className={cn(
-                  'w-8 h-8 rounded-sm bg-[var(--raised-h)] border border-[var(--border)] flex items-center justify-center flex-shrink-0 mt-0.5',
-                  doc.isLive ? 'text-primary' : 'text-muted-foreground'
-                )}>
-                  {TYPE_ICON[doc.type] || <FileText size={14} />}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{doc.name}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className={cn('flex items-center gap-1 text-xs', st.color)}>
-                      {st.icon}
-                      {st.label}
-                      {doc.isLive && doc.status === 'embedding' && doc.total > 0 && (
-                        <span className="text-muted-foreground">{doc.done} / {doc.total}</span>
-                      )}
-                    </span>
-                    {!doc.isLive && doc.chunks > 0 && (
-                      <span className="text-xs text-muted-foreground font-mono">· {doc.chunks} chunks</span>
-                    )}
-                    {doc.error && (
-                      <span className="text-xs text-red-400/70 font-mono truncate max-w-[200px]" title={doc.error}>
-                        {doc.error}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <button
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-sm bg-[var(--raised-h)] border border-[var(--border)] text-[var(--t2)] hover:text-[var(--t1)] transition-all"
-                    onClick={() => handleChat(doc.id)}
-                  >
-                    <MessageSquare size={12} />
-                    <span className="text-xs">Chat</span>
-                  </button>
-                  <span className="text-xs text-muted-foreground font-mono">{doc.date}</span>
-                  {!doc.isLive && (
-                    <button
-                      onClick={() => handleDelete(doc.id)}
-                      disabled={isDeleting}
-                      className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-sm flex items-center justify-center text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-all"
-                      title="Delete document"
-                    >
-                      {isDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                    </button>
-                  )}
-                </div>
+              {/* Type badge */}
+              <div className="flex items-center">
+                <TypeBadge type={doc.type} />
               </div>
 
-              {doc.isLive && doc.status !== 'complete' && (
-                <div className="mt-2 space-y-1">
-                  <div className="h-px rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-300"
-                      style={{
-                        width: doc.status === 'embedding' && doc.total > 0
-                          ? `${Math.round((doc.done / doc.total) * 100)}%`
-                          : doc.progress > 0 ? `${doc.progress}%` : '15%',
-                        background: 'hsl(var(--primary) / 0.6)',
-                      }}
-                    />
+              {/* Name + status */}
+              <div className="min-w-0 flex flex-col justify-center gap-0.5 pr-3">
+                <p className="text-[13px] text-[var(--t1)] truncate" style={{ fontFamily: 'var(--fb)' }}>
+                  {doc.name}
+                </p>
+                {doc.isLive && (
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className={cn('text-[11px]', st.color)}>{st.label}</span>
+                      {doc.status === 'embedding' && doc.total > 0 && (
+                        <span className="text-[11px] text-[var(--t4)] font-mono">{doc.done}/{doc.total}</span>
+                      )}
+                    </div>
+                    <div className="h-px w-32 rounded-full bg-[var(--border)] overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: doc.status === 'embedding' && doc.total > 0
+                            ? `${Math.round((doc.done / doc.total) * 100)}%`
+                            : '20%',
+                          background: 'hsl(var(--primary) / 0.6)',
+                          animation: doc.status !== 'embedding' ? 'shimmerPulse 2s ease-in-out infinite' : undefined,
+                        }}
+                      />
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-[10px] text-muted-foreground font-mono">
-                      {doc.status === 'uploading'  && 'Uploading file…'}
-                      {doc.status === 'extracting' && 'Extracting text…'}
-                      {doc.status === 'chunking'   && 'Splitting into chunks…'}
-                      {doc.status === 'embedding'  && doc.total > 0
-                        ? `Embedding chunk ${doc.done} of ${doc.total}…`
-                        : doc.status === 'embedding' && 'Embedding…'}
-                      {doc.status === 'processing' && 'Processing…'}
+                )}
+                {!doc.isLive && doc.status !== 'complete' && (
+                  <span className={cn('text-[11px] flex items-center gap-1', st.color)}>
+                    {st.icon}{st.label}
+                  </span>
+                )}
+                {doc.error && (
+                  <span className="text-[11px] text-red-400/70 truncate font-mono" title={doc.error}>
+                    {doc.error}
+                  </span>
+                )}
+              </div>
+
+              {/* Collection */}
+              <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                {doc.collectionName ? (
+                  <>
+                    <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-[var(--blue)]" />
+                    <span className="text-[12px] text-[var(--t2)] truncate" style={{ fontFamily: 'var(--fb)' }}>
+                      {doc.collectionName}
                     </span>
-                    {doc.status === 'embedding' && doc.total > 0 && (
-                      <span className="text-[10px] text-muted-foreground font-mono">
-                        {Math.round((doc.done / doc.total) * 100)}%
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-            </li>
+                  </>
+                ) : (
+                  <span className="text-[12px] text-[var(--t4)]">—</span>
+                )}
+              </div>
+
+              {/* Added */}
+              <div className="flex items-center">
+                <span className="text-[12px] text-[var(--t3)]">{doc.date}</span>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-1">
+                <button
+                  className="flex items-center justify-center w-6 h-6 rounded-sm text-[var(--t3)] hover:text-[var(--t1)] hover:bg-[var(--raised-h)] transition-all"
+                  onClick={() => handleChat(doc.id)}
+                  title="Chat with this document"
+                >
+                  <MessageSquare size={12} />
+                </button>
+                {!doc.isLive && (
+                  <DocumentMenu
+                    isDeleting={isDeleting}
+                    collections={collections}
+                    currentCollectionId={doc.collectionId}
+                    onDelete={() => handleDelete(doc.id)}
+                    onMoveToCollection={(collectionId) => onMoveToCollection(doc.id, collectionId)}
+                  />
+                )}
+              </div>
+            </div>
           );
         })}
-      </ul>
+      </div>
 
       <Modal
         open={conversationsModal.open}

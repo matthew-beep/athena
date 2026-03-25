@@ -185,7 +185,7 @@ async def list_documents(
     collection_id: str | None = Query(default=None),
     file_type: str | None = Query(default=None),
 ):
-    conditions = ["user_id = $1"]
+    conditions = ["d.user_id = $1"]
     params: list = [current_user["id"]]
 
     if collection_id:
@@ -198,11 +198,13 @@ async def list_documents(
 
     where = " AND ".join(conditions)
     rows = await postgres.fetch_all(
-        f"""SELECT document_id, filename, file_type, processing_status,
-                  upload_date, word_count, chunk_count, error_message, collection_id
-           FROM documents
+        f"""SELECT d.document_id, d.filename, d.file_type, d.processing_status,
+                  d.upload_date, d.word_count, d.chunk_count, d.error_message,
+                  d.collection_id, c.name AS collection_name
+           FROM documents d
+           LEFT JOIN collections c ON c.collection_id = d.collection_id
            WHERE {where}
-           ORDER BY upload_date DESC
+           ORDER BY d.upload_date DESC
            LIMIT 50""",
         *params,
     )

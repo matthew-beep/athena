@@ -55,10 +55,11 @@ export const apiClient = {
     }).then((r) => handleResponse<T>(r));
   },
 
-  delete<T>(path: string): Promise<T> {
+  delete<T>(path: string, body?: unknown): Promise<T> {
     return fetch(`${BASE_URL}${path}`, {
       method: 'DELETE',
       headers: getHeaders(),
+      body: body ? JSON.stringify(body) : undefined,
     }).then((r) => handleResponse<T>(r));
   },
 

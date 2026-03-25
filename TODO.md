@@ -39,8 +39,10 @@ Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scop
 
 1. **`GET /api/documents` — return `collection_name` per row** — add JOIN to `collections` table, include `collection_name` nullable in each document row. `DocumentItem` and frontend rendering can then show collection name on each doc.
 2. **Fix "X Collections" → "X Documents" header count** — header currently shows collection count. Switch to total doc count or remove subtitle entirely (revisit when pagination lands).
-3. **Document assign to collection UX** — "Move to collection" popover on document row → `POST /api/collections/{id}/documents`. Needed so users can reorganize docs without re-uploading.
-4. **Remove duplicate `refetchCollections` call** — `DocumentsPanel` calls it at mount and inside `createCollection` — second call may be redundant.
+~~3. **Document assign to collection UX**~~ ✓ Done (`•••` menu on each doc row — "Move to collection" submenu (two-state menu, collections list, Unassign option) + "Delete". Same `Menu` component pattern as `CollectionsList`. `handleMoveToCollection` in `DocumentsPanel` handles both POST assign and DELETE unassign.)
+~~4. **Remove duplicate `refetchCollections` call**~~ ✓ Already gone — the two call sites (mount `useEffect` + `createCollection`) are both necessary and serve different purposes. No change needed.
+5. **Drag doc to collection** — drag a document row onto a collection in the sidebar to assign it. Deferred — do after basic assign UX is stable.
+6. **Refetch docs on collection delete** — when a collection is deleted in `DocumentSideBar`, `onCollectionDeleted` removes it from `selectedCollections` but `documents` state is stale — doc rows still show the deleted collection name. Fix: call `fetchDocuments()` from `DocumentsPanel` after a collection is deleted, or optimistically clear `collection_id`/`collection_name` on all docs that had that collection.
 
 ### Collection Colors
 

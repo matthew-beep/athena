@@ -68,6 +68,18 @@ export function DocumentsPanel() {
     setDocuments((prev) => prev.filter((d) => d.document_id !== documentId));
   }, []);
 
+  const handleMoveToCollection = useCallback(async (documentId: string, collectionId: string | null) => {
+    if (collectionId) {
+      await apiClient.post(`/collections/${collectionId}/documents`, { document_ids: [documentId] });
+    } else {
+      const doc = documents.find((d) => d.document_id === documentId);
+      if (doc?.collection_id) {
+        await apiClient.delete(`/collections/${doc.collection_id}/documents`, { document_ids: [documentId] });
+      }
+    }
+    await fetchDocuments();
+  }, [documents, fetchDocuments]);
+
   const handleSelectCollection = (collection: CollectionItem) => {
     setSelectedCollections((prev) =>
       prev.some((c) => c.collection_id === collection.collection_id)
@@ -100,8 +112,9 @@ export function DocumentsPanel() {
   }, [refetchCollections]);
 
   const handleImportComplete = useCallback(() => {
+    fetchDocuments();
     setIsPollingProgress(true);
-  }, []);
+  }, [fetchDocuments]);
 
   useEffect(() => {
     refetchCollections();
@@ -170,7 +183,9 @@ export function DocumentsPanel() {
               search={search}
               collectionIds={selectedCollections.map((c) => c.collection_id)}
               fileType={tab}
+              collections={collections}
               onDelete={handleDeleteDocument}
+              onMoveToCollection={handleMoveToCollection}
             />
           </div>
         </div>
