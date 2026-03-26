@@ -58,9 +58,11 @@ Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scop
 - [ ] **Expose scores in frontend source citations** — `rag_sources` carries `score` and `score_type` but verify `SourcesPanel` in `Message.tsx` actually renders them. Show as a small badge (e.g. `0.87 · hybrid`) next to each source.
 
 ### URL Ingestion
-- [ ] **Investigate Crawl4AI response shape** — add `GET /api/documents/url/debug?url=...` or log raw response. The `markdown` field can be string or object (`raw_markdown`, `markdown_with_citations`) — backend doesn't handle the object case.
-- [ ] **Complete URL ingestion backend** — after response shape confirmed, rewrite `POST /api/documents/url` to create a DB record, call `_process_document` as BackgroundTask, return `document_id` immediately. Extract crawl logic into `core/crawler.py`.
-- [ ] **Frontend URL ingestion UX** — loading state, error feedback, clear input on success, wire `onUploadStart`/`onUploadComplete`. Remove raw markdown preview.
+~~**Investigate Crawl4AI response shape**~~ ✓ Done — confirmed via live test. Response is `{ success, results: [{ url, html, markdown: { raw_markdown, markdown_with_citations, fit_markdown, references_markdown }, metadata: { title, description, og:* }, links: { internal, external }, media }] }`. Useful fields: `results[0].markdown.raw_markdown` (text to ingest), `results[0].metadata.title` (display name), `results[0].url` (source ref). `fit_markdown` strips nav/footer noise — worth testing vs `raw_markdown` for embedding quality.
+- [ ] **Write `core/crawler.py`** — `FetchResult` dataclass (`url`, `markdown`, `title`, `word_count`). `fetch_url(url)` calls `POST /crawl`, extracts `results[0].markdown.raw_markdown`, `results[0].metadata.title`. Raise `HTTPException(502)` on Crawl4AI error.
+- [ ] **`_process_url_document()` in `documents.py`** — mirrors `_process_document()` but takes a `FetchResult` instead of `bytes`. Calls `fetch_url()`, then runs chunk → embed → Qdrant → BM25 pipeline. Store `source_url` in Qdrant payload, use `title` as filename.
+- [ ] **Wire URL loop in `/upload`** — currently creates a `pending` DB row but never processes it. Add `background_tasks.add_task(_process_url_document, document_id, url, user_id)` after DB insert, set `processing_status='processing'`.
+- [ ] **Frontend URL ingestion UX** — loading state, error feedback, clear input on success, wire `onUploadStart`/`onUploadComplete`. Remove raw markdown preview from `UploadZone`.
 
 ### Pagination + Search
 - [ ] **Backend: search + pagination on `GET /api/documents`** — add `search: str`, `limit: int`, `offset: int` query params. Return `total` count alongside results. Filter: `AND ($n = '' OR filename ILIKE '%' || $n || '%')`.

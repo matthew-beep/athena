@@ -15,6 +15,7 @@ from app.core.ingestion import extract_text, chunk_text, VIDEO_MIME_TYPES, _reso
 from app.db import postgres
 from app.db import qdrant
 from app.core.bm25 import build_bm25_index
+from app.core.crawler import fetch_url
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -292,36 +293,19 @@ async def upload_documents(
 @router.post("/url")
 async def ingest_url(body: dict, current_user: dict = Depends(get_current_user)):
     settings = get_settings()
+
     crawl4ai_base_url = f"http://{settings.crawl4ai_host}:{settings.crawl4ai_port}"
     url = body.get("url")
+
     if not url:
         return JSONResponse(status_code=400, content={"detail": "URL is required."})
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{crawl4ai_base_url}/crawl",
-                json={"urls": [url]},
-            )
-        resp.raise_for_status()
-        data = resp.json()
-        # Crawl4AI may return top-level markdown or results[0].markdown
-        if not data.get("markdown") and data.get("results"):
-            first = data["results"][0] if data["results"] else {}
-            data = {**data, "markdown": first.get("markdown")}
-        return JSONResponse(status_code=200, content=data)
-    except httpx.HTTPStatusError as e:
-        logger.warning("Crawl4AI HTTP error for {}: {}", url, e.response.status_code)
-        return JSONResponse(
-            status_code=502,
-            content={"detail": f"Crawl failed: {e.response.status_code}"},
-        )
+        result = await fetch_url(url)
+        return JSONResponse(status_code=200, content=result)
     except Exception as e:
         logger.exception("URL ingest failed for {}: {}", url, e)
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "URL ingestion failed."},
-        )
+        return JSONResponse(status_code=500, content={"detail": "URL ingestion failed."})
 
 
 @router.get("/progress/active")
