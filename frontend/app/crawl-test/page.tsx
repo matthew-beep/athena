@@ -2,17 +2,20 @@
 
 import { useState } from 'react';
 import { useAuthStore } from '@/stores/auth.store';
+import ReactMarkdown from 'react-markdown';
 
 export default function CrawlTestPage() {
   const [url, setUrl] = useState('');
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [markdown, setMarkdown] = useState<string | null>(null);
 
   const handleFetch = async () => {
     if (!url.trim()) return;
     setLoading(true);
     setResult(null);
+    setMarkdown(null);
     setError(null);
 
     try {
@@ -31,6 +34,7 @@ export default function CrawlTestPage() {
         return;
       }
       // Extract markdown from response
+      setMarkdown(JSON.stringify(data["results"][0]["markdown"]["raw_markdown"]));
       let md = data.markdown;
       if (md && typeof md === 'object') {
         md = md.raw_markdown ?? md.markdown_with_citations ?? '';
@@ -72,7 +76,7 @@ export default function CrawlTestPage() {
 
       {result && (
         <pre style={{ marginTop: 20, padding: 12, background: '#0a0a0a', color: '#ccc', border: '1px solid #222', borderRadius: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 600, overflow: 'auto' }}>
-          {result}
+          <ReactMarkdown>{markdown}</ReactMarkdown>
         </pre>
       )}
     </div>
