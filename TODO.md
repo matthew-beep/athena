@@ -37,12 +37,12 @@ Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scop
 
 ### Library View — Remaining Wiring
 
-1. **`GET /api/documents` — return `collection_name` per row** — add JOIN to `collections` table, include `collection_name` nullable in each document row. `DocumentItem` and frontend rendering can then show collection name on each doc.
+~~1. **`GET /api/documents` — return `collection_name` per row**~~ ✓ Done (LEFT JOIN to `collections`, `collection_name` in SELECT, `d.user_id` qualified to fix ambiguity after JOIN)
 2. **Fix "X Collections" → "X Documents" header count** — header currently shows collection count. Switch to total doc count or remove subtitle entirely (revisit when pagination lands).
 ~~3. **Document assign to collection UX**~~ ✓ Done (`•••` menu on each doc row — "Move to collection" submenu (two-state menu, collections list, Unassign option) + "Delete". Same `Menu` component pattern as `CollectionsList`. `handleMoveToCollection` in `DocumentsPanel` handles both POST assign and DELETE unassign.)
 ~~4. **Remove duplicate `refetchCollections` call**~~ ✓ Already gone — the two call sites (mount `useEffect` + `createCollection`) are both necessary and serve different purposes. No change needed.
 5. **Drag doc to collection** — drag a document row onto a collection in the sidebar to assign it. Deferred — do after basic assign UX is stable.
-6. **Refetch docs on collection delete** — when a collection is deleted in `DocumentSideBar`, `onCollectionDeleted` removes it from `selectedCollections` but `documents` state is stale — doc rows still show the deleted collection name. Fix: call `fetchDocuments()` from `DocumentsPanel` after a collection is deleted, or optimistically clear `collection_id`/`collection_name` on all docs that had that collection.
+~~6. **Refetch docs on collection delete**~~ ✓ Done (`onCollectionDeleted` in `DocumentsPanel` now calls `fetchDocuments()` after filtering `selectedCollections`)
 
 
 
@@ -52,9 +52,9 @@ Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scop
 
 ### URL Ingestion
 ~~**Investigate Crawl4AI response shape**~~ ✓ Done — confirmed via live test. Response is `{ success, results: [{ url, html, markdown: { raw_markdown, markdown_with_citations, fit_markdown, references_markdown }, metadata: { title, description, og:* }, links: { internal, external }, media }] }`. Useful fields: `results[0].markdown.raw_markdown` (text to ingest), `results[0].metadata.title` (display name), `results[0].url` (source ref). `fit_markdown` strips nav/footer noise — worth testing vs `raw_markdown` for embedding quality.
-- [ ] **Write `core/crawler.py`** — `FetchResult` dataclass (`url`, `markdown`, `title`, `word_count`). `fetch_url(url)` calls `POST /crawl`, extracts `results[0].markdown.raw_markdown`, `results[0].metadata.title`. Raise `HTTPException(502)` on Crawl4AI error.
-- [ ] **`_process_url_document()` in `documents.py`** — mirrors `_process_document()` but takes a `FetchResult` instead of `bytes`. Calls `fetch_url()`, then runs chunk → embed → Qdrant → BM25 pipeline. Store `source_url` in Qdrant payload, use `title` as filename.
-- [ ] **Wire URL loop in `/upload`** — currently creates a `pending` DB row but never processes it. Add `background_tasks.add_task(_process_url_document, document_id, url, user_id)` after DB insert, set `processing_status='processing'`.
+~~- [ ] **Write `core/crawler.py`**~~ ✓ Done
+~~- [ ] **`_process_url_document()` in `documents.py`**~~ ✓ Done
+~~- [ ] **Wire URL loop in `/upload`**~~ ✓ Done
 - [ ] **Frontend URL ingestion UX** — loading state, error feedback, clear input on success, wire `onUploadStart`/`onUploadComplete`. Remove raw markdown preview from `UploadZone`.
 
 ### Pagination + Search
@@ -67,13 +67,16 @@ Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scop
 - [ ] **Redis + Celery** — migrate document processing from `BackgroundTasks` to Celery once ingestion paths are stable. Enables retries, parallelism, and survival across restarts. Do this before URL ingestion goes live — URL crawling + file ingestion running concurrently is where sequential BackgroundTasks becomes a real problem.
 - [ ] **Document cancel** — add `_cancelled: set[str]` module-level in `documents.py`. `POST /api/documents/{id}/cancel` adds to set. `_process_document` checks at each stage boundary and calls cleanup (DELETE documents row → cascades chunks, delete Qdrant points). Not immediate — stops at next checkpoint. Low priority until Celery (which gives `revoke(terminate=True)` for free).
 
-### pg_search Migration (do before URL ingestion goes live)
+### pg_search Migration
 
-- [ ] **Swap Docker image** — `postgres:16-alpine` → `paradedb/paradedb:latest` in both compose files. Drop-in replacement.
-- [ ] **Migration `005_pg_search.sql`** — `CREATE EXTENSION IF NOT EXISTS pg_search;`, drop `bm25_indexes` table, create BM25 index on `document_chunks` (key: `chunk_id`, fields: `text` + `filename_normalized` boosted 4×). Verify `filename_normalized` column exists on `document_chunks` — it's in Qdrant payload but may need adding to the table.
-- [ ] **Rewrite `bm25_search()` in `core/rag.py`** — replace Python `rank_bm25` scoring with SQL: `WHERE text @@@ $1 ORDER BY paradedb.score(chunk_id) DESC`. Scoped path adds `AND document_id = ANY($2)`, search_all path adds `AND user_id = $2`.
-- [ ] **Delete old BM25 plumbing** — remove `core/bm25.py`, remove `build_bm25_index` call from `_process_document`, remove `_bm25_cache` + helpers from `rag.py`, remove `rank-bm25` from `requirements.txt`.
-- [ ] **Test** — upload a doc, ask a question, verify hybrid search + RRF still returns results.
+**Unknown:** `paradedb/paradedb:16` may need a fresh data volume rather than working as a drop-in with an existing Postgres volume. Test this first before doing anything else.
+
+1. [ ] **Swap Docker image** — `postgres:16-alpine` → `paradedb/paradedb:16` in both compose files. Test drop-in compatibility with existing data volume first.
+2. [ ] **Confirm `filename_normalized` column on `document_chunks`** — it's in the Qdrant payload but may not exist as a DB column. If missing, add it: `ALTER TABLE document_chunks ADD COLUMN filename_normalized TEXT;` and backfill from the `documents` table.
+3. [ ] **Migration `005_pg_search.sql`** — `CREATE EXTENSION IF NOT EXISTS pg_search;`, drop `bm25_indexes` table, create BM25 index on `document_chunks` (key: `chunk_id`, fields: `text` + `filename_normalized` boosted 4×).
+4. [ ] **Rewrite `bm25_search()` in `core/rag.py`** — replace Python `rank_bm25` scoring with SQL: `WHERE text @@@ $1 ORDER BY paradedb.score(chunk_id) DESC`. Scoped path adds `AND document_id = ANY($2)`, search_all path adds `AND user_id = $2`.
+5. [ ] **Delete old BM25 plumbing** — remove `core/bm25.py`, remove `build_bm25_index` calls from `_process_document` and `_process_url_document`, remove `_bm25_cache` + helpers from `rag.py`, remove `rank-bm25` from `requirements.txt`.
+6. [ ] **Test** — upload a doc, ask a question, verify hybrid search + RRF still returns results.
 
 ---
 
