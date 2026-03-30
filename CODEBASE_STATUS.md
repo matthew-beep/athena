@@ -1,4 +1,25 @@
 # Athena — Codebase Status
+## 2026-03-30
+
+### URL Ingestion — Now Functional
+
+- **`backend/app/models/url.py`** — `FetchResult` converted from plain class to `@dataclass`
+- **`backend/app/core/crawler.py`** — `fetch_url()` now parses `/crawl` response: extracts `fit_markdown` (falls back to `raw_markdown`), `metadata.title`, computes `word_count`. Returns proper `FetchResult`. Guards on empty `results`. Catches both `httpx.HTTPStatusError` and `httpx.RequestError`. Logs Ollama error body before raising.
+- **`backend/app/api/documents.py`** — `_process_url_document()` added: full pipeline (fetch → chunk → embed → Qdrant → BM25). Transitions DB status `pending → processing` at start, updates `filename` to page title on completion. URL loop in `upload_documents` now fires `background_tasks.add_task(_process_url_document, ...)`. `ingest_url` route returns parsed `FetchResult` fields instead of raw dict.
+- **`backend/app/core/ingestion.py`** — switched from `tiktoken cl100k_base` to `tokenizers` library with `nomic-ai/nomic-embed-text-v1` tokenizer for accurate token counting. Pre-splits text on `\n` before `sent_tokenize` to prevent navigation blocks from becoming oversized single "sentences" that overflow Ollama's context.
+- **`backend/requirements.txt`** — replaced `tiktoken` with `tokenizers>=0.19`
+
+### Collection Colors — Dropped
+
+Removed from TODO and CODEBASE_STATUS. Not worth the implementation cost at this stage. Can be added later as a self-contained migration + field + color picker.
+
+### Other
+
+- **`frontend/app/crawl-test/page.tsx`** — updated to parse `FetchResult` shape, added metadata bar (title/url/words), uses `remarkGfm` + `message-content` CSS class for consistent markdown rendering with chat.
+- **`frontend/components/documents/DocumentsPanel.tsx`** — `onCollectionDeleted` now also calls `fetchDocuments()` so doc rows clear their collection name immediately after a collection is deleted.
+
+---
+
 ## 2026-03-23
 
 ---
@@ -396,7 +417,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | DELETE | `/api/chat/{id}/documents/{doc_id}` | ✅ |
 | GET | `/api/documents` | ✅ |
 | POST | `/api/documents/upload` | ✅ |
-| POST | `/api/documents/url` | ⚠️ scraper preview only |
+| POST | `/api/documents/url` | ✅ debug/test endpoint — returns FetchResult |
 | GET | `/api/documents/{id}` | ✅ |
 | GET | `/api/documents/{id}/progress` | ✅ |
 | GET | `/api/documents/progress/active` | ✅ bulk active |
@@ -430,13 +451,12 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | 3 | Medium | Summarization in hot path — `_generate_and_cache_summary()` blocks the next user request | `core/context.py` |
 | 4 | Medium | No Celery/Redis — background processing uses FastAPI `BackgroundTasks`; no retries, no persistence across restarts | `api/documents.py` |
 | 5 | Medium | Context window display broken — (a) `contextBudget` hardcoded 4096 in store; (b) `context_debug` tokens held until `done`, not applied immediately; (c) `token_count` never returned by conversations API | `chat.store.ts`, `useSSEChat.ts`, `api/chat.py` |
-| 6 | Medium | URL ingestion non-functional — `POST /api/documents/url` returns Crawl4AI raw payload, creates no DB record, nothing enters Qdrant | `api/documents.py`, `UploadZone.tsx` |
+| 6 | ~~Medium~~ | ~~URL ingestion non-functional~~ | ✅ Fixed |
 | 7 | Medium | Storage stats return 0.0 — `/api/system/resources` NVMe/HDD percentages hardcoded to 0 (Redis cache not yet wired) | `api/system.py` |
 | 8 | ~~Medium~~ | ~~`.glass`/`.glass-subtle`/`.glass-strong` class references on multiple components~~ | ✅ Fixed (F2 complete) |
 | 9 | Low | Muting docs is UI-only — `mutedIds` in `DocumentBar` never sent to backend | `DocumentBar.tsx` |
 | 10 | Low | `GET /api/documents` returns `collection_id` per row but not `collection_name` — needs JOIN to `collections` table | `api/documents.py` |
 | 11 | ~~Low~~ | ~~`POST /api/documents/upload` doesn't accept `collection_id`~~ | ✅ Fixed |
-| 12 | Low | `collections` table has no `color` column — collection pills use static index-based color array, colors shift when collections are deleted/reordered | `api/collections.py`, `UploadModal.tsx` |
 | 13 | Low | `/progress/active` route was shadowed by `/{document_id}/progress` — FastAPI treated "progress" as a document_id | ✅ Fixed |
 
 ---
@@ -464,11 +484,11 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | Phase | Status | Notes |
 |---|---|---|
 | Phase 1: Foundation | ~97% | Core chat, RAG, ingestion, auth all working. Missing: Celery/Redis |
-| Phase 2: Document Processing | ~25% | URL ingestion non-functional; collections fully wired (collection_id on upload atomic) |
+| Phase 2: Document Processing | ~55% | URL ingestion functional; file + URL ingestion both wired end-to-end |
 | Phase F1: Design System | ✅ Done | Structural Glass tokens, Slate default, all CSS utility classes |
 | Phase F2: Glass Audit | ✅ Done | All 14 components migrated off glass-subtle/glass-strong |
 | Phase F3: Layout Shell Polish | 0% | AppShell, Sidebar, SystemFooter need token updates |
-| Phase F4: Library View + Collections | 45% | Collections backend fully complete; upload modal stages 1–3 fully wired (4 removed); collection filter + file type filter wired in DocumentList; documents.py query params added; collection_name JOIN, document assign UX, collection colors remain |
+| Phase F4: Library View + Collections | 50% | Collections backend fully complete; upload modal stages 1–3 fully wired; collection filter + file type filter wired; collection_name JOIN done; document assign UX done; collection colors dropped |
 | Phase 3: Learning Features | 0% | |
 | Phase 4: Two-Tier Knowledge | 0% | |
 | Phase 5: Research Pipeline | 0% | |
@@ -505,7 +525,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | Upload modal stage 4 | ✅ Removed (stage 3 handles completion) |
 | Chat message anatomy update | ❌ F5 pending |
 | System panel (ArcGauge, Sparkline) | ❌ F6 pending |
-| URL ingestion (real, not preview) | ❌ blocked on Crawl4AI shape validation |
+| URL ingestion (real, not preview) | ✅ functional — fetch → chunk → embed → Qdrant → BM25 |
 | Context window display (3 bugs) | ❌ |
 | Token flush throttle | ❌ |
 | Auto-scroll at-bottom detection | ❌ |

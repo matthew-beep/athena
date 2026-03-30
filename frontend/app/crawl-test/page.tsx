@@ -3,19 +3,25 @@
 import { useState } from 'react';
 import { useAuthStore } from '@/stores/auth.store';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+
+interface FetchResult {
+  url: string;
+  markdown: string;
+  title: string;
+  word_count: number;
+}
 
 export default function CrawlTestPage() {
   const [url, setUrl] = useState('');
-  const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [markdown, setMarkdown] = useState<string | null>(null);
+  const [result, setResult] = useState<FetchResult | null>(null);
 
   const handleFetch = async () => {
     if (!url.trim()) return;
     setLoading(true);
     setResult(null);
-    setMarkdown(null);
     setError(null);
 
     try {
@@ -33,13 +39,7 @@ export default function CrawlTestPage() {
         setError(data.detail ?? 'Request failed');
         return;
       }
-      // Extract markdown from response
-      setMarkdown(JSON.stringify(data["results"][0]["markdown"]["raw_markdown"]));
-      let md = data.markdown;
-      if (md && typeof md === 'object') {
-        md = md.raw_markdown ?? md.markdown_with_citations ?? '';
-      }
-      setResult(typeof md === 'string' ? md : JSON.stringify(data, null, 2));
+      setResult(data as FetchResult);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -75,9 +75,37 @@ export default function CrawlTestPage() {
       )}
 
       {result && (
-        <pre style={{ marginTop: 20, padding: 12, background: '#0a0a0a', color: '#ccc', border: '1px solid #222', borderRadius: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 600, overflow: 'auto' }}>
-          <ReactMarkdown>{markdown}</ReactMarkdown>
-        </pre>
+        <div style={{ marginTop: 20 }}>
+          <div style={{ marginBottom: 12, padding: '8px 12px', background: '#111', border: '1px solid #333', borderRadius: 4, fontSize: 13 }}>
+            <div><span style={{ color: '#666' }}>title:</span> <span style={{ color: '#fff' }}>{result.title || '—'}</span></div>
+            <div><span style={{ color: '#666' }}>url:</span> <span style={{ color: '#888' }}>{result.url}</span></div>
+            <div><span style={{ color: '#666' }}>words:</span> <span style={{ color: '#888' }}>{result.word_count}</span></div>
+          </div>
+          <div
+            style={{
+              padding: 12,
+              background: '#0a0a0a',
+              border: '1px solid #222',
+              borderRadius: 4,
+              maxHeight: 600,
+              overflow: 'auto',
+            }}
+          >
+            <div className="message-content">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  img: ({ src, alt, ...props }) => {
+                    if (!src || String(src).trim() === '') return null;
+                    return <img src={src} alt={alt ?? ''} {...props} />;
+                  },
+                }}
+              >
+                {result.markdown}
+              </ReactMarkdown>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

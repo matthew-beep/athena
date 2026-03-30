@@ -44,13 +44,6 @@ Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scop
 5. **Drag doc to collection** — drag a document row onto a collection in the sidebar to assign it. Deferred — do after basic assign UX is stable.
 6. **Refetch docs on collection delete** — when a collection is deleted in `DocumentSideBar`, `onCollectionDeleted` removes it from `selectedCollections` but `documents` state is stale — doc rows still show the deleted collection name. Fix: call `fetchDocuments()` from `DocumentsPanel` after a collection is deleted, or optimistically clear `collection_id`/`collection_name` on all docs that had that collection.
 
-### Collection Colors
-
-1. **Backend: add `color` column to `collections` table** — migration: `ALTER TABLE collections ADD COLUMN color VARCHAR(20) NOT NULL DEFAULT 'var(--blue)'`. Auto-assign from a preset palette on CREATE (cycle through blue/purple/green/amber/red/slate by existing row count). Return `color` in `GET /api/collections`, `POST /api/collections`, `PUT /api/collections/{id}` responses.
-2. **Backend: update Pydantic models** — add `color: str` to `CollectionItem` and `CollectionMutateResponse` in `models/collections.py`. Add `color` to the SELECT in `get_collections` query.
-3. **Backend: `PUT /api/collections/{id}` accepts color** — add optional `color: str | None` to `CollectionNameRequest` (or a new `CollectionUpdateRequest`). Update SQL to set color if provided.
-4. **Frontend: add `color` to `CollectionItem` type** — `frontend/types/index.ts`. Remove `COLLECTION_COLORS` array and the index-based `collectionColor()` fallback from `UploadModal.tsx`. Use `c.color` directly everywhere a collection color is needed.
-5. **Frontend: wire color into `CollectionsList`** — any component rendering collection pills/dots should read `c.color` from the API response, not derive it locally.
 
 
 ### RAG Scoring Audit

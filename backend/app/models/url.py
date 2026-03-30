@@ -1,5 +1,6 @@
-from pydantic import BaseModel
+from dataclasses import dataclass
 
+@dataclass
 class FetchResult:
     url: str
     markdown: str

@@ -160,7 +160,10 @@ export function DocumentsPanel() {
             loadingCollections={loadingCollections}
             selectedCollections={selectedCollections}
             onSelectCollection={handleSelectCollection}
-            onCollectionDeleted={(id) => setSelectedCollections((prev) => prev.filter((c) => c.collection_id !== id))}
+            onCollectionDeleted={(id) => {
+              setSelectedCollections((prev) => prev.filter((c) => c.collection_id !== id));
+              fetchDocuments();
+            }}
             refetchCollections={refetchCollections}
             onCreateCollection={createCollection}
           />

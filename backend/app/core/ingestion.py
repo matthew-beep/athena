@@ -1,6 +1,6 @@
 import os
 import tempfile
-import tiktoken
+from tokenizers import Tokenizer
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 import docx
@@ -12,7 +12,7 @@ import re
 import nltk
 from nltk.tokenize import sent_tokenize
 
-enc = tiktoken.get_encoding("cl100k_base")
+enc = Tokenizer.from_pretrained("nomic-ai/nomic-embed-text-v1")
 nltk.download('punkt_tab', quiet=True)
 
 CHUNK_SIZE = 500
@@ -83,12 +83,15 @@ def chunk_text(text: str) -> list[dict]:
     # Normalize whitespace — rejoin hyphenated line breaks common in PDFs
     text = re.sub(r'-\n(\w)', r'\1', text)
 
-    sentences = sent_tokenize(text)
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    sentences = []
+    for line in lines:
+        sentences.extend(sent_tokenize(line))
     if not sentences:
         return []
 
     # Pre-compute token counts once per sentence
-    sentence_tokens = [(s, len(enc.encode(s))) for s in sentences]
+    sentence_tokens = [(s, len(enc.encode(s).ids)) for s in sentences]
 
     chunks = []
     current: list[tuple[str, int]] = []  # (sentence, token_count)

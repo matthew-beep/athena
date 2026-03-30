@@ -65,7 +65,9 @@ async def _embed(client: httpx.AsyncClient, text: str) -> list[float]:
         json={"model": settings.ollama_embed_model, "prompt": text},
         timeout=60.0,
     )
-    resp.raise_for_status()
+    if not resp.is_success:
+        logger.error("Ollama embed error {}: {}", resp.status_code, resp.text)
+        resp.raise_for_status()
     return resp.json()["embedding"]
 
 
@@ -178,6 +180,109 @@ async def _process_document(
         )
 
 
+async def _process_url_document(document_id: str, url: str, user_id: int) -> None:
+    """URL ingestion pipeline: fetch → chunk → embed → store."""
+    try:
+        # ── 1. Fetch ───────────────────────────────────────────────────────
+        _progress[document_id] = {"stage": "fetching", "done": 0, "total": 0}
+        await postgres.execute(
+            "UPDATE documents SET processing_status='processing' WHERE document_id=$1",
+            document_id,
+        )
+        result = await fetch_url(url)
+        text = result.markdown
+        title = result.title or url
+        normalized_title = normalize_filename(title)
+
+        # ── 2. Chunk ───────────────────────────────────────────────────────
+        _progress[document_id] = {"stage": "chunking", "done": 0, "total": 0}
+        chunks = chunk_text(text)
+        word_count = result.word_count
+
+        if not chunks:
+            _progress.pop(document_id, None)
+            await postgres.execute(
+                "UPDATE documents SET processing_status='error', error_message='No content to chunk' WHERE document_id=$1",
+                document_id,
+            )
+            return
+
+        total = len(chunks)
+        logger.info("URL document {}: {} words → {} chunks", document_id, word_count, total)
+
+        # ── 3. Embed + store ───────────────────────────────────────────────
+        _progress[document_id] = {"stage": "embedding", "done": 0, "total": total}
+        qdrant_points = []
+        bm25_chunk_ids = []
+        bm25_texts = []
+
+        async with httpx.AsyncClient() as client:
+            for chunk in chunks:
+                i = chunk["chunk_index"]
+                chunk_id = f"{document_id}_chunk_{i}"
+
+                bm25_chunk_ids.append(chunk_id)
+                bm25_texts.append(chunk["text"])
+
+                try:
+                    embedding = await _embed(client, chunk["text"])
+                except Exception as e:
+                    logger.error("Embedding failed for chunk {} of {}: {}", i, document_id, e)
+                    raise
+
+                await postgres.execute(
+                    """INSERT INTO document_chunks
+                           (chunk_id, document_id, chunk_index, text, token_count, qdrant_point_id, user_id)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7)
+                       ON CONFLICT (chunk_id) DO NOTHING""",
+                    chunk_id, document_id, i,
+                    chunk["text"], chunk["token_count"],
+                    str(_chunk_id_to_qdrant_id(chunk_id)),
+                    user_id,
+                )
+
+                qdrant_points.append({
+                    "id": _chunk_id_to_qdrant_id(chunk_id),
+                    "vector": embedding,
+                    "payload": {
+                        "document_id": document_id,
+                        "user_id": user_id,
+                        "chunk_id": chunk_id,
+                        "filename": title,
+                        "normalized_filename": normalized_title,
+                        "chunk_index": i,
+                        "source_type": "web",
+                        "knowledge_tier": "persistent",
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                })
+
+                _progress[document_id] = {"stage": "embedding", "done": i + 1, "total": total}
+
+        # ── 4. Upsert Qdrant and build BM25 index ─────────────────────────
+        await qdrant.ensure_collection()
+        await qdrant.upsert_points(qdrant_points)
+        await build_bm25_index(document_id, bm25_chunk_ids, bm25_texts)
+
+        # ── 5. Complete ────────────────────────────────────────────────────
+        _progress.pop(document_id, None)
+        await postgres.execute(
+            """UPDATE documents
+               SET processing_status='complete', filename=$1, word_count=$2, chunk_count=$3
+               WHERE document_id=$4""",
+            title, word_count, total, document_id,
+        )
+        logger.info("URL document {} ingested: {} chunks", document_id, total)
+
+    except Exception:
+        _progress.pop(document_id, None)
+        logger.exception("Unexpected error processing URL document {}", document_id)
+        await postgres.execute(
+            "UPDATE documents SET processing_status='error', error_message='Internal processing error' WHERE document_id=$1",
+            document_id,
+        )
+
+
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @router.get("")
@@ -277,7 +382,8 @@ async def upload_documents(
                VALUES ($1, $2, 'web', 'pending', 0, $3, $4)""",
             document_id, url, current_user["id"], collection_id or None,
         )
-        logger.info("URL queued (not yet crawled): {} → {}", url, document_id)
+        background_tasks.add_task(_process_url_document, document_id, url, current_user["id"])
+        logger.info("URL queued for crawl: {} → {}", url, document_id)
         results.append({
             "type": "url",
             "document_id": document_id,
@@ -302,7 +408,12 @@ async def ingest_url(body: dict, current_user: dict = Depends(get_current_user))
 
     try:
         result = await fetch_url(url)
-        return JSONResponse(status_code=200, content=result)
+        return JSONResponse(status_code=200, content={
+            "url": result.url,
+            "markdown": result.markdown,
+            "title": result.title,
+            "word_count": result.word_count,
+        })
     except Exception as e:
         logger.exception("URL ingest failed for {}: {}", url, e)
         return JSONResponse(status_code=500, content={"detail": "URL ingestion failed."})
