@@ -49,13 +49,14 @@ Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scop
 ### RAG Scoring Audit
 - [ ] **Audit RRF score accuracy** — with scoring unblocked, verify numbers are meaningful. With `k=60` and ~20 results, max RRF score is ~2*(1/61) ≈ 0.033 — too small to display raw. Normalize against top result score so displayed scores span `0.0–1.0`. Add debug log of top-5 chunk_ids + scores in `retrieve()` for validation.
 - [ ] **Expose scores in frontend source citations** — `rag_sources` carries `score` and `score_type` but verify `SourcesPanel` in `Message.tsx` actually renders them. Show as a small badge (e.g. `0.87 · hybrid`) next to each source.
+- [ ] **Score breakdown in citation shutter (Option B)** — backend: add `vector_score` and `bm25_score` to each source object in `retrieve()` alongside the existing RRF `score`. Frontend: compact list shows combined score + `hybrid`/`vector` badge; clicking into a source (citation shutter) shows the breakdown — `V 0.84  BM25 3.2` — labeled so it's clear they're on different scales.
 
 ### URL Ingestion
 ~~**Investigate Crawl4AI response shape**~~ ✓ Done — confirmed via live test. Response is `{ success, results: [{ url, html, markdown: { raw_markdown, markdown_with_citations, fit_markdown, references_markdown }, metadata: { title, description, og:* }, links: { internal, external }, media }] }`. Useful fields: `results[0].markdown.raw_markdown` (text to ingest), `results[0].metadata.title` (display name), `results[0].url` (source ref). `fit_markdown` strips nav/footer noise — worth testing vs `raw_markdown` for embedding quality.
 ~~- [ ] **Write `core/crawler.py`**~~ ✓ Done
 ~~- [ ] **`_process_url_document()` in `documents.py`**~~ ✓ Done
 ~~- [ ] **Wire URL loop in `/upload`**~~ ✓ Done
-- [ ] **Frontend URL ingestion UX** — loading state, error feedback, clear input on success, wire `onUploadStart`/`onUploadComplete`. Remove raw markdown preview from `UploadZone`.
+- [x] **Frontend URL ingestion UX** — URLs handled in UploadModal queue → stage 3 → progress polling, same flow as files. Error cards, spinner → green check on complete. `UploadZone` was dead code (never imported) and has been deleted.
 
 ### Pagination + Search
 - [ ] **Backend: search + pagination on `GET /api/documents`** — add `search: str`, `limit: int`, `offset: int` query params. Return `total` count alongside results. Filter: `AND ($n = '' OR filename ILIKE '%' || $n || '%')`.
@@ -692,7 +693,7 @@ Message anatomy classes are now defined in globals.css (`.msg-user`, `.msg-ai`) 
   values in `config.py`. Add a startup warning in `main.py` lifespan if either matches the default.
 - [ ] **CORS too permissive** — `allow_methods=["*"]` and `allow_headers=["*"]` in `main.py`.
   Fine for local dev; tighten to specific methods/headers before any non-localhost exposure.
-- [ ] **Context window display broken in three ways** — (1) `contextBudget: 4096` hardcoded in `chat.store.ts` but backend uses 8192; `context_debug` SSE event sends `budget` but `useSSEChat` never reads it — add `setContextBudget` to store and wire it. (2) `context_debug` tokens are held in `pendingContextTokens` and only committed to the store on `done` — apply them immediately when the event fires so the fill updates as soon as the request starts, not after full generation. (3) `conversations.token_count` is maintained in the DB via `save_message()` but never returned by the conversations list API — add it to `ConversationOut` and pre-populate `contextTokens[convId]` on conversation load so fill is visible before any message is sent.
+- [x] **Context window display fixed** — (1) `contextBudget` initial value corrected to `0` (populated from `context_debug` SSE event via `setContextBudget`); (2) `context_debug` tokens applied immediately on event fire, not just on `done`; (3) `token_count` returned by conversations list API and pre-populated via `bulkSetContextTokens` on sidebar mount. Backend `TOTAL_BUDGET` corrected to 4096 to match actual `qwen2.5:7b` Ollama context.
 - [ ] **`token_count` drift** — `save_message` counts only raw content tokens but `count_tokens()` adds 4 tokens overhead per message. Cached `token_count` drifts low over time, causing the fast path to load all history when it may be over budget. Fix: add the 4-token overhead in `save_message`.
 - [ ] **`score_type` not forwarded in done event** — `chat.py` builds `rag_sources` for the SSE `done` event but omits `score_type`. Add it so the frontend can label hybrid vs vector scores differently.
 - [ ] **Summarization blocks the next message** — `_generate_and_cache_summary()` in `context.py`

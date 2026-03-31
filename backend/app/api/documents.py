@@ -14,7 +14,6 @@ from app.core.security import get_current_user
 from app.core.ingestion import extract_text, chunk_text, VIDEO_MIME_TYPES, _resolve_mime, normalize_filename
 from app.db import postgres
 from app.db import qdrant
-from app.core.bm25 import build_bm25_index
 from app.core.crawler import fetch_url
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -108,16 +107,11 @@ async def _process_document(
         # ── 3. Embed + store ───────────────────────────────────────────────
         _progress[document_id] = {"stage": "embedding", "done": 0, "total": total}
         qdrant_points = []
-        bm25_chunk_ids = []  # collect here
-        bm25_texts = []
 
         async with httpx.AsyncClient() as client:
             for chunk in chunks:
                 i = chunk["chunk_index"]
                 chunk_id = f"{document_id}_chunk_{i}"
-
-                bm25_chunk_ids.append(chunk_id)   # add to list
-                bm25_texts.append(chunk["text"])   # add to list
 
                 try:
                     embedding = await _embed(client, chunk["text"])
@@ -127,13 +121,13 @@ async def _process_document(
 
                 await postgres.execute(
                     """INSERT INTO document_chunks
-                           (chunk_id, document_id, chunk_index, text, token_count, qdrant_point_id, user_id)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7)
+                           (chunk_id, document_id, chunk_index, text, token_count, qdrant_point_id, user_id, filename_normalized)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                        ON CONFLICT (chunk_id) DO NOTHING""",
                     chunk_id, document_id, i,
                     chunk["text"], chunk["token_count"],
                     str(_chunk_id_to_qdrant_id(chunk_id)),
-                    user_id,
+                    user_id, normalized_filename,
                 )
 
                 qdrant_points.append({
@@ -154,11 +148,9 @@ async def _process_document(
 
                 _progress[document_id] = {"stage": "embedding", "done": i + 1, "total": total}
 
-        # ── 4. Upsert Qdrant and build BM25 index ───────────────────────────────────────────────
+        # ── 4. Upsert Qdrant ──────────────────────────────────────────────────
         await qdrant.ensure_collection()
         await qdrant.upsert_points(qdrant_points)
-
-        await build_bm25_index(document_id, bm25_chunk_ids, bm25_texts)
 
 
         # ── 5. Complete ────────────────────────────────────────────────────
@@ -213,16 +205,11 @@ async def _process_url_document(document_id: str, url: str, user_id: int) -> Non
         # ── 3. Embed + store ───────────────────────────────────────────────
         _progress[document_id] = {"stage": "embedding", "done": 0, "total": total}
         qdrant_points = []
-        bm25_chunk_ids = []
-        bm25_texts = []
 
         async with httpx.AsyncClient() as client:
             for chunk in chunks:
                 i = chunk["chunk_index"]
                 chunk_id = f"{document_id}_chunk_{i}"
-
-                bm25_chunk_ids.append(chunk_id)
-                bm25_texts.append(chunk["text"])
 
                 try:
                     embedding = await _embed(client, chunk["text"])
@@ -232,13 +219,13 @@ async def _process_url_document(document_id: str, url: str, user_id: int) -> Non
 
                 await postgres.execute(
                     """INSERT INTO document_chunks
-                           (chunk_id, document_id, chunk_index, text, token_count, qdrant_point_id, user_id)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7)
+                           (chunk_id, document_id, chunk_index, text, token_count, qdrant_point_id, user_id, filename_normalized)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                        ON CONFLICT (chunk_id) DO NOTHING""",
                     chunk_id, document_id, i,
                     chunk["text"], chunk["token_count"],
                     str(_chunk_id_to_qdrant_id(chunk_id)),
-                    user_id,
+                    user_id, normalized_title,
                 )
 
                 qdrant_points.append({
@@ -259,10 +246,9 @@ async def _process_url_document(document_id: str, url: str, user_id: int) -> Non
 
                 _progress[document_id] = {"stage": "embedding", "done": i + 1, "total": total}
 
-        # ── 4. Upsert Qdrant and build BM25 index ─────────────────────────
+        # ── 4. Upsert Qdrant ──────────────────────────────────────────────────
         await qdrant.ensure_collection()
         await qdrant.upsert_points(qdrant_points)
-        await build_bm25_index(document_id, bm25_chunk_ids, bm25_texts)
 
         # ── 5. Complete ────────────────────────────────────────────────────
         _progress.pop(document_id, None)

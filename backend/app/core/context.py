@@ -9,7 +9,7 @@ from app.config import get_settings
 
 enc = tiktoken.get_encoding("cl100k_base")
 
-TOTAL_BUDGET = 8192
+TOTAL_BUDGET = 4096
 SYSTEM_BUDGET = 1000
 GENERATION_BUDGET = 1192
 PROTECT_LAST_N = 6

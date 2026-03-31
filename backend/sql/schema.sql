@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     document_id VARCHAR(255) REFERENCES documents(document_id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL,
     text TEXT NOT NULL,
+    filename_normalized TEXT,
     token_count INTEGER,
     qdrant_point_id VARCHAR(255),
     metadata JSONB,
@@ -108,17 +109,6 @@ CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(do
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
 CREATE INDEX IF NOT EXISTS idx_document_chunks_user ON document_chunks(user_id);
 
--- bm25 indexes table
-
-CREATE TABLE IF NOT EXISTS bm25_indexes (
-    document_id  VARCHAR(255) REFERENCES documents(document_id) ON DELETE CASCADE,
-    chunk_ids    JSONB NOT NULL DEFAULT '[]',
-    corpus       JSONB NOT NULL DEFAULT '[]',
-    updated_at   TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY  (document_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_bm25_document ON bm25_indexes(document_id);
 
 
 -- Collections table: user_id lives directly here, no user-collection junction needed
@@ -139,3 +129,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_user_lower_name
 ALTER TABLE documents
     ADD CONSTRAINT fk_documents_collection
     FOREIGN KEY (collection_id) REFERENCES collections(collection_id) ON DELETE SET NULL;
+
+-- pg_search (ParadeDB) BM25 index
+CREATE EXTENSION IF NOT EXISTS pg_search;
+
+CREATE INDEX document_chunks_search_idx ON document_chunks
+USING bm25 (chunk_id, text, filename_normalized)
+WITH (key_field = 'chunk_id');

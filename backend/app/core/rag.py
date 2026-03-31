@@ -12,8 +12,6 @@ from app.config import get_settings
 from app.db import qdrant, postgres
 from app.core.ingestion import normalize_filename
 from rapidfuzz import fuzz
-from app.core.bm25 import get_bm25_index
-from rank_bm25 import BM25Okapi
 import asyncio
 
 
@@ -80,44 +78,30 @@ async def find_referenced_document(
 
     return best_match
 
-async def _bm_25_search(    
+async def _pg_search(
     query: str,
     document_ids: list[str],
     top_k: int = 20,
 ) -> list[tuple[str, float]]:
     """
-    Run BM25 keyword search across a set of documents.
-    Merges per-document indexes at search time — only scores chunks
-    from the provided document_ids, never the full knowledge base.
+    Run BM25 keyword search using ParadeDB pg_search.
     Returns list of (chunk_id, score) tuples sorted by score descending.
     """
-
     if not document_ids:
         return []
 
-    # Load and merge indexes for all documents in scope
-    all_chunk_ids: list[str] = []
-    all_corpus: list[list[str]] = []
-
-    for doc_id in document_ids:
-        index = await get_bm25_index(doc_id)
-        all_chunk_ids.extend(index["chunk_ids"])
-        all_corpus.extend(index["corpus"])
-
-    if not all_corpus:
-        return []
-
-    # Run BM25 search against documents and user query
-    bm25 = BM25Okapi(all_corpus)
-    scores = bm25.get_scores(query.lower().split())
-
-    results = [
-        (chunk_id, float(score))
-        for chunk_id, score in zip(all_chunk_ids, scores)
-        if score > 0
-    ]
-
-    return sorted(results, key=lambda x: x[1], reverse=True)[:top_k]
+    rows = await postgres.fetch_all(
+        """SELECT dc.chunk_id, paradedb.score(dc.chunk_id) AS score
+           FROM document_chunks dc
+           WHERE dc.text @@@ $1
+             AND dc.document_id = ANY($2)
+           ORDER BY score DESC
+           LIMIT $3""",
+        query,
+        document_ids,
+        top_k,
+    )
+    return [(row["chunk_id"], float(row["score"])) for row in rows]
 
 
 def reciprocal_rank_fusion(
@@ -199,7 +183,7 @@ async def retrieve(
         if search_ids:
             vector_hits, bm25_hits = await asyncio.gather(
                 qdrant.search(vector, top_k=top_k * 3, filters=search_filter),
-                _bm_25_search(query, search_ids, top_k=top_k * 3),
+                _pg_search(query, search_ids, top_k=top_k * 3),
             )
             vector_scores = {
                 h.get("payload", {}).get("chunk_id"): h.get("score", 0.0)

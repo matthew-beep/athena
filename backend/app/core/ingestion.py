@@ -7,7 +7,6 @@ import docx
 from loguru import logger
 from typing import IO
 import json
-from rank_bm25 import BM25Okapi
 import re
 import nltk
 from nltk.tokenize import sent_tokenize

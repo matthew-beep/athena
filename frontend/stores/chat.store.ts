@@ -76,7 +76,7 @@ export const useChatStore = create<ChatState>((set) => ({
   streamingContent: '',
   isStreaming: false,
   contextTokens: {},
-  contextBudget: 4096,
+  contextBudget: 0,
   messageTokens: 0,
   statusMessage: null,
   activeModel: process.env.NEXT_PUBLIC_OLLAMA_MODEL ?? 'qwen2.5:7b',
