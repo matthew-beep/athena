@@ -1,4 +1,41 @@
 # Athena — Codebase Status
+## 2026-03-31
+
+### pg_search Migration — Complete
+
+- **`docker-compose.yml` + `docker-compose.mac.yml`** — `postgres:16-alpine` → `paradedb/paradedb:latest-pg16`. Fresh volume required (dropped old volume).
+- **`backend/sql/schema.sql`** — added `filename_normalized TEXT` to `document_chunks`, added `CREATE EXTENSION IF NOT EXISTS pg_search` + BM25 index on `document_chunks(chunk_id, text, filename_normalized)`. Removed `bm25_indexes` table entirely.
+- **`backend/app/core/rag.py`** — replaced Python `_bm_25_search()` (rank_bm25 + in-memory corpus) with `_pg_search()` using `WHERE text @@@ $1 ORDER BY paradedb.score(chunk_id) DESC`. Added `bm25_scores` dict for per-chunk score tracking.
+- **`backend/app/core/bm25.py`** — deleted.
+- **`backend/app/api/documents.py`** — removed `build_bm25_index` calls from both `_process_document` and `_process_url_document`. Added `filename_normalized` to `document_chunks` INSERT in both functions.
+- **`backend/app/core/ingestion.py`** — removed unused `from rank_bm25 import BM25Okapi`.
+- **`backend/requirements.txt`** — removed `rank-bm25==0.2.2`.
+
+### RAG Scoring Display
+
+- **`backend/app/core/rag.py`** — each source object now includes `vector_score` (cosine 0–1, rounded to 3dp) and `bm25_score` (raw BM25, rounded to 3dp) alongside existing `score` (RRF combined) and `score_type`.
+- **`backend/app/api/chat.py`** — `score_type`, `vector_score`, `bm25_score` now forwarded in the SSE `done` event `rag_sources` list.
+- **`frontend/types/index.ts`** — `RagSource` extended with optional `score_type`, `vector_score`, `bm25_score`.
+- **`frontend/components/chat/Message.tsx`** — compact source list now shows `hybrid`/`vector` type badge instead of a raw `%` score (RRF scores are too small to display as %).
+- **`frontend/components/chat/DocumentBar.tsx`** — `CitationShutter` now shows a Scores section: `V 0.843` for vector-only, `V 0.843  BM25 4.21` for hybrid results.
+
+### Context Window Fixes
+
+- **`backend/app/core/context.py`** — `TOTAL_BUDGET` corrected from 8192 → 4096 to match actual `qwen2.5:7b` Ollama context (confirmed via `ollama ps`).
+- **`frontend/stores/chat.store.ts`** — `contextBudget` initial value changed from hardcoded `4096` → `0` (populated from `context_debug` SSE event via `setContextBudget` — already wired in `useSSEChat.ts`).
+- Confirmed the other two context window bugs were already fixed: `context_debug` tokens applied immediately (line 137 in `useSSEChat.ts`), `token_count` pre-populated via `bulkSetContextTokens` on sidebar mount.
+
+### Cleanup
+
+- **`frontend/components/documents/UploadZone.tsx`** — deleted (dead code, never imported, fully superseded by `UploadModal`).
+- **`TODO.md`** — major audit. Marked done: pg_search migration, URL ingestion, health/resources endpoints, F4 collections backend, F4 upload modal, F5 Message.tsx classes, context window fixes. Collapsed stale multi-step sections. Removed outdated implementation notes.
+
+### Now Working On
+
+Redis + Celery infrastructure — adding Redis sidecar to Docker Compose, wiring `db/redis.py`, migrating document processing from `BackgroundTasks` to Celery tasks, then building the research pipeline on top.
+
+---
+
 ## 2026-03-30
 
 ### URL Ingestion — Now Functional
@@ -34,7 +71,7 @@ Removed from TODO and CODEBASE_STATUS. Not worth the implementation cost at this
 | Backend Python files | 26 |
 | Frontend TS/TSX files | 57 |
 | API endpoints | 30 |
-| Database tables | 8 |
+| Database tables | 7 |
 
 ### Backend File Breakdown
 
@@ -49,10 +86,9 @@ Removed from TODO and CODEBASE_STATUS. Not worth the implementation cost at this
 | `api/quizzes.py` | ~20 | Stub |
 | `api/graph.py` | ~20 | Stub |
 | `core/context.py` | ~336 | Token budget, summarization, history |
-| `core/rag.py` | ~272 | BM25 + vector hybrid search, RRF |
+| `core/rag.py` | ~272 | pg_search + vector hybrid search, RRF |
 | `core/ingestion.py` | ~209 | Chunking, embedding, Qdrant upsert |
 | `core/security.py` | ~65 | JWT auth |
-| `core/bm25.py` | ~55 | Per-document BM25 index cache |
 | `db/qdrant.py` | ~95 | httpx Qdrant REST client |
 | `db/postgres.py` | ~60 | asyncpg pool + query helpers |
 | `main.py` | ~94 | FastAPI app, lifespan, admin seed |
@@ -335,7 +371,7 @@ POST /api/chat
            ├─ [if doc_ids or search_all] retrieve(query, user_id, doc_ids, search_all)
            │       ├─ embed query → nomic-embed-text via Ollama
            │       ├─ find_referenced_document() → fuzzy filename match
-           │       ├─ asyncio.gather(qdrant.search(), _bm25_search())
+           │       ├─ asyncio.gather(qdrant.search(), _pg_search())
            │       ├─ reciprocal_rank_fusion(vector_hits, bm25_hits)[:top_k]
            │       └─ batch fetch chunk text from document_chunks WHERE user_id = $2
            │
@@ -360,7 +396,6 @@ POST /api/documents/upload (multipart)
            │
            ├─ extract text (pypdf / python-docx / plain text / faster-whisper for video)
            ├─ chunk_text() — sentence-aware, 500-token chunks, ~50-token overlap
-           ├─ build BM25 index → INSERT bm25_indexes (chunk_ids, corpus)
            ├─ embed all chunks → nomic-embed-text via Ollama
            ├─ qdrant.upsert_points() — payload: document_id, chunk_id, user_id, filename
            ├─ INSERT document_chunks rows
@@ -387,7 +422,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 ---
 
-## Database Tables (8)
+## Database Tables (7)
 
 | Table | Purpose |
 |---|---|
@@ -395,10 +430,9 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | `conversations` | Chat sessions — tier, title, token_count, summary, summarized_up_to_id |
 | `messages` | Individual messages — role, content, model_used, timestamp, rag_sources JSONB |
 | `documents` | Uploaded documents — status, chunk_count, user_id, error_message, collection_id |
-| `document_chunks` | Chunks — text, token_count, qdrant_point_id, user_id |
+| `document_chunks` | Chunks — text, token_count, qdrant_point_id, user_id, filename_normalized |
 | `conversation_documents` | Junction — scopes documents to conversations |
-| `bm25_indexes` | Per-document BM25 corpus — chunk_ids, corpus JSONB |
-| `collections` | User-defined document collections — name, color, user_id |
+| `collections` | User-defined document collections — name, user_id |
 
 ---
 
@@ -450,7 +484,7 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | 2 | ~~High~~ | ~~`MAX_RRF_SCORE` undefined in `rag.py`~~ | ✅ Fixed |
 | 3 | Medium | Summarization in hot path — `_generate_and_cache_summary()` blocks the next user request | `core/context.py` |
 | 4 | Medium | No Celery/Redis — background processing uses FastAPI `BackgroundTasks`; no retries, no persistence across restarts | `api/documents.py` |
-| 5 | Medium | Context window display broken — (a) `contextBudget` hardcoded 4096 in store; (b) `context_debug` tokens held until `done`, not applied immediately; (c) `token_count` never returned by conversations API | `chat.store.ts`, `useSSEChat.ts`, `api/chat.py` |
+| 5 | ~~Medium~~ | ~~Context window display broken — `contextBudget` hardcoded, `context_debug` tokens held until `done`, `token_count` not returned by conversations API~~ | ✅ Fixed — `TOTAL_BUDGET=4096`, `contextBudget` initial=0 (dynamic from SSE), already wired in `useSSEChat.ts` |
 | 6 | ~~Medium~~ | ~~URL ingestion non-functional~~ | ✅ Fixed |
 | 7 | Medium | Storage stats return 0.0 — `/api/system/resources` NVMe/HDD percentages hardcoded to 0 (Redis cache not yet wired) | `api/system.py` |
 | 8 | ~~Medium~~ | ~~`.glass`/`.glass-subtle`/`.glass-strong` class references on multiple components~~ | ✅ Fixed (F2 complete) |
@@ -471,9 +505,9 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | qdrant | ✅ Running | ✅ |
 | crawl4ai | ✅ Running | ✅ |
 | backend | ✅ Running | ✅ |
-| redis | ❌ Missing | Phase 2 |
-| celery worker | ❌ Missing | Phase 2 |
-| celery beat | ❌ Missing | Phase 2 |
+| redis | ✅ Running | ✅ |
+| celery worker | ✅ Running | ✅ |
+| celery beat | ❌ Missing | Phase 8 |
 | nginx | ❌ Missing | Production only |
 | frontend | ❌ Host-only (npm run dev) | Production only |
 
@@ -483,8 +517,8 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 
 | Phase | Status | Notes |
 |---|---|---|
-| Phase 1: Foundation | ~97% | Core chat, RAG, ingestion, auth all working. Missing: Celery/Redis |
-| Phase 2: Document Processing | ~55% | URL ingestion functional; file + URL ingestion both wired end-to-end |
+| Phase 1: Foundation | ✅ ~100% | Core chat, RAG, ingestion, auth, Redis, Celery all working. |
+| Phase 2: Document Processing | ~75% | URL ingestion functional; pg_search BM25 via ParadeDB; Celery tasks for file + URL ingestion. Missing: video transcription, Docling |
 | Phase F1: Design System | ✅ Done | Structural Glass tokens, Slate default, all CSS utility classes |
 | Phase F2: Glass Audit | ✅ Done | All 14 components migrated off glass-subtle/glass-strong |
 | Phase F3: Layout Shell Polish | 0% | AppShell, Sidebar, SystemFooter need token updates |
@@ -525,8 +559,9 @@ Text is **not** stored in Qdrant. `chunk_id` bridges back to `document_chunks` i
 | Upload modal stage 4 | ✅ Removed (stage 3 handles completion) |
 | Chat message anatomy update | ❌ F5 pending |
 | System panel (ArcGauge, Sparkline) | ❌ F6 pending |
-| URL ingestion (real, not preview) | ✅ functional — fetch → chunk → embed → Qdrant → BM25 |
-| Context window display (3 bugs) | ❌ |
+| URL ingestion (real, not preview) | ✅ functional — fetch → chunk → embed → Qdrant → pg_search |
+| RAG scoring display (hybrid/vector badge + V/BM25 breakdown) | ✅ |
+| Context window display (3 bugs) | ✅ Fixed |
 | Token flush throttle | ❌ |
 | Auto-scroll at-bottom detection | ❌ |
 | Suggestion pills | ❌ |

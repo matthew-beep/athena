@@ -18,3 +18,5 @@ psutil
 pynvml
 nltk>=3.9
 crawl4ai>=0.4.0
+celery[redis]>=5.4
+redis>=5.0

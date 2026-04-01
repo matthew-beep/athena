@@ -190,6 +190,7 @@ async def retrieve(
                 for h in vector_hits
                 if h.get("payload", {}).get("chunk_id")
             }
+            bm25_scores = {chunk_id: score for chunk_id, score in bm25_hits}
             ranked_pairs = reciprocal_rank_fusion(vector_hits, bm25_hits)[:top_k]
             ranked_ids = [chunk_id for chunk_id, _ in ranked_pairs]
             rrf_scores = {chunk_id: score for chunk_id, score in ranked_pairs}
@@ -202,6 +203,7 @@ async def retrieve(
                 for h in vector_hits
                 if h.get("payload", {}).get("chunk_id")
             }
+            bm25_scores = {}
             ranked_ids = [cid for h in vector_hits if (cid := h.get("payload", {}).get("chunk_id"))]
             rrf_scores = {}
         if not ranked_ids:
@@ -232,6 +234,8 @@ async def retrieve(
                 "document_id": row["document_id"],
                 "score": rrf_scores.get(chunk_id) if rrf_scores else round(vector_scores.get(chunk_id, 0.0), 3),
                 "score_type": "hybrid" if rrf_scores else "vector",
+                "vector_score": round(vector_scores.get(chunk_id, 0.0), 3),
+                "bm25_score": round(bm25_scores.get(chunk_id, 0.0), 3),
             })
 
         logger.debug("[rag] retrieved {} chunks for query: {!r}", len(sources), query[:60])

@@ -142,7 +142,7 @@ function CitationShutter({
   source,
   onClose,
 }: {
-  source: { filename: string; text: string; chunk_index: number; document_id: string; chunk_id?: string };
+  source: { filename: string; text: string; chunk_index: number; document_id: string; chunk_id?: string; score_type?: string; vector_score?: number; bm25_score?: number };
   onClose: () => void;
 }) {
   return (
@@ -187,6 +187,23 @@ function CitationShutter({
             {source.chunk_index}
           </p>
         </div>
+        {source.score_type && (
+          <div>
+            <p className="text-[9px] font-mono text-muted-foreground/50 uppercase tracking-wider mb-1">
+              Scores
+            </p>
+            <div className="flex gap-3">
+              <span className="text-[10px] font-mono text-muted-foreground/70">
+                V {source.vector_score?.toFixed(3) ?? '—'}
+              </span>
+              {source.score_type === 'hybrid' && (
+                <span className="text-[10px] font-mono text-muted-foreground/70">
+                  BM25 {source.bm25_score && source.bm25_score > 0 ? source.bm25_score.toFixed(2) : '—'}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
         <div>
           <p className="text-[9px] font-mono text-muted-foreground/50 uppercase tracking-wider mb-1">
             Excerpt

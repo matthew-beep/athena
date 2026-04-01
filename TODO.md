@@ -51,33 +51,28 @@ Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scop
 - [ ] **Expose scores in frontend source citations** — `rag_sources` carries `score` and `score_type` but verify `SourcesPanel` in `Message.tsx` actually renders them. Show as a small badge (e.g. `0.87 · hybrid`) next to each source.
 - [ ] **Score breakdown in citation shutter (Option B)** — backend: add `vector_score` and `bm25_score` to each source object in `retrieve()` alongside the existing RRF `score`. Frontend: compact list shows combined score + `hybrid`/`vector` badge; clicking into a source (citation shutter) shows the breakdown — `V 0.84  BM25 3.2` — labeled so it's clear they're on different scales.
 
-### URL Ingestion
-~~**Investigate Crawl4AI response shape**~~ ✓ Done — confirmed via live test. Response is `{ success, results: [{ url, html, markdown: { raw_markdown, markdown_with_citations, fit_markdown, references_markdown }, metadata: { title, description, og:* }, links: { internal, external }, media }] }`. Useful fields: `results[0].markdown.raw_markdown` (text to ingest), `results[0].metadata.title` (display name), `results[0].url` (source ref). `fit_markdown` strips nav/footer noise — worth testing vs `raw_markdown` for embedding quality.
-~~- [ ] **Write `core/crawler.py`**~~ ✓ Done
-~~- [ ] **`_process_url_document()` in `documents.py`**~~ ✓ Done
-~~- [ ] **Wire URL loop in `/upload`**~~ ✓ Done
-- [x] **Frontend URL ingestion UX** — URLs handled in UploadModal queue → stage 3 → progress polling, same flow as files. Error cards, spinner → green check on complete. `UploadZone` was dead code (never imported) and has been deleted.
+### URL Ingestion ✓ Done
+
+`core/crawler.py` → `fetch_url()`, `_process_url_document()` in `api/documents.py`, batch upload endpoint accepts URLs alongside files, UploadModal stage 3 tracks URL progress same as files. `UploadZone` deleted.
 
 ### Pagination + Search
 - [ ] **Backend: search + pagination on `GET /api/documents`** — add `search: str`, `limit: int`, `offset: int` query params. Return `total` count alongside results. Filter: `AND ($n = '' OR filename ILIKE '%' || $n || '%')`.
 - [ ] **Frontend: debounced search + pagination controls** — remove client-side `.filter()` in `DocumentList`. Pass `search` as query param (debounced ~300ms). Add prev/next controls, reset offset on search change.
 
 ### Infrastructure
-- [ ] **Fix context window tracking** — expose `conversations.token_count` in `GET /api/chat/conversations`. Pre-populate `contextTokens[convId]` on load. Apply `context_debug` tokens immediately on SSE event. Fix `contextBudget` hardcoded `4096` in `DevModeOverlay.tsx`.
+- [x] **Fix context window tracking** — `token_count` returned by conversations list, pre-populated via `bulkSetContextTokens` on sidebar mount. `context_debug` tokens applied immediately. `contextBudget` initial value set to `0` (populated from SSE). Backend `TOTAL_BUDGET` corrected to 4096.
 - [ ] **Add SearXNG to Docker Compose** — self-hosted search, same sidecar pattern as Crawl4AI.
-- [ ] **Redis + Celery** — migrate document processing from `BackgroundTasks` to Celery once ingestion paths are stable. Enables retries, parallelism, and survival across restarts. Do this before URL ingestion goes live — URL crawling + file ingestion running concurrently is where sequential BackgroundTasks becomes a real problem.
-- [ ] **Document cancel** — add `_cancelled: set[str]` module-level in `documents.py`. `POST /api/documents/{id}/cancel` adds to set. `_process_document` checks at each stage boundary and calls cleanup (DELETE documents row → cascades chunks, delete Qdrant points). Not immediate — stops at next checkpoint. Low priority until Celery (which gives `revoke(terminate=True)` for free).
+- [x] **Redis + Celery** — `redis:7-alpine` + `celery-worker` added to both compose files. `celery[redis]` + `redis` in requirements. `app/celery_app.py` created. `app/tasks/ingestion.py` — `process_document` and `process_url` Celery tasks. `app/db/redis.py` — sync client with `set/get/delete_progress`. Document processing fully migrated from `BackgroundTasks` to Celery. Progress tracked via Redis instead of in-process dict.
+- [ ] **Document cancel** — `POST /api/documents/{id}/cancel` → Celery `revoke(task_id, terminate=True)`. Requires storing the Celery task ID on the `documents` row at dispatch time.
 
-### pg_search Migration
+### pg_search Migration ✓ Done
 
-**Unknown:** `paradedb/paradedb:16` may need a fresh data volume rather than working as a drop-in with an existing Postgres volume. Test this first before doing anything else.
-
-1. [ ] **Swap Docker image** — `postgres:16-alpine` → `paradedb/paradedb:16` in both compose files. Test drop-in compatibility with existing data volume first.
-2. [ ] **Confirm `filename_normalized` column on `document_chunks`** — it's in the Qdrant payload but may not exist as a DB column. If missing, add it: `ALTER TABLE document_chunks ADD COLUMN filename_normalized TEXT;` and backfill from the `documents` table.
-3. [ ] **Migration `005_pg_search.sql`** — `CREATE EXTENSION IF NOT EXISTS pg_search;`, drop `bm25_indexes` table, create BM25 index on `document_chunks` (key: `chunk_id`, fields: `text` + `filename_normalized` boosted 4×).
-4. [ ] **Rewrite `bm25_search()` in `core/rag.py`** — replace Python `rank_bm25` scoring with SQL: `WHERE text @@@ $1 ORDER BY paradedb.score(chunk_id) DESC`. Scoped path adds `AND document_id = ANY($2)`, search_all path adds `AND user_id = $2`.
-5. [ ] **Delete old BM25 plumbing** — remove `core/bm25.py`, remove `build_bm25_index` calls from `_process_document` and `_process_url_document`, remove `_bm25_cache` + helpers from `rag.py`, remove `rank-bm25` from `requirements.txt`.
-6. [ ] **Test** — upload a doc, ask a question, verify hybrid search + RRF still returns results.
+~~1. Swap Docker image~~ ✓ `paradedb/paradedb:latest-pg16` in both compose files (dropped old volume, fresh schema)
+~~2. Add `filename_normalized` to `document_chunks`~~ ✓ In schema.sql, written on every chunk INSERT
+~~3. Create BM25 index~~ ✓ `CREATE INDEX document_chunks_search_idx USING bm25` in schema.sql
+~~4. Rewrite `bm25_search()`~~ ✓ `_pg_search()` in `core/rag.py` uses `text @@@ $1` + `paradedb.score(chunk_id)`
+~~5. Delete old BM25 plumbing~~ ✓ `core/bm25.py` deleted, `build_bm25_index` removed, `rank-bm25` removed from requirements
+~~6. Test~~ ✓ Hybrid search + RRF working
 
 ---
 
@@ -104,10 +99,10 @@ Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scop
 - [x] **Naive token chunking** — replaced with sentence-aware chunking in `ingestion.py`. Uses nltk
   `sent_tokenize`, 500-token chunks, 50-token sentence-level overlap. PDF hyphenated line breaks normalized.
 - [x] **RAG threshold incompatible with hybrid search** — duplicate of item above; confirmed fixed.
-- [ ] **URL ingestion is a scraper preview, not real ingestion** — `POST /api/documents/url` calls Crawl4AI and returns the raw markdown payload to the frontend. It never creates a `documents` row, never chunks/embeds, never stores in Qdrant. The frontend renders a markdown preview. Nothing is actually ingested. Additionally, the backend doesn't handle the case where `markdown` is an object (`{ raw_markdown, markdown_with_citations }`) — only the string case works.
+- [x] **URL ingestion** — `_process_url_document()` fully implemented. Creates `documents` row, fetches via Crawl4AI (`fit_markdown` → `raw_markdown` fallback), chunks, embeds, stores in Qdrant + Postgres. Runs as `BackgroundTask`. Progress tracked via `/progress/active`.
 - [x] **`MAX_RRF_SCORE` undefined** — removed reference. Fixed.
 - [x] **`httpx` not imported in `main.py`** — added import. Fixed.
-- [ ] **`collections` color column** — reopened. Add `color VARCHAR(20)` to the `collections` table. See Collection Colors section under Next Up.
+- [x] **`collections` color column** — intentionally dropped. Not worth the implementation cost, can be added later if needed.
 - [ ] **No deduplication in RAG** — can return near-identical chunks from the same document. Add a
   minimum chunk distance check or a per-document chunk cap before returning sources.
 - [x] **RAG sources not persisting across page reload** — `save_message` never stored `rag_sources`;
@@ -134,58 +129,19 @@ Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scop
   - Keep extraction inside `asyncio.to_thread` — Docling is compute-heavy
   - Test against: scanned PDF, DOCX with tables, markdown file, plain text
 
-- [ ] **Migrate BM25 to `pg_search` (ParadeDB)** — current `rank_bm25` Python lib is a whitespace
-  tokenizer with no stemming, no fuzzy matching, O(N) in-memory scoring, and ~150 lines of manual
-  cache/rebuild plumbing. `pg_search` (formerly `pg_bm25`) is a Rust/Tantivy Postgres extension
-  with a real inverted index, true BM25 (TF saturation + IDF + length norm), fuzzy matching, and
-  automatic index maintenance on INSERT/UPDATE/DELETE. No Python deps, no cache layer, no manual rebuilds.
-
-  **Migration order:**
-  1. Swap `postgres:16-alpine` → `paradedb/paradedb:16` in both `docker-compose.yml` and
-     `docker-compose.mac.yml`. Drop-in replacement — same env vars, volumes, ports, health check.
-  2. Add `CREATE EXTENSION IF NOT EXISTS pg_search;` to init SQL or new migration.
-  3. Add `filename_normalized` column to `document_chunks` if not already present; backfill from `documents`.
-  4. Write migration: drop `bm25_indexes` table, create BM25 index:
-     ```sql
-     CREATE INDEX document_chunks_search_idx ON document_chunks
-     USING bm25 (chunk_id, text, filename_normalized)
-     WITH (key_field = 'chunk_id');
-     ```
-  5. Rewrite `bm25_search()` in `core/rag.py` — SQL query replaces Python scoring:
-     ```python
-     WHERE text @@@ $1 OR filename_normalized @@@ paradedb.boost(4.0, $1)
-     ORDER BY paradedb.score(chunk_id) DESC LIMIT $2
-     ```
-  6. Test hybrid search end-to-end, compare RRF output vs baseline.
-  7. Delete old BM25 plumbing: `bm25_indexes` table, `_bm25_cache`, `get_or_build_bm25()`,
-     `invalidate_bm25_cache()`, `update_bm25_index()`, `rebuild_bm25_for_tag()`.
-  8. Remove `rank-bm25` from `requirements.txt`.
-  9. Update `find_referenced_document()` — replace exact substring match with `rapidfuzz.fuzz.partial_ratio()`
-     threshold ~75, or drop it entirely and rely on `filename_normalized` field boosting in the BM25 query.
-
-  **What stays the same:** `reciprocal_rank_fusion()`, `hybrid_search()` orchestration, Qdrant vector
-  leg, `asyncpg` connection, all ingestion code.
-- [ ] **Migrate document processing to Celery** — currently using FastAPI `BackgroundTasks`. Move
-  `_process_document` into a Celery task in `tasks/ingestion.py`. API returns task ID immediately.
-  Requires Redis broker and Celery worker added to Docker Compose.
-- [ ] **Redis client** — `db/redis.py` not implemented. Needed for Celery broker, storage stats cache,
-  and future session data.
-- [ ] **`GET /api/system/health`** — not implemented. Should return service status for all deps
-  (Postgres, Qdrant, Ollama, Redis reachability).
-- [ ] **`GET /api/system/resources`** — not implemented. Returns live CPU %, GPU VRAM used/total,
-  RAM used/total. Frontend system footer polls this every 10s.
-- [ ] **`GET /api/system/storage`** — not implemented. Must read from Redis cache only, never compute
-  on request. Celery beat job refreshes every 5 min.
+- [x] **Migrate BM25 to `pg_search` (ParadeDB)** — complete. `paradedb/paradedb:latest-pg16`, `_pg_search()` in `core/rag.py`, `core/bm25.py` deleted, `rank-bm25` removed. See pg_search Migration section above.
+- [x] **Migrate document processing to Celery** — `tasks/ingestion.py` with `process_document` and `process_url` tasks. `api/documents.py` calls `.delay()`. Redis progress tracking via `db/redis.py`.
+- [x] **Redis client** — `db/redis.py` implemented. Sync client (correct for Celery tasks + low-frequency FastAPI reads). `set_progress`, `get_progress`, `delete_progress` helpers with 1h TTL safety expiry.
+- [x] **`GET /api/system/health`** — implemented in `api/system.py`. Checks Postgres, Qdrant, Ollama reachability concurrently.
+- [x] **`GET /api/system/resources`** — implemented. Returns live CPU %, GPU VRAM (pynvml), RAM (psutil). Frontend system footer polls this every 10s.
+- [ ] **`GET /api/system/storage`** — not implemented. Must read from Redis cache only, never compute on request. Blocked on Redis + Celery.
 - [x] **Conversation list endpoint** — `GET /api/chat/conversations` implemented at `chat.py:272`.
 - [x] **Conversation history endpoint** — implemented at `chat.py:287` as
   `GET /api/chat/conversations/{id}/messages`.
 
 ### Phase 2: Document Processing
 
-- [ ] **Web URL scraping** — wire Crawl4AI into `POST /api/documents/url`. Currently returns 501.
-  Use FastAPI `BackgroundTasks` (same as PDF upload) for now — no Celery needed yet. Crawl4AI fetches
-  URL → returns markdown → same chunk → embed → Qdrant pipeline as file upload. Returns `document_id`
-  immediately. **This is the #1 priority** — unblocks URL UI and research pipeline Stage 1.
+- [x] **Web URL scraping** — `_process_url_document()` implemented. Crawl4AI → markdown → chunk → embed → Qdrant + Postgres. BackgroundTask, progress tracked.
 - [ ] **Video/audio ingestion** — Faster-Whisper transcription already stubbed in `ingestion.py` but
   not connected to the Celery pipeline. Wire it up: yt-dlp download → Whisper transcription → chunk → embed.
 - [x] **Bulk document progress endpoint** — `GET /api/documents/progress/active` returns a
@@ -491,7 +447,7 @@ The old `.glass`, `.glass-subtle`, `.glass-strong` classes are no longer defined
 - [x] **`DevModeOverlay.tsx`** — `glass-subtle` → `bg-[var(--surface-2)] border border-[var(--border)]`.
 
 **Documents:**
-- [ ] **`UploadZone.tsx`** — still has `.glass`. Drop zone: `bg-[var(--raised)] border border-dashed border-[var(--border-s)]`. Dragover: `border-[var(--blue-br)] bg-[var(--blue-b)]`. (Low priority — UploadZone is largely superseded by UploadModal)
+- [x] **`UploadZone.tsx`** — deleted (was dead code, never imported anywhere, fully superseded by UploadModal)
 - [x] **`DocumentList.tsx`** — row cards, icon box, Chat button: `glass`/`glass-subtle` → `bg-[var(--raised/raised-h)] border border-[var(--border)]`.
 
 **Other:**
@@ -512,17 +468,16 @@ The old `.glass`, `.glass-subtle`, `.glass-strong` classes are no longer defined
 
 Full spec in `frontend_design_vision.md` → Library View section.
 
-**Backend — Collections API**
-- [ ] Add `collections` table to schema: `(id SERIAL PK, collection_id VARCHAR UNIQUE, user_id INT FK, name VARCHAR, color VARCHAR, created_at TIMESTAMP)`. Add migration `004_collections.sql`.
-- [ ] Add `collection_id VARCHAR` nullable FK column to `documents` table. Migration `004`.
-- [ ] `GET /api/collections` — list all collections for current user, include `document_count` via COUNT join
-- [ ] `POST /api/collections` — create collection `{ name, color }`. Auto-generate `collection_id`. Return full object.
-- [ ] `PUT /api/collections/{collection_id}` — rename or recolor
-- [ ] `DELETE /api/collections/{collection_id}` — delete collection, set `collection_id = NULL` on all its documents (don't delete docs)
-- [ ] `POST /api/collections/{collection_id}/documents` — assign documents `{ document_ids: list[str] }` to collection. Batch update.
-- [ ] `DELETE /api/collections/{collection_id}/documents/{document_id}` — remove single doc from collection (sets `collection_id = NULL`)
-- [ ] Update `GET /api/documents` — add optional `collection_id` query param to filter. Include `collection_id` + `collection_name` + `collection_color` in each document row response.
-- [ ] Update `DocumentOut` model in `models/documents.py` — add `collection_id`, `collection_name`, `collection_color` fields (all nullable)
+**Backend — Collections API** ✓ Done
+- [x] `collections` table in schema (no color — intentionally dropped)
+- [x] `collection_id` FK on `documents`
+- [x] `GET /api/collections` — with `document_count`
+- [x] `POST /api/collections` — create with `{ name }`
+- [x] `PUT /api/collections/{collection_id}` — rename
+- [x] `DELETE /api/collections/{collection_id}` — sets `collection_id = NULL` on docs
+- [x] `POST /api/collections/{collection_id}/documents` — batch assign
+- [x] `DELETE /api/collections/{collection_id}/documents/{document_id}` — unassign
+- [x] `GET /api/documents` — `collection_id` filter param, `collection_name` in response
 
 **Frontend — Layout shell**
 - [ ] Rebuild the documents tab as a two-pane layout inside `.panel`:
@@ -561,21 +516,14 @@ Full spec in `frontend_design_vision.md` → Library View section.
   - Video: `bg: var(--amber-a)`, `border: 1px solid var(--amber-br)`, `color: var(--amber)`, label "VID"
   - Font: `var(--fm)`, `8.5px`, `700`
 
-**Frontend — Upload modal (4-stage)**
-- [ ] Replace current `UploadZone` flat zone with a proper modal triggered by the "Import" button
-- [ ] Modal overlay: `background: rgba(7,7,9,0.72)`, `backdrop-filter: blur(8px)`. Modal card: `background: var(--surface-2)`, `border-radius: 20px`, `box-shadow: var(--panel-shadow)`, `width: 520px`
-- [ ] Modal header: "Import Documents" title + 4 small progress bars (3px height, fills blue as stages advance) + × close button
-- [ ] **Stage 1 — Drop**: dashed dropzone (`border: 1.5px dashed var(--border-s)`, highlights `var(--blue-br)` on dragover) + "or paste a URL" input below + format pills (PDF / MD / TXT / DOCX / Web / Video)
-- [ ] **Stage 2 — Configure**: file list with `FileTypeBadge` + filename + × remove per file. Below: "Save to collection" picker (inline color-dot buttons, one per collection + "No collection"). Three toggle rows using `.toggle`: "Sentence-aware chunking" (on by default), "Auto-tag", "Generate summary". "Start Import" primary button.
-- [ ] **Stage 3 — Processing**: per-file row: `FileTypeBadge` + filename + animated progress bar + phase label (`Parsing → Chunking → Embedding`) + mono percentage. Spinner → green check on complete. No close/back while processing.
-- [ ] **Stage 4 — Done**: green check circle (32px, `var(--green)`). "Import complete" heading. File list with chunk counts in mono. "View in Library" primary button closes modal + scrolls to new docs. "Import more" ghost button resets to Stage 1.
-- [ ] Wire Stage 3 to existing `GET /api/documents/progress/active` polling (same pattern as current `DocumentList`)
+**Frontend — Upload modal** ✓ Done (3-stage, stage 4 intentionally removed)
+- [x] `UploadModal.tsx` — 3-stage modal (Add Files → Save to Collection → Indexing). Triggered by Import button. TypeBadge inline. URL + file queue mixed. Stage 3 wired to `/progress/active` polling. Spinner → green check on complete.
 
 #### Phase F5: Chat View Update
 
 Message anatomy classes are now defined in globals.css (`.msg-user`, `.msg-ai`) — components just need to apply them.
 
-- [ ] **`Message.tsx`** — wire `.msg-user` and `.msg-ai` classes (covered in F2 above). Verify asymmetric border-radius: AI `4px 13px 13px 13px`, user `13px 13px 4px 13px`.
+- [x] **`Message.tsx`** — `.msg-user` / `.msg-ai` / `.message-content` applied.
 - [ ] **Chat header** — add model status indicator: `6px` green pulse dot + model name in `var(--fm)` + tier badge. Sits in the panel header row alongside the "Chat" title.
 - [ ] **Suggestion pills** — 3–4 `.pill` buttons above `MessageInput`, adapt to context: no docs → generic ("Summarize my docs", "Quiz me on…"), docs in scope → "Summarize all", "Find contradictions", "Key takeaways", research mode → "Key findings", "Compare sources". Click pre-fills textarea.
 - [ ] **Quote block style** — add to `message-content` in globals.css: `blockquote { border-left: 2px solid var(--blue); padding-left: 12px; color: var(--t2); font-style: italic; margin: 0.5rem 0; }`
@@ -589,7 +537,7 @@ Message anatomy classes are now defined in globals.css (`.msg-user`, `.msg-ai`) 
 - [ ] **`Sparkline` component** — `components/system/Sparkline.tsx`. Pure SVG `<polyline>`. Accept `values: number[]`, normalize to SVG height, `1.5px` colored stroke, no axes, no fill. Props: `values`, `color`, `width`, `height`.
 - [ ] **`SystemPanel.tsx`** — rebuild using new components. Sections: Active Model (name `var(--fm)` + Tok/s + TTFT + `<Sparkline>`) · GPU (`<ArcGauge>` + VRAM `.prog-bar` + temp `.prog-bar`) · System RAM (total mono + bar + Ollama/Qdrant/PG breakdown) · Context Window (token count + bar + 4 mini stat cards: System / Docs / History / Buffer) · CPU (percentage + `<Sparkline>`).
 - [ ] **Mini stat card** — `48px` wide, `background: var(--raised)`, `border: 1px solid var(--border)`, `border-radius: 6px`. Label `10px/--t4/uppercase`, value `12px/--fm/--t1`.
-- [ ] **Backend: `GET /api/system/resources`** — not yet implemented. Returns live CPU %, GPU VRAM used/total/temp, RAM used/total, per-process RAM (Ollama, Qdrant, PG). Frontend polls every 10s.
+- [x] **Backend: `GET /api/system/resources`** — implemented in `api/system.py`. CPU (psutil), RAM (psutil), GPU VRAM (pynvml, graceful fallback). Frontend polls every 10s.
 
 ---
 
@@ -606,8 +554,6 @@ Message anatomy classes are now defined in globals.css (`.msg-user`, `.msg-ai`) 
 ### Chat: Other Modes
 
 - [ ] **Start chat from document** — see "Priority 1: Document Chat" section above.
-- [ ] **`contextBudget` hardcoded to 4096** — `chat.store.ts` has `contextBudget: 4096`. Backend
-  uses 8192. Fix to 8192 or fetch from backend `context_debug` SSE event (already emitted).
 
 ### Chat: UX Polish
 
@@ -638,16 +584,11 @@ Message anatomy classes are now defined in globals.css (`.msg-user`, `.msg-ai`) 
 
 ### Web Scraping Integration
 
-- [x] **Crawl4AI Docker sidecar** — `unclecode/crawl4ai:latest` added to `docker-compose.yml`. Backend calls `http://crawl4ai:11235/crawl` via httpx. No Python package needed.
-- [x] **`POST /api/documents/url` wired to Crawl4AI** — endpoint exists, calls Crawl4AI, returns raw markdown response. Not real ingestion — see bug above.
-- [ ] **Validate Crawl4AI response shape** — add debug endpoint or log raw payload for article/docs/YouTube URLs. Confirm whether `markdown` is always a string or sometimes `{ raw_markdown, ... }`. Do this before writing the ingestion pipeline.
-- [ ] **Complete URL ingestion backend** — after shape confirmed: add `BackgroundTasks` + DB INSERT, call `_process_document`, return `document_id`. Extract crawl logic into `core/crawler.py` as `scrape_url(url) -> str`.
-- [ ] **Frontend: URL ingestion UX** — loading state on "Ingest URL" button, error feedback card (matches file failed style), clear input on success, integrate `onUploadStart`/`onUploadComplete` so URL docs appear in the processing list with the same progress bar treatment. Add Enter key submit. Remove `urlIngestionResult` debug display.
-- [ ] **Frontend: URL zone design** — merge tab strip + content into a single glass card (tabs as header, content below). Remove `cursor-pointer` from outer div. URL icon (Globe) in document list for web-sourced docs.
-- [ ] **Backend: SearXNG Docker sidecar + client** — add SearXNG to `docker-compose.yml` (same pattern as Crawl4AI). Add `search(query) -> [urls]` to `core/crawler.py`. Read `SEARXNG_URL` from env; fall back to SerpAPI if set, skip if neither configured.
-- [ ] **Frontend: research tab URL/topic input** — Research tab is a stub. Add topic text input +
-  "Research" button that POSTs to `POST /api/research`. Show progress via WebSocket
-  (`WS /ws/research/{id}`). Display synthesis on completion.
+- [x] **Crawl4AI Docker sidecar** — `unclecode/crawl4ai:latest` in both compose files.
+- [x] **URL ingestion backend** — `fetch_url()` in `core/crawler.py`, `_process_url_document()` in `api/documents.py`. `fit_markdown` → `raw_markdown` fallback. Newline pre-splitting before `sent_tokenize` to prevent nav-block overflow. Full chunk → embed → Qdrant + Postgres pipeline.
+- [x] **Frontend URL ingestion UX** — URLs in UploadModal queue → stage 3 progress, same as files. `UploadZone` deleted.
+- [ ] **Backend: SearXNG Docker sidecar + client** — add SearXNG to `docker-compose.yml`. `search(query) -> [urls]` in `core/crawler.py`. Read `SEARXNG_URL` from env; fall back to SerpAPI if set, skip if neither.
+- [ ] **Frontend: research tab** — stub. Add topic input + "Research" button → `POST /api/research`. Progress via WebSocket. Display synthesis on completion.
 
 ### Other Tabs (Stubs)
 
@@ -673,10 +614,36 @@ Message anatomy classes are now defined in globals.css (`.msg-user`, `.msg-ai`) 
 
 ---
 
+## Auth Hardening (pre-public exposure)
+
+Do not implement until Athena is being shared beyond the local machine or Tailscale.
+Trigger: right before adding Nginx + Let's Encrypt for internet exposure.
+
+- [ ] **Switch to httpOnly cookie auth** — replace current JWT-in-memory/localStorage pattern.
+  Login endpoint sets two httpOnly, Secure, SameSite=Strict cookies: `access_token` (30 min) and
+  `refresh_token` (30 days, path scoped to `/api/auth/refresh`). No token ever touches JS.
+- [ ] **Refresh tokens table** — new Postgres table `refresh_tokens`: `id UUID PK`, `user_id INT FK`,
+  `token_hash TEXT` (store bcrypt hash, never plaintext), `expires_at TIMESTAMPTZ`, `revoked BOOL DEFAULT false`.
+- [ ] **POST /api/auth/refresh endpoint** — reads refresh cookie, validates hash against DB, checks
+  not revoked and not expired, sets a new access_token cookie. Returns 401 if invalid.
+- [ ] **POST /api/auth/logout endpoint** — marks refresh token `revoked = true` in DB, clears both cookies.
+- [ ] **Update get_current_user** — `core/security.py` reads token from Cookie dependency instead of
+  Authorization header. `jwt.decode` throws `ExpiredSignatureError` on stale tokens → 401.
+- [ ] **Frontend fetchWithRefresh interceptor** — wrap all API calls. On 401: POST /api/auth/refresh,
+  if ok retry original request, if fail call logout() and redirect to login. Remove all manual
+  Authorization header injection from apiClient.
+- [ ] **Auth store becomes UI-only** — remove token from Zustand state entirely. Store only `user: UserOut | null`.
+  On app boot, GET /api/auth/me to rehydrate — valid cookie returns user, 401 means not logged in.
+- [ ] **Audit all queries for user_id isolation** — every endpoint that touches documents,
+  conversations, collections, chunks must filter by `user_id` from the JWT claim, never from the
+  request body. This should be done before any of the above.
+
+---
+
 ## Infrastructure
 
-- [ ] **Full Docker Compose** — current compose has 5 services (postgres, ollama, init-ollama, qdrant, backend).
-  Missing: Redis, Celery worker, Celery beat, Nginx, frontend container.
+- [ ] **Full Docker Compose** — current compose has 7 services (postgres, ollama, init-ollama, qdrant, crawl4ai, redis, backend, celery-worker).
+  Missing: Celery beat, Nginx, frontend container.
 - [ ] **Nginx config** — `nginx.conf` needs SSE-specific config: `proxy_buffering off`,
   `proxy_cache off`, `chunked_transfer_encoding on` for `/api/chat`.
 - [ ] **Volume mounts** — hot storage (`/mnt/data`) and bulk storage (`/mnt/storage`) paths need to
@@ -695,7 +662,7 @@ Message anatomy classes are now defined in globals.css (`.msg-user`, `.msg-ai`) 
   Fine for local dev; tighten to specific methods/headers before any non-localhost exposure.
 - [x] **Context window display fixed** — (1) `contextBudget` initial value corrected to `0` (populated from `context_debug` SSE event via `setContextBudget`); (2) `context_debug` tokens applied immediately on event fire, not just on `done`; (3) `token_count` returned by conversations list API and pre-populated via `bulkSetContextTokens` on sidebar mount. Backend `TOTAL_BUDGET` corrected to 4096 to match actual `qwen2.5:7b` Ollama context.
 - [ ] **`token_count` drift** — `save_message` counts only raw content tokens but `count_tokens()` adds 4 tokens overhead per message. Cached `token_count` drifts low over time, causing the fast path to load all history when it may be over budget. Fix: add the 4-token overhead in `save_message`.
-- [ ] **`score_type` not forwarded in done event** — `chat.py` builds `rag_sources` for the SSE `done` event but omits `score_type`. Add it so the frontend can label hybrid vs vector scores differently.
+- [x] **`score_type` forwarded in done event** — `chat.py` includes `score_type`, `vector_score`, `bm25_score` in `rag_sources`. Frontend `Message.tsx` shows hybrid/vector badge; citation shutter shows V + BM25 score breakdown.
 - [ ] **Summarization blocks the next message** — `_generate_and_cache_summary()` in `context.py`
   runs in the hot path of the user's next request. Fire it as a background task after the previous
   assistant response completes instead.

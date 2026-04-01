@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     crawl4ai_host: str = "crawl4ai"
     crawl4ai_port: int = 11235
 
+    # Redis
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+
     # Auth
     jwt_secret_key: str = "supersecretkey-change-in-production"
     jwt_algorithm: str = "HS256"
@@ -55,6 +59,10 @@ class Settings(BaseSettings):
     @property
     def qdrant_base_url(self) -> str:
         return f"http://{self.qdrant_host}:{self.qdrant_port}"
+
+    @property
+    def redis_url(self) -> str:
+        return f"redis://{self.redis_host}:{self.redis_port}/0"
 
     class Config:
         env_file = str(_ROOT_ENV)

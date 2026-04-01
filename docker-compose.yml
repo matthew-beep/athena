@@ -58,6 +58,19 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   crawl4ai:
     image: unclecode/crawl4ai:latest
     ports:
@@ -87,10 +100,15 @@ services:
       CRAWL4AI_HOST: crawl4ai
       CRAWL4AI_PORT: 11235
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     depends_on:
       postgres:
         condition: service_healthy
       ollama:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -100,7 +118,35 @@ services:
       retries: 10
       start_period: 10s
 
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2
+    volumes:
+      - ./backend/app:/app/app
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-athena}
+      POSTGRES_USER: ${POSTGRES_USER:-athena}
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      OLLAMA_HOST: ollama
+      OLLAMA_PORT: 11434
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   ollama_models:
   qdrant_data:
+  redis_data:

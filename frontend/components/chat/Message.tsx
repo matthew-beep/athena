@@ -82,9 +82,9 @@ function SourcesPanel({ sources }: { sources: RagSource[] }) {
                   <span className="text-[10px] text-muted-foreground truncate flex-1 font-mono">
                     {src.filename}
                   </span>
-                  {src.score > 0 && (
-                    <span className="text-[10px] font-mono text-muted-foreground/50 flex-shrink-0">
-                      {Math.round(src.score * 100)}%
+                  {src.score_type && (
+                    <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-muted/40 text-muted-foreground/50 flex-shrink-0">
+                      {src.score_type}
                     </span>
                   )}
                 </button>

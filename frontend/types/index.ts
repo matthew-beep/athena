@@ -39,6 +39,9 @@ export interface ConversationDocument {
 export interface RagSource {
   filename: string;
   score: number;
+  score_type?: 'hybrid' | 'vector';
+  vector_score?: number;
+  bm25_score?: number;
   chunk_index: number;
   document_id: string;
   text: string;

@@ -1,27 +1,18 @@
-import asyncio
-import hashlib
+import base64
 import uuid
-from datetime import datetime, timezone
-from io import BytesIO
 
-import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Query
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from app.config import get_settings
 from app.core.security import get_current_user
-from app.core.ingestion import extract_text, chunk_text, VIDEO_MIME_TYPES, _resolve_mime, normalize_filename
-from app.db import postgres
-from app.db import qdrant
+from app.core.ingestion import VIDEO_MIME_TYPES, _resolve_mime
 from app.core.crawler import fetch_url
+from app.db import postgres, qdrant
+from app.db import redis as redis_store
+from app.tasks.ingestion import process_document, process_url
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
-
-# ── In-process progress store ──────────────────────────────────────────────────
-# Keyed by document_id. Cleared when processing finishes (success or error).
-# Shape: { "stage": str, "done": int, "total": int }
-_progress: dict[str, dict] = {}
 
 ALLOWED_TYPES = {
     "application/pdf",
@@ -50,223 +41,6 @@ _MIME_TO_TYPE = {
     "audio/wav": "audio",
     "audio/mp4": "audio",
 }
-
-
-def _chunk_id_to_qdrant_id(chunk_id: str) -> int:
-    """Deterministic uint64 Qdrant point ID derived from chunk_id."""
-    return int.from_bytes(hashlib.sha256(chunk_id.encode()).digest()[:8], "big")
-
-
-async def _embed(client: httpx.AsyncClient, text: str) -> list[float]:
-    settings = get_settings()
-    resp = await client.post(
-        f"{settings.ollama_base_url}/api/embeddings",
-        json={"model": settings.ollama_embed_model, "prompt": text},
-        timeout=60.0,
-    )
-    if not resp.is_success:
-        logger.error("Ollama embed error {}: {}", resp.status_code, resp.text)
-        resp.raise_for_status()
-    return resp.json()["embedding"]
-
-
-async def _process_document(
-    document_id: str, body: bytes, mime: str, filename: str, file_type: str, user_id: int
-) -> None:
-    """Full ingestion pipeline: extract → chunk → embed → store."""
-    try:
-        # ── 1. Extract ─────────────────────────────────────────────────────
-        _progress[document_id] = {"stage": "extracting", "done": 0, "total": 0}
-        text, error = await asyncio.to_thread(extract_text, BytesIO(body), mime, filename)
-        normalized_filename = normalize_filename(filename)
-        if error:
-            _progress.pop(document_id, None)
-            await postgres.execute(
-                "UPDATE documents SET processing_status='error', error_message=$1 WHERE document_id=$2",
-                error, document_id,
-            )
-            logger.warning("Extraction failed for {}: {}", document_id, error)
-            return
-
-        # ── 2. Chunk ───────────────────────────────────────────────────────
-        _progress[document_id] = {"stage": "chunking", "done": 0, "total": 0}
-        chunks = chunk_text(text)
-        word_count = len(text.split())
-
-        if not chunks:
-            _progress.pop(document_id, None)
-            await postgres.execute(
-                "UPDATE documents SET processing_status='error', error_message='No content to chunk' WHERE document_id=$1",
-                document_id,
-            )
-            return
-
-        total = len(chunks)
-        logger.info("Document {}: {} words → {} chunks", document_id, word_count, total)
-
-        # ── 3. Embed + store ───────────────────────────────────────────────
-        _progress[document_id] = {"stage": "embedding", "done": 0, "total": total}
-        qdrant_points = []
-
-        async with httpx.AsyncClient() as client:
-            for chunk in chunks:
-                i = chunk["chunk_index"]
-                chunk_id = f"{document_id}_chunk_{i}"
-
-                try:
-                    embedding = await _embed(client, chunk["text"])
-                except Exception as e:
-                    logger.error("Embedding failed for chunk {} of {}: {}", i, document_id, e)
-                    raise
-
-                await postgres.execute(
-                    """INSERT INTO document_chunks
-                           (chunk_id, document_id, chunk_index, text, token_count, qdrant_point_id, user_id, filename_normalized)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                       ON CONFLICT (chunk_id) DO NOTHING""",
-                    chunk_id, document_id, i,
-                    chunk["text"], chunk["token_count"],
-                    str(_chunk_id_to_qdrant_id(chunk_id)),
-                    user_id, normalized_filename,
-                )
-
-                qdrant_points.append({
-                    "id": _chunk_id_to_qdrant_id(chunk_id),
-                    "vector": embedding,
-                    "payload": {
-                        "document_id": document_id,
-                        "user_id": user_id,
-                        "chunk_id": chunk_id,
-                        "filename": filename,
-                        "normalized_filename": normalized_filename,
-                        "chunk_index": i,
-                        "source_type": file_type,
-                        "knowledge_tier": "persistent",
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                    },
-                })
-
-                _progress[document_id] = {"stage": "embedding", "done": i + 1, "total": total}
-
-        # ── 4. Upsert Qdrant ──────────────────────────────────────────────────
-        await qdrant.ensure_collection()
-        await qdrant.upsert_points(qdrant_points)
-
-
-        # ── 5. Complete ────────────────────────────────────────────────────
-        _progress.pop(document_id, None)
-        await postgres.execute(
-            """UPDATE documents
-               SET processing_status='complete', word_count=$1, chunk_count=$2
-               WHERE document_id=$3""",
-            word_count, total, document_id,
-        )
-        logger.info("Document {} ingested: {} chunks", document_id, total)
-
-    except Exception:
-        _progress.pop(document_id, None)
-        logger.exception("Unexpected error processing document {}", document_id)
-        await postgres.execute(
-            "UPDATE documents SET processing_status='error', error_message='Internal processing error' WHERE document_id=$1",
-            document_id,
-        )
-
-
-async def _process_url_document(document_id: str, url: str, user_id: int) -> None:
-    """URL ingestion pipeline: fetch → chunk → embed → store."""
-    try:
-        # ── 1. Fetch ───────────────────────────────────────────────────────
-        _progress[document_id] = {"stage": "fetching", "done": 0, "total": 0}
-        await postgres.execute(
-            "UPDATE documents SET processing_status='processing' WHERE document_id=$1",
-            document_id,
-        )
-        result = await fetch_url(url)
-        text = result.markdown
-        title = result.title or url
-        normalized_title = normalize_filename(title)
-
-        # ── 2. Chunk ───────────────────────────────────────────────────────
-        _progress[document_id] = {"stage": "chunking", "done": 0, "total": 0}
-        chunks = chunk_text(text)
-        word_count = result.word_count
-
-        if not chunks:
-            _progress.pop(document_id, None)
-            await postgres.execute(
-                "UPDATE documents SET processing_status='error', error_message='No content to chunk' WHERE document_id=$1",
-                document_id,
-            )
-            return
-
-        total = len(chunks)
-        logger.info("URL document {}: {} words → {} chunks", document_id, word_count, total)
-
-        # ── 3. Embed + store ───────────────────────────────────────────────
-        _progress[document_id] = {"stage": "embedding", "done": 0, "total": total}
-        qdrant_points = []
-
-        async with httpx.AsyncClient() as client:
-            for chunk in chunks:
-                i = chunk["chunk_index"]
-                chunk_id = f"{document_id}_chunk_{i}"
-
-                try:
-                    embedding = await _embed(client, chunk["text"])
-                except Exception as e:
-                    logger.error("Embedding failed for chunk {} of {}: {}", i, document_id, e)
-                    raise
-
-                await postgres.execute(
-                    """INSERT INTO document_chunks
-                           (chunk_id, document_id, chunk_index, text, token_count, qdrant_point_id, user_id, filename_normalized)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                       ON CONFLICT (chunk_id) DO NOTHING""",
-                    chunk_id, document_id, i,
-                    chunk["text"], chunk["token_count"],
-                    str(_chunk_id_to_qdrant_id(chunk_id)),
-                    user_id, normalized_title,
-                )
-
-                qdrant_points.append({
-                    "id": _chunk_id_to_qdrant_id(chunk_id),
-                    "vector": embedding,
-                    "payload": {
-                        "document_id": document_id,
-                        "user_id": user_id,
-                        "chunk_id": chunk_id,
-                        "filename": title,
-                        "normalized_filename": normalized_title,
-                        "chunk_index": i,
-                        "source_type": "web",
-                        "knowledge_tier": "persistent",
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                    },
-                })
-
-                _progress[document_id] = {"stage": "embedding", "done": i + 1, "total": total}
-
-        # ── 4. Upsert Qdrant ──────────────────────────────────────────────────
-        await qdrant.ensure_collection()
-        await qdrant.upsert_points(qdrant_points)
-
-        # ── 5. Complete ────────────────────────────────────────────────────
-        _progress.pop(document_id, None)
-        await postgres.execute(
-            """UPDATE documents
-               SET processing_status='complete', filename=$1, word_count=$2, chunk_count=$3
-               WHERE document_id=$4""",
-            title, word_count, total, document_id,
-        )
-        logger.info("URL document {} ingested: {} chunks", document_id, total)
-
-    except Exception:
-        _progress.pop(document_id, None)
-        logger.exception("Unexpected error processing URL document {}", document_id)
-        await postgres.execute(
-            "UPDATE documents SET processing_status='error', error_message='Internal processing error' WHERE document_id=$1",
-            document_id,
-        )
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -305,7 +79,6 @@ async def list_documents(
 
 @router.post("/upload")
 async def upload_documents(
-    background_tasks: BackgroundTasks,
     files: list[UploadFile] = File([]),
     urls: list[str] = Form([]),
     collection_id: str | None = Form(None),
@@ -346,7 +119,7 @@ async def upload_documents(
             document_id, filename, file_type, current_user["id"], collection_id or None,
         )
 
-        background_tasks.add_task(_process_document, document_id, body, mime, filename, file_type, current_user["id"])
+        process_document.delay(document_id, base64.b64encode(body).decode(), mime, filename, file_type, current_user["id"])
         logger.info("Upload accepted: {} → {}", filename, document_id)
 
         results.append({
@@ -368,7 +141,7 @@ async def upload_documents(
                VALUES ($1, $2, 'web', 'pending', 0, $3, $4)""",
             document_id, url, current_user["id"], collection_id or None,
         )
-        background_tasks.add_task(_process_url_document, document_id, url, current_user["id"])
+        process_url.delay(document_id, url, current_user["id"])
         logger.info("URL queued for crawl: {} → {}", url, document_id)
         results.append({
             "type": "url",
@@ -384,9 +157,6 @@ async def upload_documents(
 
 @router.post("/url")
 async def ingest_url(body: dict, current_user: dict = Depends(get_current_user)):
-    settings = get_settings()
-
-    crawl4ai_base_url = f"http://{settings.crawl4ai_host}:{settings.crawl4ai_port}"
     url = body.get("url")
 
     if not url:
@@ -415,7 +185,7 @@ async def get_active_progress(current_user: dict = Depends(get_current_user)):
     for row in rows:
         doc_id = row["document_id"]
         status = row["processing_status"]
-        prog = _progress.get(doc_id)
+        prog = redis_store.get_progress(doc_id)
         if prog is not None:
             result[doc_id] = {**prog, "active": True, "processing_status": status}
         else:
@@ -424,10 +194,9 @@ async def get_active_progress(current_user: dict = Depends(get_current_user)):
 
 @router.get("/{document_id}/progress")
 async def get_document_progress(document_id: str, current_user: dict = Depends(get_current_user)):
-    prog = _progress.get(document_id)
+    prog = redis_store.get_progress(document_id)
     if prog is not None:
         return {**prog, "active": True}
-    # Not actively processing — return DB status as fallback
     row = await postgres.fetch_one(
         "SELECT processing_status FROM documents WHERE document_id = $1 AND user_id = $2", document_id, current_user["id"],
     )
@@ -485,6 +254,6 @@ async def delete_document(document_id: str, current_user: dict = Depends(get_cur
         logger.warning("Qdrant delete failed for {} — vectors may linger", document_id)
 
     # Clear any in-progress state
-    _progress.pop(document_id, None)
+    redis_store.delete_progress(document_id)
 
     return {"deleted": document_id}
