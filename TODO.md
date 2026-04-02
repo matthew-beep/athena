@@ -400,6 +400,28 @@ On × remove:        DELETE /api/chat/{conv_id}/documents/{id} ← already exist
   is non-empty and no documents are in scope. Each row has filename + score + [+ Pin] button.
   Pinning calls the attach endpoint and moves the doc to the In Scope card.
 
+### Citation UX Overhaul
+
+**Problem:** RAG citations are currently disconnected from retrieved content in two ways. First, inline `[1]`, `[2]` references in the model response have no traceable link to the sources panel — there's no numbered correspondence between what the model cites and what's shown. Second, the sources panel collapses all chunks from a file into one row (highest score only), so if 3 chunks from `paper.md` were sent to the LLM you only see one — no visibility into the full retrieval set or individual chunk scores. The goal is to make citations feel like a research tool: click `[1]` in the response and immediately read the exact passage, expand a file to see all retrieved chunks ranked by score.
+
+**Target UX:**
+- Sources panel shows one row per file with chunk count + score type + pin button: `[1] paper.md · 3 chunks · hybrid [pin]`
+- Expanding a file row reveals all its chunks ranked by score, each with a short excerpt and a click-to-shutter action
+- Inline `[n]` in the response text are clickable chips — click opens the citation shutter for that exact chunk
+- Chip hover shows a ~120 char tooltip preview of the chunk without needing to open the shutter
+
+### Clickable Inline Citations
+
+- [ ] **Custom markdown renderer for `[n]` citations** — override the `p` renderer in `react-markdown`
+  via the `components` prop. Split text nodes on `/(\[\d+\])/g`, map matches to a `CitationChip`
+  component. `[1]` → index 0 in `rag_sources` array for that message.
+- [ ] **`CitationChip` component** — small inline superscript badge: monospace, subtle blue border,
+  `bg-blue-500/10`. Hover shows a tooltip with the first ~120 chars of the chunk excerpt.
+  Click calls `setCitationShutter(source)` to open the existing citation shutter with that chunk.
+- [ ] **Numbered source rows in SourcesPanel** — add `[n]` prefix to each row in the sources panel
+  so `[1]` in the response text visually maps to `[1]` in the panel. Ordering must match
+  the `rag_sources` array order (already ranked by score from backend).
+
 ### Frontend Redesign — Structural Glass
 
 Full design spec in `frontend_design_vision.md`. Two themes: Slate (dark default) + Light.

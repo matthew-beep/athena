@@ -100,7 +100,6 @@ services:
       CRAWL4AI_HOST: crawl4ai
       CRAWL4AI_PORT: 11235
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
-    environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
     depends_on:

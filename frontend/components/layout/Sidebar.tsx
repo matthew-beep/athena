@@ -15,7 +15,8 @@ import {
   LogOut,
   ChevronLeft,
   X,
-  PanelLeft
+  PanelLeft,
+  Home
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chat.store';
 import { useAuthStore } from '@/stores/auth.store';
@@ -25,6 +26,7 @@ import { cn } from '@/utils/cn';
 import type { Conversation, Message } from '@/types';
 
 const NAV_ITEMS = [
+  { href: '/', label: 'Home', icon: Home },
   { href: '/chat', label: 'Chat', icon: MessageSquare },
   { href: '/research', label: 'Research', icon: Search },
   { href: '/graph', label: 'Knowledge', icon: Network },
@@ -126,7 +128,10 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
         {/* Main navigation */}
         <nav className="space-y-0.5 w-full">
           {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-            const active = pathname.startsWith(href);
+            const active =
+              href === '/'
+                ? pathname === '/'
+                : pathname === href || pathname.startsWith(`${href}/`);
             if (collapsed) {
               return (
                 <Link

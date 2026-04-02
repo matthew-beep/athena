@@ -52,6 +52,8 @@ function SourcesPanel({ sources }: { sources: RagSource[] }) {
 
   const [open, setOpen] = useState(false);
 
+  // TODO: re do deduped to show chunk rather than unique document 
+
   return (
     <div className="px-1 mt-0.5">
       {/* Toggle button */}
@@ -76,7 +78,7 @@ function SourcesPanel({ sources }: { sources: RagSource[] }) {
                 <button
                   type="button"
                   onClick={() => setCitationShutter(src)}
-                  className="flex items-center gap-2 flex-1 min-w-0 text-left hover:opacity-80 transition-opacity"
+                  className="flex items-center gap-2 flex-1 border-2 border-red-500 min-w-0 text-left hover:opacity-80 transition-opacity"
                 >
                   <FileText size={10} className="text-muted-foreground/50 flex-shrink-0" />
                   <span className="text-[10px] text-muted-foreground truncate flex-1 font-mono">
