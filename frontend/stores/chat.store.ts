@@ -67,6 +67,13 @@ interface ChatState {
   /** TTFT in ms when first token arrived; shown until 'done' updates lastInferenceStats (avoids flash of old value) */
   firstTokenReachedMs: number | null;
   setFirstTokenReachedMs: (ms: number | null) => void;
+
+  /**  rag sources for the active conversation */
+  selectedMessageId: string | null;
+  setSelectedMessageId: (id: string | null) => void;
+
+  selectedSourceIndex: number | null;
+  setSelectedSourceIndex: (index: number | null) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -118,6 +125,12 @@ export const useChatStore = create<ChatState>((set) => ({
 
   firstTokenReachedMs: null,
   setFirstTokenReachedMs: (ms) => set({ firstTokenReachedMs: ms }),
+
+  selectedMessageId: null,
+  setSelectedMessageId: (id) => set({ selectedMessageId: id }),
+
+  selectedSourceIndex: null,
+  setSelectedSourceIndex: (index) => set({ selectedSourceIndex: index }),
 
   setConversations: (convs) => set({ conversations: convs }),
 

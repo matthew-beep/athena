@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { FileText, ChevronDown, ChevronUp, Pin } from 'lucide-react';
 import { TierBadge } from './TierBadge';
 import { useChatStore } from '@/stores/chat.store';
@@ -14,6 +14,14 @@ interface MessageProps {
   message: MessageType;
 }
 
+function SourceItem({ index, active = false, onClick }: { index: number, active?: boolean, onClick?: () => void }) {
+  return (
+    <button className={`border rounded-md px-1 py-0.5 min-w-6 text-center cursor-pointer border-[var(--blue-br)] bg-[var(--blue-a)] text-[var(--blue)] transition-colors ${active ? 'bg-[var(--blue-a)] text-[var(--t1)]' : 'bg-[var(--blue-a)] text-[var(--blue)]'}`} onClick={onClick}>
+      <p className={`text-[10px] font-mono`}>{index + 1}</p>
+    </button>
+  );
+}
+
 function SourcesPanel({ sources }: { sources: RagSource[] }) {
   const { setCitationShutter, activeConversationId, conversationDocuments, addConversationDocument, setSearchAll } = useChatStore(
     useShallow((s) => ({
@@ -24,6 +32,8 @@ function SourcesPanel({ sources }: { sources: RagSource[] }) {
       setSearchAll: s.setSearchAll,
     }))
   );
+
+
 
   const attachedIds = activeConversationId
     ? new Set((conversationDocuments[activeConversationId] ?? []).map((d) => d.document_id))
@@ -65,6 +75,14 @@ function SourcesPanel({ sources }: { sources: RagSource[] }) {
         <span>{deduped.length} source{deduped.length !== 1 ? 's' : ''}</span>
         {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
       </button>
+
+
+
+      {sources && (<div className="flex gap-1">
+        {sources.map((src, index) => (
+          <SourceItem key={src.filename + (src.chunk_id ?? src.chunk_index)} index={index} />
+        ))}
+      </div>)}
 
       {/* Source list — click opens Citation Shutter in Context Sidebar */}
       {open && (
@@ -126,6 +144,17 @@ export function Message({ message }: MessageProps) {
   const isUser = message.role === 'user';
   const hasSources = !isUser && (message.rag_sources?.length ?? 0) > 0;
 
+  const { selectedMessageId, setSelectedMessageId } = useChatStore(
+    useShallow((s) => ({
+      selectedMessageId: s.selectedMessageId,
+      setSelectedMessageId: s.setSelectedMessageId,
+    }))
+  );
+
+  useEffect(() => {
+    console.log(selectedMessageId);
+  }, [selectedMessageId]);
+
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       {/* Avatar */}
@@ -142,17 +171,25 @@ export function Message({ message }: MessageProps) {
       {/* Bubble */}
       <div
         className={`max-w-[80%] ${
-          isUser ? 'items-end' : 'items-start'
+          isUser ? 'items-end' : `items-start ${selectedMessageId === message.message_id ? 'border-[var(--blue-br)]' : ''}`
         } flex flex-col gap-1`}
       >
-        <div className={isUser ? 'msg-user' : 'msg-ai'}>
+        <div 
+          className={isUser ? 'msg-user' : `msg-ai border ${selectedMessageId === message.message_id ? 'border-[var(--blue-br)] bg-[var(--blue-a)]' : 'border-[var(--border)]'}`}
+          onClick={() => {
+            if (isUser) return;
+            setSelectedMessageId(message.message_id)
+          }}
+        >
           {isUser ? (
             <span className="whitespace-pre-wrap">{message.content}</span>
           ) : (
-            <div className="message-content">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {message.content}
-              </ReactMarkdown>
+            <div className={`message-content`}>
+              <div>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {message.content}
+                </ReactMarkdown>
+              </div>
             </div>
           )}
         </div>

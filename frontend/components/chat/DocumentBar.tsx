@@ -46,8 +46,8 @@ function WorkingMemoryCard({
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1.5">
           <FileText size={10} className="text-muted-foreground/50" />
-          <span className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-wider">
-            Working Memory
+          <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">
+            Scope
           </span>
         </div>
         <button
@@ -59,11 +59,11 @@ function WorkingMemoryCard({
         </button>
       </div>
       {isSearchAll ? (
-        <p className="text-[10px] font-mono text-muted-foreground/40 py-2 leading-relaxed">
+        <p className="text-[10px] text-muted-foreground/40 py-2 leading-relaxed">
           Global Chat Mode — Searching all documents.
         </p>
       ) : documents.length === 0 ? (
-        <p className="text-[10px] font-mono text-muted-foreground/40 py-2 leading-relaxed">
+        <p className="text-[10px] text-[var(--t1)] py-2 leading-relaxed">
           General Chat Mode — No documents in scope.
         </p>
       ) : (
@@ -97,8 +97,8 @@ function WorkingMemoryCard({
                 )}
                 <span
                   className={cn(
-                    'text-[10px] font-mono truncate flex-1 min-w-0',
-                    muted ? 'text-muted-foreground/50 line-through' : 'text-foreground/80'
+                    'text-[10px] truncate flex-1 min-w-0',
+                    muted ? 'text-[var(--t2)] line-through' : 'text-[var(--t1)]'
                   )}
                 >
                   {doc.filename ?? doc.document_id}
@@ -243,6 +243,7 @@ export function DocumentBar() {
     firstTokenReachedMs,
     conversationSearchAll,
     pendingSearchAll,
+    selectedMessageId,
   } = useChatStore(
     useShallow((s) => ({
       activeConversationId: s.activeConversationId,
@@ -260,6 +261,7 @@ export function DocumentBar() {
       firstTokenReachedMs: s.firstTokenReachedMs,
       conversationSearchAll: s.conversationSearchAll,
       pendingSearchAll: s.pendingSearchAll,
+      selectedMessageId: s.selectedMessageId,
     }))
   );
 
@@ -362,6 +364,12 @@ export function DocumentBar() {
           onAddClick={() => setCommandPaletteOpen(true)}
           isSearchAll={isSearchAll}
         />
+      </div>
+
+      <div>
+        <p className="text-[10px] text-[var(--t1)]">
+          {selectedMessageId}
+        </p>
       </div>
 
       {/* Citation Shutter (slides out over content when a source is focused) */}

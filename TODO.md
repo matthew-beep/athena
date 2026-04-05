@@ -1,6 +1,11 @@
 # Athena — TODO
 
-Current phase: **Phase 2** — RAG chat, hybrid search, document ingestion, scoped retrieval, sentence-aware chunking, scope bar, full collections CRUD (backend + frontend), Structural Glass design system, upload modal stages 1–3 fully wired (stage 4 removed), glass audit (Phase F2) complete, batch upload endpoint (files + URLs in one request), collection_id atomic on upload, single polling loop, library view filtering wired, DocumentsPanel owns document fetch.
+Current phase: **Chat Refinement** — working in this order:
+1. **Citation UX** — clickable inline `[n]` chips, expandable chunk list in sources panel, numbered rows
+2. **Sidebar UX** — conversation list polish, ephemeral/persistent indicators, new chat flow
+3. **Chat messaging + input** — suggestion pills, token flush throttle, auto-scroll, promotion card, quote block style
+
+After chat refinement: **Dashboard**, then **Research Pipeline**.
 
 ~~Fix `MAX_RRF_SCORE` NameError~~ ✓ Done
 ~~Fix `httpx` missing import in `main.py`~~ ✓ Done
