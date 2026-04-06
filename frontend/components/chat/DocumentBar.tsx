@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   FileText,
   X,
@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chat.store';
 import type { PendingDocument } from '@/stores/chat.store';
-import type { ConversationDocument } from '@/types';
+import type { ConversationDocument, RagSource } from '@/types';
 import { useSystemStore } from '@/stores/system.store';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/utils/cn';
@@ -244,6 +244,7 @@ export function DocumentBar() {
     conversationSearchAll,
     pendingSearchAll,
     selectedMessageId,
+    messages
   } = useChatStore(
     useShallow((s) => ({
       activeConversationId: s.activeConversationId,
@@ -262,6 +263,7 @@ export function DocumentBar() {
       conversationSearchAll: s.conversationSearchAll,
       pendingSearchAll: s.pendingSearchAll,
       selectedMessageId: s.selectedMessageId,
+      messages: s.messages,
     }))
   );
 
@@ -270,6 +272,30 @@ export function DocumentBar() {
   const ttftSum = useSystemStore((s) => s.ttftSum);
   const ttftCount = useSystemStore((s) => s.ttftCount);
   const averageTtftMs = ttftCount > 0 ? Math.round(ttftSum / ttftCount) : 0;
+
+
+
+  const activeMessageId = activeConversationId
+  ? selectedMessageId[activeConversationId]
+  : undefined;  
+  
+  
+  const thread = activeConversationId ? (messages[activeConversationId] ?? []) : [];
+
+  const activeMessage = activeMessageId
+  ? thread.find((m) => m.message_id === activeMessageId)
+  : undefined;
+
+  const activeMessageSources = activeMessage?.rag_sources ?? [];
+
+  const deduped = useMemo(() => {
+    const map = new Map<string, RagSource>();
+    for (const s of activeMessageSources) {
+      const existing = map.get(s.filename);
+      if (!existing || s.score > existing.score) map.set(s.filename, s);
+    }
+    return [...map.values()].sort((a, b) => b.score - a.score);
+  }, [activeMessageSources]);
 
   const isSearchAll = activeConversationId
   ? (conversationSearchAll[activeConversationId] ?? false)
@@ -321,7 +347,7 @@ export function DocumentBar() {
   return (
     <div
       className={cn(
-        'flex flex-col h-full rounded-lg overflow-hidden border border-border/30 relative',
+        'flex flex-col h-full min-w-0 w-72 max-w-full shrink-0 rounded-lg overflow-hidden border border-border/30 relative',
         shutterOpen && 'bg-foreground/[0.02]'
       )}
     >
@@ -354,22 +380,83 @@ export function DocumentBar() {
         </p>
       </div>
 
-      {/* Working Memory */}
-      <div className="flex-1 min-h-0 overflow-y-auto relative z-[1]">
-        <WorkingMemoryCard
-          documents={displayDocuments}
-          mutedIds={mutedIds}
-          onMuteToggle={handleMuteToggle}
-          onRemove={handleRemoveDoc}
-          onAddClick={() => setCommandPaletteOpen(true)}
-          isSearchAll={isSearchAll}
-        />
-      </div>
-
-      <div>
-        <p className="text-[10px] text-[var(--t1)]">
-          {selectedMessageId}
-        </p>
+      {/* Middle: Scope + retrieval sources share space between context and footer (2:1) */}
+      <div className="flex min-h-0 flex-1 flex-col relative z-[1]">
+        <div className="min-h-0 min-w-0 flex-[2] overflow-y-auto">
+          <WorkingMemoryCard
+            documents={displayDocuments}
+            mutedIds={mutedIds}
+            onMuteToggle={handleMuteToggle}
+            onRemove={handleRemoveDoc}
+            onAddClick={() => setCommandPaletteOpen(true)}
+            isSearchAll={isSearchAll}
+          />
+        </div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto border-t border-border/20 px-3 py-2">
+        <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground/50 mb-2">
+          <span>Retrieval sources</span>
+          {activeMessageSources.length > 0 && (
+            <span className="tabular-nums">{activeMessageSources.length}</span>
+          )}
+        </div>
+        {!activeConversationId || !activeMessageId ? (
+          <p className="text-[10px] text-muted-foreground/45 leading-relaxed">Open a chat and select an assistant message.</p>
+        ) : activeMessageSources.length === 0 ? (
+          <p className="text-[10px] text-muted-foreground/45 leading-relaxed">No sources for this message.</p>
+        ) : (
+          <ul className="flex flex-col gap-2 min-w-0">
+            {deduped.map((source, i) => (
+              <li
+                key={source.chunk_id ?? `${source.document_id}-${source.chunk_index}-${i}`}
+                className="min-w-0 rounded-md border border-border/35 bg-foreground/[0.025] p-2.5 flex items-center gap-2"
+              >
+                <div className="flex items-start gap-2 min-w-0">
+                  <FileText className="h-3.5 w-3.5 shrink-0 mt-0.5 text-muted-foreground/50" aria-hidden />
+                </div>
+                <p
+                  className="text-[10px] text-muted-foreground/70 leading-snug pl-5 border-l border-border/20 ml-2 min-w-0 truncate"
+                  title={source.filename}
+                >
+                  {source.filename}
+                </p>
+              </li>
+            ))}
+            {activeMessageSources.map((source, i) => (
+              <li
+                key={source.chunk_id ?? `${source.document_id}-${source.chunk_index}-${i}`}
+                className="min-w-0 rounded-md border border-border/35 bg-foreground/[0.025] p-2.5 space-y-1.5"
+              >
+                <div className="flex items-start gap-2 min-w-0">
+                  <FileText className="h-3.5 w-3.5 shrink-0 mt-0.5 text-muted-foreground/50" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-medium text-foreground/90 truncate" title={source.filename}>
+                      {source.filename}
+                    </p>
+                    <p className="text-[9px] font-mono text-muted-foreground/45 tabular-nums">
+                      #{source.chunk_index}
+                      {source.score_type && (
+                        <span className="text-muted-foreground/35"> · {source.score_type}</span>
+                      )}
+                    </p>
+                  </div>
+                  <span className="text-[9px] font-mono tabular-nums text-muted-foreground/55 shrink-0">
+                    {source.score.toFixed(3)}
+                  </span>
+                </div>
+                {(source.vector_score != null || source.bm25_score != null) && (
+                  <div className="flex flex-wrap gap-x-2 gap-y-0.5 pl-5 text-[9px] font-mono text-muted-foreground/40 tabular-nums">
+                    {source.vector_score != null && <span>vec {source.vector_score.toFixed(3)}</span>}
+                    {source.bm25_score != null && <span>bm25 {source.bm25_score.toFixed(3)}</span>}
+                  </div>
+                )}
+                <p className="text-[10px] text-muted-foreground/70 leading-snug pl-5 line-clamp-4 border-l border-border/20 ml-2 min-w-0 break-words [overflow-wrap:anywhere]">
+                  {source.text}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+        </div>
       </div>
 
       {/* Citation Shutter (slides out over content when a source is focused) */}
@@ -381,7 +468,7 @@ export function DocumentBar() {
       )}
 
       
-          <div className="border-t border-[var(--border)] px-3 py-3 mt-auto space-y-2">
+          <div className="flex-shrink-0 border-t border-[var(--border)] px-3 py-3 space-y-2">
             {/* Model + live indicator */}
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-mono text-[var(--t3)] truncate">{modelStats ? modelStats.name : '—'}</span>

@@ -9,18 +9,13 @@ import { useShallow } from 'zustand/react/shallow';
 import type { Message as MessageType, RagSource } from '@/types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { SourceItem } from './SourceItem';
 
 interface MessageProps {
   message: MessageType;
 }
 
-function SourceItem({ index, active = false, onClick }: { index: number, active?: boolean, onClick?: () => void }) {
-  return (
-    <button className={`border rounded-md px-1 py-0.5 min-w-6 text-center cursor-pointer border-[var(--blue-br)] bg-[var(--blue-a)] text-[var(--blue)] transition-colors ${active ? 'bg-[var(--blue-a)] text-[var(--t1)]' : 'bg-[var(--blue-a)] text-[var(--blue)]'}`} onClick={onClick}>
-      <p className={`text-[10px] font-mono`}>{index + 1}</p>
-    </button>
-  );
-}
+
 
 function SourcesPanel({ sources }: { sources: RagSource[] }) {
   const { setCitationShutter, activeConversationId, conversationDocuments, addConversationDocument, setSearchAll } = useChatStore(
@@ -151,6 +146,8 @@ export function Message({ message }: MessageProps) {
     }))
   );
 
+  const isActiveMessage = selectedMessageId[message.conversation_id] === message.message_id;
+
   useEffect(() => {
     console.log(selectedMessageId);
   }, [selectedMessageId]);
@@ -171,14 +168,14 @@ export function Message({ message }: MessageProps) {
       {/* Bubble */}
       <div
         className={`max-w-[80%] ${
-          isUser ? 'items-end' : `items-start ${selectedMessageId === message.message_id ? 'border-[var(--blue-br)]' : ''}`
+          isUser ? 'items-end' : `items-start ${isActiveMessage ? 'border-[var(--blue-br)]' : ''}`
         } flex flex-col gap-1`}
       >
         <div 
-          className={isUser ? 'msg-user' : `msg-ai border ${selectedMessageId === message.message_id ? 'border-[var(--blue-br)] bg-[var(--blue-a)]' : 'border-[var(--border)]'}`}
+          className={isUser ? 'msg-user' : `msg-ai border ${isActiveMessage ? 'border-[var(--blue-br)] bg-[var(--blue-a)]' : 'border-[var(--border)]'}`}
           onClick={() => {
             if (isUser) return;
-            setSelectedMessageId(message.message_id)
+            setSelectedMessageId(message.conversation_id, message.message_id)
           }}
         >
           {isUser ? (

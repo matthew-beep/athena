@@ -69,8 +69,8 @@ interface ChatState {
   setFirstTokenReachedMs: (ms: number | null) => void;
 
   /**  rag sources for the active conversation */
-  selectedMessageId: string | null;
-  setSelectedMessageId: (id: string | null) => void;
+  selectedMessageId: Record<string, string>;
+  setSelectedMessageId: (conversationId: string, id: string) => void;
 
   selectedSourceIndex: number | null;
   setSelectedSourceIndex: (index: number | null) => void;
@@ -126,8 +126,8 @@ export const useChatStore = create<ChatState>((set) => ({
   firstTokenReachedMs: null,
   setFirstTokenReachedMs: (ms) => set({ firstTokenReachedMs: ms }),
 
-  selectedMessageId: null,
-  setSelectedMessageId: (id) => set({ selectedMessageId: id }),
+  selectedMessageId: {},
+  setSelectedMessageId: (conversationId, id) => set((s) => ({ selectedMessageId: { ...s.selectedMessageId, [conversationId]: id } })),
 
   selectedSourceIndex: null,
   setSelectedSourceIndex: (index) => set({ selectedSourceIndex: index }),
