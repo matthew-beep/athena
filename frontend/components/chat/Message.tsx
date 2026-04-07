@@ -45,15 +45,6 @@ function SourcesPanel({ sources }: { sources: RagSource[] }) {
       .catch(console.error);
   };
 
-  // Deduplicate by filename — keep highest-score chunk per file
-  const deduped = useMemo(() => {
-    const map = new Map<string, RagSource>();
-    for (const s of sources) {
-      const existing = map.get(s.filename);
-      if (!existing || s.score > existing.score) map.set(s.filename, s);
-    }
-    return [...map.values()].sort((a, b) => b.score - a.score);
-  }, [sources]);
 
   const [open, setOpen] = useState(false);
 
@@ -61,15 +52,6 @@ function SourcesPanel({ sources }: { sources: RagSource[] }) {
 
   return (
     <div className="px-1 mt-0.5">
-      {/* Toggle button */}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-      >
-        <FileText size={10} />
-        <span>{deduped.length} source{deduped.length !== 1 ? 's' : ''}</span>
-        {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-      </button>
 
 
 
@@ -79,58 +61,7 @@ function SourcesPanel({ sources }: { sources: RagSource[] }) {
         ))}
       </div>)}
 
-      {/* Source list — click opens Citation Shutter in Context Sidebar */}
-      {open && (
-        <ul className="mt-1.5 space-y-1">
-          {deduped.map((src) => (
-            <li
-              key={src.filename + (src.chunk_id ?? src.chunk_index)}
-              className="rounded-sm bg-muted/20 border border-border/20 overflow-hidden"
-            >
-              <div className="flex items-center gap-2 px-2 py-1">
-                <button
-                  type="button"
-                  onClick={() => setCitationShutter(src)}
-                  className="flex items-center gap-2 flex-1 border-2 border-red-500 min-w-0 text-left hover:opacity-80 transition-opacity"
-                >
-                  <FileText size={10} className="text-muted-foreground/50 flex-shrink-0" />
-                  <span className="text-[10px] text-muted-foreground truncate flex-1 font-mono">
-                    {src.filename}
-                  </span>
-                  {src.score_type && (
-                    <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-muted/40 text-muted-foreground/50 flex-shrink-0">
-                      {src.score_type}
-                    </span>
-                  )}
-                </button>
-                {activeConversationId && (
-                  <button
-                    type="button"
-                    onClick={() => handleAttach(src)}
-                    disabled={attachedIds.has(src.document_id)}
-                    title={attachedIds.has(src.document_id) ? 'Already in scope' : 'Pin to conversation'}
-                    className="flex-shrink-0 p-0.5 rounded text-muted-foreground/30 hover:text-foreground disabled:opacity-20 disabled:cursor-default transition-colors"
-                  >
-                    <Pin size={9} />
-                  </button>
-                )}
-              </div>
-              {/* Snippet — click opens citation shutter */}
-              {src.text && (
-                <button
-                  type="button"
-                  onClick={() => setCitationShutter(src)}
-                  className="w-full text-left hover:bg-muted/30 transition-colors"
-                >
-                  <p className="px-2 pb-2 text-[10px] text-muted-foreground/60 font-mono leading-relaxed line-clamp-3 border-t border-border/10 pt-1">
-                    {src.text}
-                  </p>
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+
     </div>
   );
 }

@@ -12,6 +12,8 @@ import {
 import { useChatStore } from '@/stores/chat.store';
 import type { PendingDocument } from '@/stores/chat.store';
 import type { ConversationDocument, RagSource } from '@/types';
+
+type SourceGroup = { document_id: string; filename: string; chunks: RagSource[] };
 import { useSystemStore } from '@/stores/system.store';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/utils/cn';
@@ -289,12 +291,21 @@ export function DocumentBar() {
   const activeMessageSources = activeMessage?.rag_sources ?? [];
 
   const deduped = useMemo(() => {
-    const map = new Map<string, RagSource>();
+    const map = new Map<string, SourceGroup>();
     for (const s of activeMessageSources) {
-      const existing = map.get(s.filename);
-      if (!existing || s.score > existing.score) map.set(s.filename, s);
+      let g = map.get(s.document_id);
+      if (!g) {
+        g = { document_id: s.document_id, filename: s.filename, chunks: [] };
+        map.set(s.document_id, g);
+      }
+      g.chunks.push(s);
     }
-    return [...map.values()].sort((a, b) => b.score - a.score);
+    return [...map.values()]
+      .map((g) => ({
+        ...g,
+        chunks: [...g.chunks].sort((a, b) => b.score - a.score),
+      }))
+      .sort((a, b) => b.chunks.length - a.chunks.length);
   }, [activeMessageSources]);
 
   const isSearchAll = activeConversationId
@@ -405,53 +416,21 @@ export function DocumentBar() {
           <p className="text-[10px] text-muted-foreground/45 leading-relaxed">No sources for this message.</p>
         ) : (
           <ul className="flex flex-col gap-2 min-w-0">
-            {deduped.map((source, i) => (
+            {deduped.map((group) => (
               <li
-                key={source.chunk_id ?? `${source.document_id}-${source.chunk_index}-${i}`}
+                key={group.document_id}
                 className="min-w-0 rounded-md border border-border/35 bg-foreground/[0.025] p-2.5 flex items-center gap-2"
               >
-                <div className="flex items-start gap-2 min-w-0">
-                  <FileText className="h-3.5 w-3.5 shrink-0 mt-0.5 text-muted-foreground/50" aria-hidden />
-                </div>
-                <p
-                  className="text-[10px] text-muted-foreground/70 leading-snug pl-5 border-l border-border/20 ml-2 min-w-0 truncate"
-                  title={source.filename}
+                <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" aria-hidden />
+                <span
+                  className="text-[10px] font-medium text-foreground/90 truncate min-w-0 flex-1"
+                  title={group.filename}
                 >
-                  {source.filename}
-                </p>
-              </li>
-            ))}
-            {activeMessageSources.map((source, i) => (
-              <li
-                key={source.chunk_id ?? `${source.document_id}-${source.chunk_index}-${i}`}
-                className="min-w-0 rounded-md border border-border/35 bg-foreground/[0.025] p-2.5 space-y-1.5"
-              >
-                <div className="flex items-start gap-2 min-w-0">
-                  <FileText className="h-3.5 w-3.5 shrink-0 mt-0.5 text-muted-foreground/50" aria-hidden />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[10px] font-medium text-foreground/90 truncate" title={source.filename}>
-                      {source.filename}
-                    </p>
-                    <p className="text-[9px] font-mono text-muted-foreground/45 tabular-nums">
-                      #{source.chunk_index}
-                      {source.score_type && (
-                        <span className="text-muted-foreground/35"> · {source.score_type}</span>
-                      )}
-                    </p>
-                  </div>
-                  <span className="text-[9px] font-mono tabular-nums text-muted-foreground/55 shrink-0">
-                    {source.score.toFixed(3)}
-                  </span>
-                </div>
-                {(source.vector_score != null || source.bm25_score != null) && (
-                  <div className="flex flex-wrap gap-x-2 gap-y-0.5 pl-5 text-[9px] font-mono text-muted-foreground/40 tabular-nums">
-                    {source.vector_score != null && <span>vec {source.vector_score.toFixed(3)}</span>}
-                    {source.bm25_score != null && <span>bm25 {source.bm25_score.toFixed(3)}</span>}
-                  </div>
-                )}
-                <p className="text-[10px] text-muted-foreground/70 leading-snug pl-5 line-clamp-4 border-l border-border/20 ml-2 min-w-0 break-words [overflow-wrap:anywhere]">
-                  {source.text}
-                </p>
+                  {group.filename}
+                </span>
+                <span className="text-[9px] font-mono tabular-nums text-muted-foreground/55 shrink-0">
+                  {group.chunks.length} chunk{group.chunks.length !== 1 ? 's' : ''}
+                </span>
               </li>
             ))}
           </ul>
