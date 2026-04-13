@@ -4,7 +4,7 @@ import { useCallback, useRef } from 'react';
 import { useChatStore } from '@/stores/chat.store';
 import { useSystemStore } from '@/stores/system.store';
 import { apiClient } from '@/api/client';
-import type { StreamEvent, Message, Conversation } from '@/types';
+import type { StreamEvent, Message, Conversation, SuggestionsRequest, SuggestionsResponse } from '@/types';
 
 export function useSSEChat() {
   const requestStartTime = useRef(0);
@@ -31,20 +31,22 @@ export function useSSEChat() {
     setSearchAll,
     pendingSearchAll,
     setPendingSearchAll,
+    setConversationSuggestions,
   } = useChatStore();
 
   const sendMessage = useCallback(
     async (content: string, conversationId?: string) => {
       if (!content.trim()) return;
 
-      setIsStreaming(true);
-      clearStream();
       // Capture context_debug tokens here; stored under the real conversation_id on 'done'
       let pendingContextTokens = 0;
 
       const convId = conversationId ?? activeConversationId ?? undefined;
       const isNewConversation = !convId;
       const tempConvId = isNewConversation ? `temp_conv_${Date.now()}` : convId;
+
+      setIsStreaming(tempConvId, true);
+      clearStream(tempConvId);
 
       // Optimistic user message — show immediately (use temp conversation id for new convos)
       const tempUserMsg: Message = {
@@ -124,7 +126,7 @@ export function useSSEChat() {
 
                 }
                 tokenCount.current += 1;
-                appendStreamToken(event.content);
+                appendStreamToken(tempConvId, event.content);
                 // Clear status message once tokens start arriving
                 setStatusMessage(null);
 
@@ -138,6 +140,7 @@ export function useSSEChat() {
                 setContextBudget(event.budget);
 
               } else if (event.type === 'done') {
+
                 const genTimeSec =
                   firstTokenTime.current > 0
                     ? (performance.now() - firstTokenTime.current) / 1000
@@ -173,7 +176,7 @@ export function useSSEChat() {
                   message_id: `msg_${Date.now()}`,
                   conversation_id: realId,
                   role: 'assistant',
-                  content: useChatStore.getState().streamingContent,
+                  content: useChatStore.getState().streamingContent[tempConvId] ?? '',
                   model_used: event.model,
                   timestamp: new Date().toISOString(),
                   rag_sources: event.rag_sources,
@@ -201,13 +204,30 @@ export function useSSEChat() {
                   addMessage(realId, assistantMsg);
                 }
 
+                useChatStore.getState().setConversationSuggestionsLoading(realId, true);
+                apiClient.post<SuggestionsResponse>('/chat/suggestions', {
+                  conversation_id: realId,
+                  last_user_message: content,
+                  last_assistant_message: assistantMsg.content,
+                } satisfies SuggestionsRequest)
+                  .then((res) => {
+                    useChatStore.getState().setConversationSuggestions(realId, res.suggestions ?? []);
+                  })
+                  .catch(() => {
+                    useChatStore.getState().setConversationSuggestionsLoading(realId, false);
+                  });
+                  
               } else if (event.type === 'error') {
                 console.error('Stream error:', event.content);
                 setStatusMessage(null);
               }
+
+
             } catch {
               // skip malformed SSE lines
             }
+
+
           }
         }
       } catch (err) {
@@ -220,7 +240,7 @@ export function useSSEChat() {
         abortRef.current = null;
         useChatStore.getState().setRequestStartedAt(null);
         useChatStore.getState().setFirstTokenReachedMs(null);
-        setIsStreaming(false);
+        setIsStreaming(tempConvId, false);
         setStatusMessage(null);
       }
     },

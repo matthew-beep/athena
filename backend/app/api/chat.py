@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-from app.models.chat import BatchAttachRequest, ChatRequest, ConversationOut, MessageOut
+from app.models.chat import BatchAttachRequest, ChatRequest, ConversationOut, MessageOut, SuggestionsRequest, SuggestionsResponse
 from app.core.security import get_current_user
 from app.core.context import build_messages, count_tokens_text, MAX_MESSAGE_TOKENS, save_message, TOTAL_BUDGET
 from app.core import rag as rag_module
@@ -323,6 +323,27 @@ async def list_conversations(
     return [ConversationOut(**dict(r)) for r in rows]
 
 
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete a conversation."""
+    try: 
+
+        await postgres.execute(
+            "DELETE FROM conversations WHERE conversation_id = $1 AND user_id = $2",
+            conversation_id,
+            current_user["id"],
+        )
+    
+    except Exception as e:
+        logger.error(f"Error deleting conversation: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+        
+    return {"message": "Conversation deleted"}
+
+
 @router.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])
 async def get_messages(
     conversation_id: str,
@@ -406,3 +427,43 @@ async def detach_document(
     await detach_documents(conversation_id, [document_id])
     doc_ids = await get_conversation_document_ids(conversation_id)
     return {"conversation_id": conversation_id, "document_ids": doc_ids}
+
+
+
+@router.post("/suggestions", response_model=SuggestionsResponse)
+async def suggest_prompt(body: SuggestionsRequest, current_user: dict = Depends(get_current_user)):
+    """Generate follow-up suggestions for a conversation."""
+    settings = get_settings()
+    prompt = f"""Given this conversation, generate 3 short follow-up questions or actions the user might want next.
+Return ONLY a JSON array of strings. No explanation, no preamble. Max 8 words each.
+
+User said: {body.last_user_message}
+Assistant said: {body.last_assistant_message}"""
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{settings.ollama_base_url}/api/chat",
+                json={
+                    "model": settings.ollama_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": False,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            content = data["message"]["content"]
+            suggestions = json.loads(content)
+            if not isinstance(suggestions, list):
+                suggestions = []
+            return SuggestionsResponse(suggestions=suggestions[:3])
+    except (json.JSONDecodeError, KeyError):
+        return SuggestionsResponse(suggestions=[])
+    except httpx.TimeoutException:
+        logger.warning("[suggestions] timed out")
+        return SuggestionsResponse(suggestions=[])
+    except Exception as e:
+        logger.error(f"[suggestions] failed: {e}")
+        return SuggestionsResponse(suggestions=[])
+
+        

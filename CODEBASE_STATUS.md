@@ -1,4 +1,61 @@
 # Athena — Codebase Status
+
+---
+
+## 2026-04-09
+
+### Vision Pivot — Proactive OS
+
+Athena's organizing concept has changed. The project is no longer a conversation-first RAG app with learning features bolted on. It is a **proactive personal operating system** organized around **Projects**.
+
+**What changed:**
+- **Projects** are now the core primitive. Everything — documents, research, chat — is scoped to a project.
+- **Background Tasks** replace the promotion flow. Athena works autonomously on project goals and creates **Surfaces** when findings need review.
+- **Chat is demoted.** It remains present but is a secondary interface for follow-ups, not the primary mode of work.
+- **Quiz/spaced repetition removed from scope** entirely.
+- **Two-tier knowledge model / promotion flow removed.** Superseded by Projects.
+- **Knowledge graph removed as a top-level tab.** May revisit as a project-scoped view later.
+
+**What's unchanged:**
+- All infrastructure: FastAPI, PostgreSQL/ParadeDB, Qdrant, Redis, Celery, Ollama, Crawl4AI
+- Document ingestion pipeline (still feeds project documents)
+- Hybrid RAG (vector + BM25, RRF fusion)
+- Chat + SSE streaming
+- Auth
+- Collections
+
+**Updated files:** `CLAUDE.md` (full rewrite of vision, concepts, phases), `TODO.md` (reset around new priorities).
+
+**New database tables to add (Phase 4):**
+- `projects` — name, goal, constraints, status
+- `project_documents` — project ↔ document junction
+- `project_tasks` — per-project background task definitions
+- `surfaces` — proactive output items (finding | decision | update)
+- `project_id` FK on `conversations` and `research_sessions`
+
+### Chat Refinement — In Progress
+
+Currently working on:
+1. **Inline citation chips** — `remarkCitations` remark plugin to render `[n]` as `SourceItem` components inline in markdown
+2. **Per-message source selection** — `selectedMessageId: Record<string, string>` in chat store; DocumentBar resolves sources from selected message or derives default (latest assistant message with sources)
+
+### Phase Status (updated)
+
+| Phase | Status | Notes |
+|---|---|---|
+| Phase 1: Foundation | ✅ Complete | Chat, RAG, ingestion, auth, Redis, Celery |
+| Phase 2: Document Processing | ~75% | Missing: Docling, video transcription |
+| Phase 3: Chat Refinement | 🔄 In progress | Citation chips, per-message source selection |
+| Phase 4: Projects Layer | ⬜ Next | Schema, API, dashboard UI |
+| Phase 5: Background Tasks | ⬜ | |
+| Phase 6: Surfaces | ⬜ | |
+| Phase 7: Research Pipeline | ⬜ | Reoriented to project-scoped |
+| Phase 8: Profile | ⬜ | |
+| Phase 9: MCP Integration | ⬜ | |
+| Phase 10: Production Polish | ⬜ | |
+
+---
+
 ## 2026-03-31
 
 ### pg_search Migration — Complete

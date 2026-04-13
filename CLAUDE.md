@@ -6,15 +6,13 @@
 
 ## What This Project Is
 
-You are working on **Athena**, a self-hosted personal AI infrastructure platform. Athena is not a generic chatbot or a simple RAG application. It is a persistent, compounding intelligence layer that:
+**Athena is a proactive personal operating system.** It is not a chatbot. The organizing primitive is not a conversation — it is a **Project**.
 
-- Remembers every conversation and compounds knowledge over time
-- Builds a behavioral model of how the user learns and thinks
-- Autonomously researches topics and fills knowledge gaps
-- Routes prompts to connected external services via MCP
-- Runs entirely on local hardware with no cloud dependencies
+You define goals. Athena works on them in the background, keeps its context current with real fetched data, and surfaces findings when your input is actually needed. Chat exists but is demoted — it is a tool for refining goals or asking follow-ups, not the primary mode of work.
 
-The project is a **monorepo** with a Python/FastAPI backend and a React/TypeScript frontend. It is containerized with Docker Compose and designed for single-user self-hosted deployment.
+The core shift: most AI tools are reactive and stateless. They wait to be asked. Athena is push-based and persistent. It works while you're doing other things.
+
+**What "backed by real data" means here:** every meaningful claim traces to a source fetched at research time, not recalled from training. When data is uncertain, Athena says so. You can see exactly where any piece of information came from.
 
 ---
 
@@ -28,17 +26,17 @@ athena/
 │   │   ├── api/                     # Route handlers
 │   │   │   ├── chat.py
 │   │   │   ├── documents.py
+│   │   │   ├── collections.py
+│   │   │   ├── projects.py          # ← to be built
 │   │   │   ├── research.py
-│   │   │   ├── quizzes.py
-│   │   │   ├── graph.py
-│   │   │   └── system.py
+│   │   │   ├── system.py
+│   │   │   └── auth.py
 │   │   ├── core/                    # Business logic
 │   │   │   ├── router.py            # Intent classification + routing
 │   │   │   ├── rag.py               # Vector search + context assembly
 │   │   │   ├── ingestion.py         # Document chunking + embedding
 │   │   │   ├── research.py          # Multi-stage research pipeline
-│   │   │   ├── quiz.py              # Quiz generation + scoring
-│   │   │   ├── graph.py             # Knowledge graph operations
+│   │   │   ├── crawler.py           # Crawl4AI integration
 │   │   │   └── context.py           # Context window management
 │   │   ├── models/                  # Pydantic schemas
 │   │   ├── db/                      # Database clients + queries
@@ -62,21 +60,18 @@ athena/
 │   ├── Dockerfile
 │   └── celeryconfig.py
 ├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Chat/
-│   │   │   ├── Research/
-│   │   │   ├── KnowledgeGraph/
-│   │   │   ├── Quizzes/
-│   │   │   ├── Documents/
-│   │   │   └── Settings/
-│   │   ├── hooks/
-│   │   ├── stores/
-│   │   ├── api/
-│   │   └── App.tsx
-│   ├── package.json
-│   └── vite.config.ts
+│   ├── components/
+│   │   ├── chat/
+│   │   ├── projects/                # ← to be built
+│   │   ├── research/
+│   │   ├── documents/
+│   │   └── settings/
+│   ├── stores/
+│   ├── hooks/
+│   ├── api/
+│   └── app/                        # Next.js App Router
 ├── docker-compose.yml
+├── docker-compose.mac.yml
 ├── .env.example
 └── nginx.conf
 ```
@@ -92,10 +87,11 @@ athena/
 | backend | custom | 8000 | FastAPI application |
 | frontend | custom | 3000 | React application |
 | qdrant | qdrant/qdrant | 6333 | Vector database |
-| postgres | postgres:16-alpine | 5432 | Relational database |
+| postgres | paradedb/paradedb:latest-pg16 | 5432 | Relational DB + BM25 (pg_search) |
 | redis | redis:7-alpine | 6379 | Cache + Celery broker |
 | ollama | ollama/ollama | 11434 | Local LLM inference |
-| nginx | nginx:alpine | 80/443 | Reverse proxy |
+| crawl4ai | custom | 11235 | Web scraping |
+| nginx | nginx:alpine | 80/443 | Reverse proxy (production only) |
 
 ### Three-Tier LLM Architecture
 
@@ -104,7 +100,7 @@ Athena uses three model tiers via Ollama. Never deviate from this without explic
 | Tier | Model | Quantization | VRAM | RAM | Speed | When to Use |
 |------|-------|-------------|------|-----|-------|-------------|
 | 1 | qwen2.5:7b | Q4_K_M | 4 GB | 1 GB | 45-55 tok/s | All interactive queries, routing, classification |
-| 2 | qwen2.5:30b | Q5_K_M | 4-9 GB | 2-7 GB | 8-20 tok/s | Quiz generation, complex reasoning, concept extraction |
+| 2 | qwen2.5:30b | Q5_K_M | 4-9 GB | 2-7 GB | 8-20 tok/s | Complex reasoning, concept extraction |
 | 3 | llama3.1:70b | Q4_K_M | 0 GB | 20 GB | 2-4 tok/s | Research synthesis only, always CPU, always background |
 
 **Critical rules:**
@@ -129,45 +125,24 @@ Storage:
 
 ---
 
-## The Most Important Design Decision: Two-Tier Knowledge Model
+## Core Concepts
 
-This is the single most critical concept in Athena. Everything else depends on it being implemented correctly.
+### Projects
+A project is a goal with context, constraints, and active tasks attached. The user defines what they're trying to accomplish. Athena figures out what to track, research, and monitor.
 
-### Tier 1: Ephemeral (General Chat)
+Projects are the organizing primitive. **All research sessions, documents, and background tasks are scoped to a project.** Nothing meaningful exists globally — it belongs to a project.
 
-- Stored in PostgreSQL `conversations` and `messages` tables only
-- **NEVER embedded into Qdrant**
-- **NEVER triggers concept extraction**
-- **NEVER updates the knowledge graph**
-- **NEVER updates the learning profile**
-- Used only for conversational context within and across sessions
+### Background Tasks
+Tasks are things Athena runs without being asked — web research, source aggregation, monitoring. Defined per-project, scheduled via Celery beat. Task types: `research`, `monitor`, `aggregate`.
 
-### Tier 2: Persistent (Intentional Knowledge)
+### Surfaces
+A surface is a moment where Athena brings something to the user's attention because a decision or review is needed. Not a notification feed — a specific, actionable item. High signal, low noise. Surface types: `finding`, `decision`, `update`.
 
-Enters the persistent layer through exactly four pathways:
+### Profile
+A behavioral model that compounds over time from project activity. Domains, preferences, constraints, working style. Reduces the steering required from the user over time.
 
-1. User uploads a document (PDF, video URL, web URL)
-2. Research pipeline completes and user accepts results
-3. User accepts a promotion suggestion from Athena
-4. Quiz/review session produces concept mastery data
-
-When content enters persistent tier it triggers the full pipeline:
-- Text extraction → chunking (500 tokens, 50 overlap) → embedding → Qdrant
-- Concept extraction via Tier 2 model → knowledge graph (PostgreSQL)
-- Metadata → PostgreSQL documents table
-- Learning profile update if relevant
-
-### The Promotion Flow
-
-When Athena detects engagement signals during ephemeral chat, it offers to promote a topic to persistent knowledge. This appears as a UI card below the assistant response — never inline, never interrupting.
-
-**Engagement signals that trigger promotion offer:**
-- 3+ follow-up questions on same topic in one session
-- Same topic appears across 2+ separate sessions
-- User explicitly says "tell me more" 3+ times
-- Quiz score below 60% on a concept repeatedly
-
-**Implementation requirement:** Track these signals in the `learning_signals` table. Check signal thresholds after every assistant response. If threshold met and promotion not already offered this session, include `promotion_suggestion` object in the API response.
+### Chat (demoted)
+Chat is still present but is a secondary interface. When opened in the context of a project, it scopes RAG to that project's documents. It is for refining goals and asking follow-ups — not the primary way work gets done.
 
 ---
 
@@ -176,10 +151,19 @@ When Athena detects engagement signals during ephemeral chat, it offers to promo
 ### PostgreSQL Schema (authoritative)
 
 ```sql
--- Documents (persistent knowledge only)
+-- Auth
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(255) UNIQUE NOT NULL,
+    hashed_password TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Documents
 CREATE TABLE documents (
     id SERIAL PRIMARY KEY,
     document_id VARCHAR(255) UNIQUE NOT NULL,
+    user_id INTEGER REFERENCES users(id),
     filename VARCHAR(255),
     file_type VARCHAR(50),
     source_url TEXT,
@@ -188,7 +172,8 @@ CREATE TABLE documents (
     chunk_count INTEGER DEFAULT 0,
     word_count INTEGER,
     processing_status VARCHAR(50) DEFAULT 'pending',
-    knowledge_tier VARCHAR(20) DEFAULT 'persistent',
+    error_message TEXT,
+    collection_id VARCHAR(255) REFERENCES collections(collection_id) ON DELETE SET NULL,
     metadata JSONB
 );
 
@@ -196,21 +181,89 @@ CREATE TABLE document_chunks (
     id SERIAL PRIMARY KEY,
     chunk_id VARCHAR(255) UNIQUE NOT NULL,
     document_id VARCHAR(255) REFERENCES documents(document_id),
+    user_id INTEGER REFERENCES users(id),
     chunk_index INTEGER NOT NULL,
     text TEXT NOT NULL,
+    filename_normalized TEXT,
     token_count INTEGER,
     qdrant_point_id VARCHAR(255),
     metadata JSONB
 );
 
--- Conversations (both tiers)
+-- Collections
+CREATE TABLE collections (
+    id SERIAL PRIMARY KEY,
+    collection_id VARCHAR(255) UNIQUE NOT NULL,
+    user_id INTEGER REFERENCES users(id),
+    name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Projects (the organizing primitive)
+CREATE TABLE projects (
+    id SERIAL PRIMARY KEY,
+    project_id VARCHAR(255) UNIQUE NOT NULL,
+    user_id INTEGER REFERENCES users(id),
+    name VARCHAR(255) NOT NULL,
+    goal TEXT NOT NULL,
+    constraints TEXT,
+    status VARCHAR(50) DEFAULT 'active',   -- active | paused | archived
+    created_at TIMESTAMP DEFAULT NOW(),
+    last_active TIMESTAMP DEFAULT NOW(),
+    metadata JSONB
+);
+
+CREATE TABLE project_documents (
+    project_id VARCHAR(255) REFERENCES projects(project_id) ON DELETE CASCADE,
+    document_id VARCHAR(255) REFERENCES documents(document_id) ON DELETE CASCADE,
+    added_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (project_id, document_id)
+);
+
+-- Background Tasks (per-project)
+CREATE TABLE project_tasks (
+    id SERIAL PRIMARY KEY,
+    task_id VARCHAR(255) UNIQUE NOT NULL,
+    project_id VARCHAR(255) REFERENCES projects(project_id) ON DELETE CASCADE,
+    task_type VARCHAR(50) NOT NULL,       -- research | monitor | aggregate
+    description TEXT,
+    schedule VARCHAR(100),               -- cron expression or null for one-off
+    status VARCHAR(50) DEFAULT 'pending', -- pending | running | complete | failed
+    last_run TIMESTAMP,
+    next_run TIMESTAMP,
+    result JSONB,
+    celery_task_id VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Surfaces (proactive output)
+CREATE TABLE surfaces (
+    id SERIAL PRIMARY KEY,
+    surface_id VARCHAR(255) UNIQUE NOT NULL,
+    project_id VARCHAR(255) REFERENCES projects(project_id) ON DELETE CASCADE,
+    surface_type VARCHAR(50) NOT NULL,    -- finding | decision | update
+    title VARCHAR(255),
+    body TEXT,
+    source_task_id VARCHAR(255) REFERENCES project_tasks(task_id),
+    status VARCHAR(50) DEFAULT 'unread', -- unread | read | acted | dismissed
+    created_at TIMESTAMP DEFAULT NOW(),
+    read_at TIMESTAMP,
+    metadata JSONB
+);
+
+-- Conversations (scoped to project or standalone)
 CREATE TABLE conversations (
     id SERIAL PRIMARY KEY,
     conversation_id VARCHAR(255) UNIQUE NOT NULL,
+    user_id INTEGER REFERENCES users(id),
+    project_id VARCHAR(255) REFERENCES projects(project_id) ON DELETE SET NULL,
     started_at TIMESTAMP DEFAULT NOW(),
     last_active TIMESTAMP DEFAULT NOW(),
     title VARCHAR(255),
-    knowledge_tier VARCHAR(20) DEFAULT 'ephemeral',
+    token_count INTEGER DEFAULT 0,
+    summary TEXT,
+    summarized_up_to_id VARCHAR(255),
+    mode VARCHAR(20) DEFAULT 'general',
     metadata JSONB
 );
 
@@ -222,101 +275,24 @@ CREATE TABLE messages (
     content TEXT NOT NULL,
     timestamp TIMESTAMP DEFAULT NOW(),
     model_used VARCHAR(100),
-    tier_used INTEGER,
-    services_invoked TEXT[],
     rag_sources JSONB,
-    latency_ms INTEGER,
     metadata JSONB
 );
 
-CREATE TABLE promotion_events (
-    id SERIAL PRIMARY KEY,
-    conversation_id VARCHAR(255) REFERENCES conversations(conversation_id),
-    topic VARCHAR(255),
-    offered_at TIMESTAMP DEFAULT NOW(),
-    user_response VARCHAR(20),
-    research_session_id VARCHAR(255)
+CREATE TABLE conversation_documents (
+    conversation_id VARCHAR(255) REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+    document_id VARCHAR(255) REFERENCES documents(document_id) ON DELETE CASCADE,
+    added_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (conversation_id, document_id)
 );
 
--- Knowledge Graph (research-scoped only)
-CREATE TABLE graph_nodes (
-    id SERIAL PRIMARY KEY,
-    node_id VARCHAR(255) UNIQUE NOT NULL,
-    node_type VARCHAR(50) NOT NULL,
-    label VARCHAR(255) NOT NULL,
-    definition TEXT,
-    confidence DECIMAL(4,3) DEFAULT 1.0,
-    mention_count INTEGER DEFAULT 1,
-    first_seen TIMESTAMP DEFAULT NOW(),
-    last_reinforced TIMESTAMP DEFAULT NOW(),
-    decay_weight DECIMAL(4,3) DEFAULT 1.0,
-    source_research_ids TEXT[],
-    properties JSONB
-);
-
-CREATE TABLE graph_edges (
-    id SERIAL PRIMARY KEY,
-    edge_id VARCHAR(255) UNIQUE NOT NULL,
-    source_node_id VARCHAR(255) REFERENCES graph_nodes(node_id),
-    target_node_id VARCHAR(255) REFERENCES graph_nodes(node_id),
-    edge_type VARCHAR(50) NOT NULL,
-    weight DECIMAL(4,3) DEFAULT 1.0,
-    confidence DECIMAL(4,3) DEFAULT 1.0,
-    reinforcement_count INTEGER DEFAULT 1,
-    first_seen TIMESTAMP DEFAULT NOW(),
-    last_reinforced TIMESTAMP DEFAULT NOW(),
-    source_research_ids TEXT[],
-    properties JSONB
-);
-
--- Quizzes
-CREATE TABLE quizzes (
-    id SERIAL PRIMARY KEY,
-    quiz_id VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
-    source_document_ids TEXT[],
-    source_research_ids TEXT[],
-    question_count INTEGER,
-    difficulty VARCHAR(20),
-    status VARCHAR(20) DEFAULT 'active'
-);
-
-CREATE TABLE quiz_questions (
-    id SERIAL PRIMARY KEY,
-    question_id VARCHAR(255) UNIQUE NOT NULL,
-    quiz_id VARCHAR(255) REFERENCES quizzes(quiz_id),
-    question_text TEXT NOT NULL,
-    question_type VARCHAR(50),
-    options JSONB,
-    correct_answer TEXT NOT NULL,
-    user_answer TEXT,
-    is_correct BOOLEAN,
-    concept_tested VARCHAR(255),
-    difficulty_rating DECIMAL(3,2),
-    answered_at TIMESTAMP,
-    time_taken_seconds INTEGER
-);
-
-CREATE TABLE concept_mastery (
-    concept_name VARCHAR(255) PRIMARY KEY,
-    total_questions INTEGER DEFAULT 0,
-    correct_answers INTEGER DEFAULT 0,
-    mastery_percentage DECIMAL(5,2) DEFAULT 0,
-    streak_current INTEGER DEFAULT 0,
-    streak_best INTEGER DEFAULT 0,
-    last_tested TIMESTAMP,
-    next_review TIMESTAMP,
-    ease_factor DECIMAL(4,3) DEFAULT 2.5,
-    interval_days INTEGER DEFAULT 1
-);
-
--- Research
+-- Research Sessions (project-scoped)
 CREATE TABLE research_sessions (
     id SERIAL PRIMARY KEY,
     research_id VARCHAR(255) UNIQUE NOT NULL,
+    project_id VARCHAR(255) REFERENCES projects(project_id) ON DELETE SET NULL,
     topic VARCHAR(255) NOT NULL,
     trigger_type VARCHAR(50),
-    trigger_context JSONB,
     status VARCHAR(50) DEFAULT 'pending',
     approval_required BOOLEAN DEFAULT TRUE,
     approved_at TIMESTAMP,
@@ -325,36 +301,9 @@ CREATE TABLE research_sessions (
     search_queries TEXT[],
     urls_scraped TEXT[],
     sources_processed INTEGER DEFAULT 0,
-    sources_accepted INTEGER DEFAULT 0,
-    documents_created INTEGER DEFAULT 0,
-    concepts_extracted INTEGER DEFAULT 0,
     synthesis_text TEXT,
     synthesis_model VARCHAR(100),
     metadata JSONB
-);
-
--- Behavioral signals
-CREATE TABLE learning_signals (
-    id SERIAL PRIMARY KEY,
-    signal_type VARCHAR(50) NOT NULL,
-    topic VARCHAR(255),
-    signal_value JSONB,
-    recorded_at TIMESTAMP DEFAULT NOW(),
-    conversation_id VARCHAR(255),
-    session_context JSONB
-);
-
-CREATE TABLE topic_engagement (
-    topic VARCHAR(255) PRIMARY KEY,
-    question_count INTEGER DEFAULT 0,
-    session_count INTEGER DEFAULT 0,
-    first_engaged TIMESTAMP DEFAULT NOW(),
-    last_engaged TIMESTAMP DEFAULT NOW(),
-    avg_question_sophistication DECIMAL(4,3),
-    follow_up_rate DECIMAL(4,3),
-    promotion_offered INTEGER DEFAULT 0,
-    promotion_accepted INTEGER DEFAULT 0,
-    quiz_score_avg DECIMAL(5,2)
 );
 ```
 
@@ -370,187 +319,157 @@ VectorParams(size=768, distance=Distance.COSINE)
     "document_id": "doc_123",
     "chunk_id": "chunk_456",
     "chunk_index": 0,
-    "text": "chunk content",
+    "user_id": 1,
+    "filename": "example.pdf",
+    "normalized_filename": "example",
     "source_type": "pdf",        # pdf | web | video | research
-    "knowledge_tier": "persistent",
-    "research_session_id": None,
-    "metadata": {
-        "filename": "example.pdf",
-        "page": 12,
-        "url": None
-    },
-    "created_at": "2026-02-18T10:00:00Z"
+    "created_at": "2026-04-01T10:00:00Z"
 }
 ```
 
-Embedding model: `nomic-embed-text` via Ollama (768 dimensions)
+Embedding model: `nomic-embed-text` via Ollama (768 dimensions). Text is NOT stored in Qdrant — `chunk_id` bridges back to `document_chunks` in Postgres.
+
+BM25 index: ParadeDB `pg_search` extension on `document_chunks(chunk_id, text, filename_normalized)`.
 
 ---
 
 ## API Endpoints
 
-All prefixed with `/api/`. No authentication in Phase 1.
+All prefixed with `/api/`. Auth via JWT Bearer token.
 
-### Chat
+### Projects (to be built)
+
+```
+GET    /api/projects
+POST   /api/projects
+GET    /api/projects/{project_id}
+PUT    /api/projects/{project_id}
+DELETE /api/projects/{project_id}
+
+GET    /api/projects/{project_id}/documents
+POST   /api/projects/{project_id}/documents        # { document_ids: list }
+DELETE /api/projects/{project_id}/documents/{id}
+
+GET    /api/projects/{project_id}/tasks
+POST   /api/projects/{project_id}/tasks
+DELETE /api/projects/{project_id}/tasks/{task_id}
+
+GET    /api/projects/{project_id}/surfaces
+POST   /api/projects/{project_id}/surfaces/{surface_id}/dismiss
+POST   /api/projects/{project_id}/surfaces/{surface_id}/act
+```
+
+### Chat (existing)
 
 ```
 POST /api/chat
 Body: {
     "message": str,
-    "conversation_id": str | null,   // null = new conversation
+    "conversation_id": str | null,
+    "document_ids": list[str],
+    "search_all": bool,
     "knowledge_tier": "ephemeral" | "persistent"
 }
-Response: {
-    "message_id": str,
-    "conversation_id": str,
-    "response": str,
-    "model_tier": int,
-    "rag_sources": list,
-    "services_invoked": list,
-    "promotion_suggestion": {         // null if no suggestion
-        "topic": str,
-        "reason": str
-    },
-    "latency_ms": int
-}
+Response: SSE stream — token events + done event with rag_sources
 
-WebSocket: /ws/chat
-// Streams tokens. Final message includes full metadata.
-// Send: { "message": str, "conversation_id": str, "knowledge_tier": str }
-// Receive stream: { "type": "token", "content": str }
-// Receive final: { "type": "done", "sources": list, "promotion_suggestion": obj }
+GET /api/chat/conversations
+GET /api/chat/conversations/{id}/messages
+GET /api/chat/{id}/documents
+POST /api/chat/{id}/documents      # batch attach
+DELETE /api/chat/{id}/documents/{doc_id}
 ```
 
-### Documents
+### Documents (existing)
 
 ```
-POST /api/documents/upload           // multipart/form-data, file field
-POST /api/documents/url              // { "url": str }
-GET  /api/documents                  // ?limit=20&offset=0&status=str
-GET  /api/documents/{document_id}
-DELETE /api/documents/{document_id}
-GET  /api/documents/{document_id}/status
+POST /api/documents/upload           # multipart, files + urls
+GET  /api/documents                  # ?search=&limit=&offset=&collection_id=&file_type=
+GET  /api/documents/{id}
+DELETE /api/documents/{id}
+GET  /api/documents/{id}/progress
+GET  /api/documents/progress/active  # bulk active progress
+GET  /api/documents/{id}/conversations
 ```
 
-### Research
+### Collections (existing)
+
+```
+GET    /api/collections
+POST   /api/collections
+PUT    /api/collections/{id}
+DELETE /api/collections/{id}
+POST   /api/collections/{id}/documents
+DELETE /api/collections/{id}/documents
+```
+
+### Research (project-scoped, to be built)
 
 ```
 POST /api/research
-Body: { "topic": str, "trigger": str, "max_sources": int, "require_approval": bool }
-Response: { "research_id": str, "status": str, "proposed_plan": obj }
-
+Body: { "project_id": str, "topic": str, "require_approval": bool }
 POST /api/research/{research_id}/approve
 POST /api/research/{research_id}/cancel
 GET  /api/research/{research_id}/status
-GET  /api/research                   // ?status=str&limit=int
 GET  /api/research/{research_id}/synthesis
 
 WebSocket: /ws/research/{research_id}
-// Server pushes stage updates throughout pipeline execution
 ```
 
-### Quizzes
+### System (existing)
 
 ```
-POST /api/quizzes/generate
-Body: { "source_ids": list, "question_count": int, "difficulty": str, "question_types": list }
-
-GET  /api/quizzes/{quiz_id}
-POST /api/quizzes/{quiz_id}/answer
-Body: { "question_id": str, "answer": str }
-
-GET  /api/quizzes/{quiz_id}/results
-GET  /api/quizzes/due                // spaced repetition queue
-GET  /api/concepts/mastery
-GET  /api/concepts/weak
-```
-
-### Knowledge Graph
-
-```
-GET  /api/graph/nodes                // ?type=str&limit=int
-GET  /api/graph/edges                // ?source_id=str
-GET  /api/graph/visualize            // full graph for D3
-GET  /api/graph/related              // ?concept=str&depth=int
-GET  /api/graph/gaps
-```
-
-### System
-
-```
-GET  /api/system/health
-GET  /api/system/storage
-GET  /api/system/resources
-GET  /api/system/models
-GET  /metrics                        // Prometheus metrics
+GET /api/system/health
+GET /api/system/resources
+GET /api/system/models
+GET /metrics
 ```
 
 ---
 
 ## Context Window Management
 
-Every chat request must manage context carefully. The request lifecycle:
+Every chat request must manage context carefully:
 
 1. Load conversation history from PostgreSQL
 2. Embed current message → search Qdrant for relevant chunks (top 4-6)
-3. Build system prompt with RAG context injected
-4. Check token budget — trim oldest history messages if over limit
-5. Send assembled messages array to Ollama with streaming
-6. Stream tokens to client via SSE or WebSocket
-7. Save complete response to PostgreSQL
-8. Check engagement signals → determine if promotion should be offered
-9. Return final metadata with response
+3. If project-scoped: filter RAG to project documents only
+4. Build system prompt with RAG context injected
+5. Check token budget — trim oldest history messages if over limit
+6. Send assembled messages array to Ollama with streaming
+7. Stream tokens to client via SSE
+8. Save complete response to PostgreSQL
 
 ### Token Budget
 
 ```
-Total context (7B model): ~8,192 tokens
-├── System prompt:         1,000 tokens (reserved)
-├── RAG sources:           2,000 tokens (trim chunks if needed)
-├── Conversation history:  3,500 tokens (drop oldest if over)
-├── Current message:         500 tokens
-└── Generation buffer:     1,192 tokens
+Total context (7B model): ~4,096 tokens
+├── System prompt:         500 tokens (reserved)
+├── RAG sources:           1,500 tokens (trim chunks if needed)
+├── Conversation history:  1,500 tokens (drop oldest if over)
+├── Current message:       500 tokens
+└── Generation buffer:     596 tokens
 ```
 
-### Summarization
-
-When conversation history exceeds budget, compress oldest messages:
-
-```python
-# Do not drop messages — summarize them
-# Summary goes at top of history as a special system context block
-# Summary must preserve: topics discussed, follow-up counts, engagement signals
-# Never summarize the 4 most recent exchanges
-```
+When history exceeds budget, summarize oldest messages — do not drop them. Summary preserves topics and decision points. Never summarize the 4 most recent exchanges.
 
 ---
 
 ## The Router
 
-The router runs on every message before any response is generated. It is a three-step process using the Tier 1 model:
+Runs on every message before any response is generated. Uses Tier 1 model. Three-step process: intent classification → tool selection → validation + fallback.
 
-**Step 1: Intent classification**
-**Step 2: Tool selection reasoning**
-**Step 3: Validation + fallback**
-
-The router must never be a simple pattern matcher. It uses structured prompting to reason about intent. When confidence is below 0.7, default to `rag_search + general_chat`.
-
-### Intent Types
+When confidence is below 0.7, default to `rag_search + general_chat`.
 
 ```python
 class IntentType(str, Enum):
     RAG_QUERY = "rag_query"
     GENERAL_CHAT = "general_chat"
     RESEARCH_REQUEST = "research"
-    QUIZ_REQUEST = "quiz"
     SERVICE_CONTROL = "service"
     SYSTEM_QUERY = "system"
     MULTI_INTENT = "multi"
-```
 
-### Router Output Schema
-
-```python
+# Router output schema
 {
     "intent": str,
     "confidence": float,       # 0.0-1.0
@@ -561,24 +480,11 @@ class IntentType(str, Enum):
 }
 ```
 
-### Routing Rules
-
-| Query type | Tier | RAG | Tools |
-|-----------|------|-----|-------|
-| Simple factual | 1 | Yes | none |
-| Complex reasoning | 2 | Yes | none |
-| Research request | 1 (route) | No | research_pipeline |
-| Quiz generation | 2 | Yes | quiz_engine |
-| Home automation | 1 | No | home_auto_mcp |
-| Jellyfin control | 1 | No | jellyfin_mcp |
-| File search | 1 | No | seafile_mcp |
-| System/storage | 1 | No | system_info |
-
 ---
 
 ## Research Pipeline
 
-Must run as Celery background tasks. Must send progress via WebSocket. Never block a synchronous request handler.
+Must run as Celery background tasks. Must send progress via WebSocket. Never block a synchronous request handler. All research sessions belong to a project.
 
 ### Stages
 
@@ -586,93 +492,31 @@ Must run as Celery background tasks. Must send progress via WebSocket. Never blo
 Stage 1: Data Collection (~30-60s)
 - Web search via SerpAPI (skip gracefully if SERP_API_KEY not set)
 - Scrape URLs via Crawl4AI
-- Download videos via yt-dlp if video URLs detected
-- Transcribe audio via Faster-Whisper
 - No LLM used in this stage
 
 Stage 2: Fast Filtering (~20-40s)
 - Use Tier 1 (7B) to summarize each source (100 words max)
 - Score relevance 0.0-1.0 per source
 - Discard sources below 0.6 relevance
-- Output: 3-5 filtered sources
 
 Stage 3: Knowledge Base Check (<1s)
-- Embed research topic
-- Search Qdrant for existing coverage
-- If similarity > 0.85: skip Stage 4, return existing knowledge
-- If similarity 0.6-0.85: augment mode
-- If similarity < 0.6: full synthesis mode
+- Embed research topic → search Qdrant
+- If similarity > 0.85: skip synthesis, return existing knowledge
+- If 0.6-0.85: augment mode
+- If < 0.6: full synthesis mode
 
 Stage 4: Deep Synthesis (~60-120s)
-- Only runs if Stage 3 requires it
-- Use Tier 3 (70B, CPU only, num_gpu=0)
-- Input: filtered sources from Stage 2 + existing knowledge from Stage 3
+- Only if Stage 3 requires it
+- Tier 3 (70B, CPU only, num_gpu=0)
 - Output: comprehensive synthesis with citations
-- Secondary pass: extract concepts and relationships for graph
 
 Stage 5: Knowledge Ingestion
 - Chunk synthesis + source content
 - Embed → Qdrant
-- Concepts + edges → PostgreSQL graph tables
+- Metadata → PostgreSQL
+- Create Surface on project with type=finding
 - Update research_session status to complete
 ```
-
-### WebSocket Progress Events
-
-```json
-{"stage": 1, "status": "running", "message": "Collecting sources..."}
-{"stage": 1, "status": "complete", "sources_found": 8}
-{"stage": 2, "status": "running", "message": "Filtering 8 sources..."}
-{"stage": 2, "status": "complete", "sources_kept": 4}
-{"stage": 3, "status": "running", "message": "Checking knowledge base..."}
-{"stage": 3, "status": "complete", "coverage": 0.2, "mode": "full_synthesis"}
-{"stage": 4, "status": "running", "message": "Synthesizing... ~90 seconds"}
-{"stage": 4, "status": "complete"}
-{"stage": 5, "status": "running", "message": "Ingesting into knowledge base..."}
-{"stage": 5, "status": "complete", "chunks_added": 47, "concepts_added": 12}
-{"status": "complete", "research_id": "res_789"}
-```
-
----
-
-## Knowledge Graph
-
-**Scope: research-scoped only.**
-
-The graph is populated exclusively by:
-- Completed research pipeline sessions (Stage 4 concept extraction)
-- Quiz/review sessions (concept mastery data)
-- Explicit document uploads
-
-It is **never** populated by general chat or ephemeral conversations.
-
-### Concept Extraction Prompt (Tier 2)
-
-After research synthesis, run this extraction pass:
-
-```
-From this research synthesis, extract key concepts and relationships.
-
-For each concept:
-- name: short canonical name
-- definition: 1-2 sentences
-- importance: 1-10
-- node_type: concept | technique | tool | person | paper
-
-For each relationship:
-- source: concept name
-- target: concept name
-- type: requires | relates_to | part_of | contradicts | extends | used_in
-- confidence: 0.0-1.0
-
-Synthesis: {synthesis_text}
-
-Respond in JSON only. No preamble.
-```
-
-### Graph Decay
-
-Weekly Celery job. Nodes not reinforced in 90 days lose 10% decay_weight per week. Minimum weight 0.1 — never fully delete. Nodes reinforced by correct quiz answers gain weight. Update `last_reinforced` and `decay_weight` fields.
 
 ---
 
@@ -681,14 +525,12 @@ Weekly Celery job. Nodes not reinforced in 90 days lose 10% decay_weight per wee
 All paths are environment-variable driven. Never hardcode paths.
 
 ```bash
-# Hot storage — NVMe, latency sensitive
 ATHENA_HOT_BASE=/mnt/data/athena
 QDRANT_STORAGE_PATH=${ATHENA_HOT_BASE}/qdrant_storage
 POSTGRES_DATA_PATH=${ATHENA_HOT_BASE}/postgres_data
 OLLAMA_MODELS_PATH=${ATHENA_HOT_BASE}/models
 REDIS_DATA_PATH=${ATHENA_HOT_BASE}/redis_data
 
-# Bulk storage — HDD, large files
 ATHENA_BULK_BASE=/mnt/storage/athena
 UPLOADS_PATH=${ATHENA_BULK_BASE}/uploads
 PROCESSED_PATH=${ATHENA_BULK_BASE}/processed
@@ -696,42 +538,32 @@ RESEARCH_ARCHIVE_PATH=${ATHENA_BULK_BASE}/research_archives
 BACKUP_PATH=${ATHENA_BULK_BASE}/backups
 ```
 
-### Storage Stats API
-
-Cache directory size calculations — never compute on-demand. Refresh every 5 minutes via Celery beat. Cache result in Redis.
+Storage stats are always cached — never computed on request. Celery beat refreshes every 5 minutes, result stored in Redis.
 
 ---
 
 ## Celery Tasks and Cron Jobs
 
 ```python
-# celeryconfig.py beat schedule
 CELERYBEAT_SCHEDULE = {
-    # Storage stats cache refresh
     "refresh-storage-stats": {
         "task": "tasks.maintenance.refresh_storage_stats",
         "schedule": crontab(minute="*/5")
     },
-    # Daily PostgreSQL backup
     "daily-postgres-backup": {
         "task": "tasks.backup.backup_postgres",
         "schedule": crontab(hour=2, minute=0)
     },
-    # Weekly Qdrant snapshot
     "weekly-qdrant-snapshot": {
         "task": "tasks.backup.snapshot_qdrant",
         "schedule": crontab(hour=3, minute=0, day_of_week=0)
     },
-    # Weekly graph decay
-    "weekly-graph-decay": {
-        "task": "tasks.maintenance.apply_graph_decay",
-        "schedule": crontab(hour=4, minute=0, day_of_week=0)
-    },
-    # Cleanup old backups (keep 30 days)
     "cleanup-old-backups": {
         "task": "tasks.backup.cleanup_old_backups",
         "schedule": crontab(hour=5, minute=0)
-    }
+    },
+    # Per-project background tasks are scheduled dynamically
+    # at project task creation time, not via beat schedule
 }
 ```
 
@@ -742,7 +574,6 @@ CELERYBEAT_SCHEDULE = {
 MCP servers are optional. Core Athena must work without any MCP connections.
 
 ```python
-# Each MCP server is dynamically discovered at connection time
 class MCPServer:
     name: str
     endpoint: str
@@ -755,8 +586,6 @@ class MCPTool:
     parameters: dict    # JSON schema
 ```
 
-The router uses tool descriptions to decide when to invoke MCP. No hardcoded tool logic.
-
 **Planned MCP servers (not yet built):**
 - `jellyfin` — media control
 - `home_automation` — device control
@@ -766,28 +595,28 @@ The router uses tool descriptions to decide when to invoke MCP. No hardcoded too
 
 ## Frontend Structure
 
-React 18 + TypeScript + Tailwind CSS + Vite. Deployed as PWA.
+React 18 + TypeScript + Tailwind CSS + Next.js App Router. Structural Glass design system (tokens defined in `globals.css`).
 
 ### Tab Structure
 
 ```
-Chat (default) → Document Questions → Research → Knowledge Graph → Quizzes → Documents → Settings
+Projects (default) → Chat → Research → Documents → Settings
 ```
+
+Projects is the primary view — a dashboard of active projects and their surfaces. Chat is secondary. Knowledge Graph and Quizzes are removed from the tab bar.
 
 ### Chat Requirements
 
-- SSE for token streaming (not WebSocket — SSE is sufficient for one-way streaming)
-- WebSocket for research pipeline progress (bidirectional — user can cancel)
+- SSE for token streaming
 - Optimistic UI — show user message immediately on send
-- Promotion suggestion renders as a card below assistant message, never inline
-- Source citations collapsible below each response
-- Model tier badge on each response: "Tier 1 · 7B · 1.8s"
-- Conversation list in left sidebar
-- Ephemeral/persistent indicator per conversation
+- Source citations collapsible below each response with inline `[n]` chips rendered as clickable components
+- Per-message source selection: clicking an assistant bubble updates the DocumentBar to show that message's RAG sources
+- Model tier badge on each response
+- Conversation list scoped to project when opened from project context
 
 ### Persistent Footer
 
-Always visible. Shows at a glance:
+Always visible:
 ```
 NVMe [████░░] 7%    HDD [███░░░░] 16%    CPU 12%    GPU 4.2/16GB
 ```
@@ -795,8 +624,6 @@ NVMe [████░░] 7%    HDD [███░░░░] 16%    CPU 12%    GP
 ---
 
 ## Environment Variables
-
-All required variables. Document every addition to `.env.example`:
 
 ```bash
 # Database
@@ -827,72 +654,83 @@ SEAFILE_API_KEY=
 # App config
 LOG_LEVEL=INFO
 MAX_UPLOAD_SIZE_MB=500
-CONTEXT_WINDOW_TOKENS=8192
+CONTEXT_WINDOW_TOKENS=4096
 RAG_TOP_K=6
-PROMOTION_SIGNAL_THRESHOLD=3
 ```
 
 ---
 
 ## Implementation Phases
 
-Build in this order. Do not start a phase until the previous phase's exit criteria are met.
+Build in this order.
 
-### Phase 1: Foundation ← START HERE
-- Docker Compose stack running all services
+### Phase 1: Foundation ← COMPLETE
+- Docker Compose stack (Postgres/ParadeDB, Qdrant, Redis, Celery, Ollama, Crawl4AI)
 - Document upload → chunking → embedding → Qdrant
-- Basic chat with RAG (Tier 1 only)
+- Hybrid search (vector + BM25 via pg_search, RRF fusion)
+- Basic chat with RAG, SSE streaming
 - Conversation history in PostgreSQL
-- Document list UI
+- Auth (JWT)
+- Collections
 
-**Exit criteria:**
-- Upload PDF → ask questions → get accurate answers
-- Restart containers → conversation history survives
-- GPU active during inference (check nvidia-smi)
+### Phase 2: Document Processing ← ~75% COMPLETE
+- Sentence-aware chunking ✓
+- URL scraping via Crawl4AI ✓
+- Background processing via Celery ✓
+- Progress tracking via Redis ✓
+- Missing: video transcription (Faster-Whisper), Docling for better PDF/DOCX extraction
 
-### Phase 2: Document Processing
-- Smart chunking (sentence-aware)
-- Video transcription via Faster-Whisper
-- Web URL scraping via Crawl4AI
-- Background processing via Celery
-- Processing status UI
+### Phase 3: Chat Refinement ← IN PROGRESS
+- Inline `[n]` citation chips (remark plugin → SourceItem component)
+- Per-message source selection in DocumentBar
+- `selectedMessageId` per-conversation state in chat store
+- Sidebar and conversation list polish
 
-### Phase 3: Learning Features
-- Quiz generation via Tier 2
-- Quiz UI
-- Concept mastery tracking
-- SM-2 spaced repetition
-- Weak area identification
+### Phase 4: Projects Layer ← NEXT
+- `projects`, `project_documents`, `project_tasks`, `surfaces` tables + schema migration
+- Projects CRUD API (`api/projects.py`)
+- Project dashboard UI — primary view, replaces conversation list as homepage
+- Wire documents to projects (project_documents join)
+- Wire research sessions to projects (project_id FK)
+- When chat opened from project context, RAG scopes to project documents
 
-### Phase 4: Two-Tier Knowledge Model
-- Ephemeral conversation tier
-- Promotion suggestion UI component
-- Engagement signal tracking
-- Promotion acceptance pipeline
+**Exit criteria:** User can create a project, attach documents, and open a scoped chat that only retrieves from those documents.
 
-### Phase 5: Research Pipeline
-- Full multi-stage pipeline via Celery
-- Research approval UI
+### Phase 5: Background Tasks
+- `project_tasks` Celery scheduling — dynamic per-project schedules
+- Task types: `research` (run research pipeline for topic), `monitor` (check URL for changes), `aggregate` (collect sources on schedule)
+- Task management UI within project view
+- Task run history
+
+### Phase 6: Surfaces
+- Surface creation from background task output (research complete → surface of type `finding`)
+- Surface inbox UI — list of unread surfaces per project
+- Dismiss / act / read state transitions
+- Surface detail view
+
+### Phase 7: Research Pipeline (project-scoped)
+- Full 5-stage Celery pipeline
+- Project-scoped: research sessions belong to a project, findings create surfaces
 - WebSocket progress updates
-- Stage 3 knowledge base check
-- Tier 3 CPU-only synthesis
+- Approval flow before execution
+- Stage 4: Tier 3 CPU-only synthesis
 
-### Phase 6: Knowledge Graph
-- Concept extraction from research
-- Graph persistence
-- D3.js visualization
-- Graph decay job
+### Phase 8: Profile
+- User behavioral model — domains, preferences, constraints
+- Populated incrementally from project activity
+- Informs background task priorities and surface ranking
 
-### Phase 7: Router + MCP
-- ReAct router implementation
+### Phase 9: MCP Integration
 - MCP connection manager
-- First MCP server (Jellyfin or home automation)
+- Router uses tool descriptions for selection
+- First server: Jellyfin or home automation
 
-### Phase 8: Production Polish
+### Phase 10: Production Polish
 - Prometheus metrics
-- Automated backups
+- Celery beat backup jobs
+- Storage stats Celery task + Redis cache
 - Full environment variable configuration
-- Docker Compose deployment documentation
+- Nginx + Docker Compose deployment
 
 ---
 
@@ -900,16 +738,18 @@ Build in this order. Do not start a phase until the previous phase's exit criter
 
 Do not implement any of the following until explicitly instructed:
 
-- Authentication or multi-user support
-- Mobile native app
-- Cloud sync or backup
-- Athena as an MCP server (exposing Athena to external tools)
-- Voice interface
-- Image generation
-- Model fine-tuning
-- Collaborative features
-- Email or push notifications
-- Paid tiers or SaaS features
+- **Quiz / spaced repetition** — removed from scope entirely
+- **Two-tier knowledge model / promotion flow** — superseded by Projects
+- **Knowledge graph as top-level feature** — may revisit as a project-scoped view later, not now
+- **Authentication beyond current JWT** — no multi-user, no OAuth
+- **Mobile native app**
+- **Cloud sync or backup**
+- **Voice interface**
+- **Image generation**
+- **Model fine-tuning**
+- **Collaborative features**
+- **Email or push notifications**
+- **Athena as an MCP server**
 
 ---
 
@@ -917,20 +757,19 @@ Do not implement any of the following until explicitly instructed:
 
 - **Python:** Type hints everywhere. Async/await throughout. Pydantic v2 for all schemas.
 - **Error handling:** Never swallow exceptions silently. Log with loguru. Return structured error responses.
-- **Environment variables:** Never hardcode credentials, paths, or hosts. Always read from environment with sensible defaults.
+- **Environment variables:** Never hardcode credentials, paths, or hosts.
 - **Database queries:** Use parameterized queries. Never string-format SQL.
 - **Background tasks:** All long-running operations go through Celery. Never block a request handler.
-- **Logging:** Structured JSON logs via loguru. Include request_id, conversation_id, latency_ms on every log line where relevant.
-- **Testing:** Write tests for core business logic (router, chunking, RAG assembly, promotion signal detection). Not required for API route handlers in Phase 1.
+- **Logging:** Structured JSON logs via loguru. Include request_id, conversation_id, latency_ms where relevant.
 
 ---
 
-## Key Constraints to Never Violate
+## Key Constraints — Never Violate
 
 1. Tier 3 model always runs with `num_gpu=0`. Always CPU. Never GPU.
-2. Ephemeral conversations never enter Qdrant.
-3. Storage stats are always cached — never computed synchronously.
-4. The router always runs before any LLM call in the chat pipeline.
-5. Research pipeline always requires user approval before executing (unless `require_approval=False` explicitly passed).
-6. All paths read from environment variables. No hardcoded paths.
-7. Never load Tier 2 and Tier 3 models simultaneously.
+2. Storage stats are always cached — never computed on request.
+3. The router always runs before any LLM call in the chat pipeline.
+4. Research pipeline always requires user approval before executing (unless `require_approval=False` explicitly passed).
+5. All paths read from environment variables. No hardcoded paths.
+6. Never load Tier 2 and Tier 3 models simultaneously.
+7. All research sessions must have a `project_id`. Standalone research sessions are not allowed.

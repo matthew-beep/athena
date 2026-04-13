@@ -21,7 +21,7 @@ export function MessageInput() {
   const { sendMessage, stopStreaming } = useSSEChat();
   const { isStreaming, activeConversationId, setMessageTokens, statusMessage, activeModel, pendingSearchAll, setPendingSearchAll, setSearchAll, conversationSearchAll } = useChatStore(
     useShallow((s) => ({
-      isStreaming: s.isStreaming,
+      isStreaming: s.activeConversationId ? (s.isStreaming[s.activeConversationId] ?? false) : false,
       activeConversationId: s.activeConversationId,
       setMessageTokens: s.setMessageTokens,
       statusMessage: s.statusMessage,
@@ -85,7 +85,7 @@ export function MessageInput() {
   const isOverMax = tokenEst > MAX_TOKENS;
 
   return (
-    <div className="p-4 flex-shrink-0">
+    <div className="p-4 flex-shrink-0 w-full">
       {/* Status message (e.g. "summarizing context...") */}
       {statusMessage && (
         <p className="text-center text-[10px] text-muted-foreground/60 font-mono mb-1.5 animate-pulse">
@@ -94,54 +94,60 @@ export function MessageInput() {
       )}
       <div
         className={cn(
-          'bg-[var(--raised)] rounded-2xl border flex items-center justify-between gap-2 px-4 py-2 focus-within:border-border transition-colors',
+          'bg-[var(--raised)] rounded-2xl border flex flex-col items-center justify-between gap-2 px-4 py-2 focus-within:border-border transition-colors',
           isOverWarn ? 'border-yellow-500/40' : 'border-border/50'
         )}
       >
-        <button
-          onClick={handleSearchAllToggle}
-          title={isSearchAll ? 'Searching all documents — click to disable' : 'Search all documents'}
-          className={cn(
-            'p-1.5 rounded-lg transition-all flex-shrink-0',
-            isSearchAll
-              ? 'text-foreground bg-[var(--raised-h)]'
-              : 'text-muted-foreground hover:text-foreground'
-          )}
-        >
-          <Globe size={14} />
-        </button>
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onInput={handleInput}
-          placeholder="Message Athena… (Enter to send, Shift+Enter for new line)"
-          className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground min-h-[24px] max-h-[200px]"
-          rows={1}
-          disabled={isStreaming}
-        />
-        {isStreaming ? (
+        <div className='w-full flex'>
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            onInput={handleInput}
+            placeholder="Message Athena… (Enter to send, Shift+Enter for new line)"
+            className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground min-h-[24px] max-h-[200px]"
+            rows={1}
+            disabled={isStreaming}
+          />
+        </div>
+
+        <div className='w-full flex items-center justify-between'>
           <button
-            onClick={stopStreaming}
-            className="px-3 py-3 rounded-lg text-xs font-semibold transition-all flex-grow-0 flex items-center gap-1.5 bg-foreground text-background hover:bg-foreground/90"
-          >
-            <Square size={12} />
-          </button>
-        ) : (
-          <button
-            onClick={handleSend}
-            disabled={!text.trim() || isOverMax}
+            onClick={handleSearchAllToggle}
+            title={isSearchAll ? 'Searching all documents — click to disable' : 'Search all documents'}
             className={cn(
-              'px-3 py-3 rounded-lg text-xs font-semibold transition-all flex-grow-0 flex items-center gap-1.5',
-              text.trim() && !isOverMax
-                ? 'bg-foreground text-background hover:bg-foreground/90'
-                : 'text-muted-foreground cursor-not-allowed bg-foreground'
+              'p-1.5 rounded-lg transition-all flex-shrink-0',
+              isSearchAll
+                ? 'text-foreground bg-[var(--raised-h)]'
+                : 'text-muted-foreground hover:text-foreground'
             )}
           >
-            <Send size={12} />
+            <Globe size={14} />
           </button>
-        )}
+
+          {isStreaming ? (
+            <button
+              onClick={stopStreaming}
+              className="px-3 py-3 rounded-lg text-xs font-semibold transition-all flex-grow-0 flex items-center gap-1.5 bg-foreground text-background hover:bg-foreground/90"
+            >
+              <Square size={12} />
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!text.trim() || isOverMax}
+              className={cn(
+                'px-3 py-3 rounded-lg text-xs font-semibold transition-all flex-grow-0 flex items-center gap-1.5',
+                text.trim() && !isOverMax
+                  ? 'bg-foreground text-background hover:bg-foreground/90'
+                  : 'text-muted-foreground cursor-not-allowed bg-foreground'
+              )}
+            >
+              <Send size={12} />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center justify-between mt-1.5 px-1">

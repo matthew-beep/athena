@@ -7,9 +7,8 @@ import { useChatStore } from '@/stores/chat.store';
 import { apiClient } from '@/api/client';
 import { useShallow } from 'zustand/react/shallow';
 import type { Message as MessageType, RagSource } from '@/types';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { SourceItem } from './SourceItem';
+import { CitationChip } from './CitationChip';
+import { AthenaMarkdown } from './AthenaMarkdown';
 
 interface MessageProps {
   message: MessageType;
@@ -57,7 +56,7 @@ function SourcesPanel({ sources }: { sources: RagSource[] }) {
 
       {sources && (<div className="flex gap-1">
         {sources.map((src, index) => (
-          <SourceItem key={src.filename + (src.chunk_id ?? src.chunk_index)} index={index} />
+          <CitationChip key={src.filename + (src.chunk_id ?? src.chunk_index)} index={index} text={src.text} />
         ))}
       </div>)}
 
@@ -85,25 +84,15 @@ export function Message({ message }: MessageProps) {
 
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-      {/* Avatar */}
-      <div
-        className={`w-6 h-6 rounded-lg flex-shrink-0 flex items-center justify-center text-xs font-bold font-display ${
-          isUser
-            ? 'bg-foreground/10 border border-foreground/20 text-foreground'
-            : 'bg-foreground/5 border border-foreground/10 text-muted-foreground'
-        }`}
-      >
-        {isUser ? 'U' : 'A'}
-      </div>
 
       {/* Bubble */}
       <div
-        className={`max-w-[80%] ${
-          isUser ? 'items-end' : `items-start ${isActiveMessage ? 'border-[var(--blue-br)]' : ''}`
+        className={`min-w-0 ${
+          isUser ? 'items-end' : 'items-start'
         } flex flex-col gap-1`}
       >
         <div 
-          className={isUser ? 'msg-user' : `msg-ai border ${isActiveMessage ? 'border-[var(--blue-br)] bg-[var(--blue-a)]' : 'border-[var(--border)]'}`}
+          className={isUser ? 'msg-user' : `msg-ai ${isActiveMessage ? 'border-[var(--blue-br)] bg-[var(--blue-a)]' : 'border-[var(--border)]'}`}
           onClick={() => {
             if (isUser) return;
             setSelectedMessageId(message.conversation_id, message.message_id)
@@ -114,9 +103,7 @@ export function Message({ message }: MessageProps) {
           ) : (
             <div className={`message-content`}>
               <div>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {message.content}
-                </ReactMarkdown>
+                <AthenaMarkdown content={message.content} sources={message.rag_sources ?? []} />
               </div>
             </div>
           )}
@@ -125,11 +112,7 @@ export function Message({ message }: MessageProps) {
         {/* Footer: tier badge + sources toggle */}
         {!isUser && (
           <div className="flex flex-col gap-1 w-full">
-            {message.model_used && (
-              <div className="px-1">
-                <TierBadge tier={1} model={message.model_used} />
-              </div>
-            )}
+            <p>Message Utility Bar</p>
             {hasSources && (
               <SourcesPanel sources={message.rag_sources!} />
             )}

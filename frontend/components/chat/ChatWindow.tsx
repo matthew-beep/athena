@@ -57,13 +57,13 @@ export function ChatWindow() {
             setSidebarCollapsed(true);
           }
         }} 
-        className="flex items-center justify-center w-8 h-8 rounded-lg border-2 border-border/50"
+        className="flex items-center justify-center w-8 h-8 rounded-lg border-border/50"
         >
           {contextPanelOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
         </button>
       </div>
-      <div className="flex-1 min-h-0 w-full flex gap-5">
-        <div className="flex-1 min-h-0 min-w-0 flex flex-col animate-scale-in rounded-lg">
+      <div className="flex-1 min-h-0 w-full flex gap-5 justify-center">
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col items-center animate-scale-in rounded-lg max-w-3xl">
           <MessageList conversationId={activeConversationId} />
           <ScopeBar />
           <MessageInput />

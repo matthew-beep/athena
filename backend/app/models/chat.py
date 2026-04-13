@@ -46,3 +46,15 @@ class MessageOut(BaseModel):
                 except (json.JSONDecodeError, ValueError):
                     values['rag_sources'] = None
         return values
+
+
+
+class SuggestionsRequest(BaseModel):
+    conversation_id: str
+    last_user_message: str
+    last_assistant_message: str
+    history: list[dict] | None = None  # optional, trimmed recent turns
+
+
+class SuggestionsResponse(BaseModel):
+    suggestions: list[str]

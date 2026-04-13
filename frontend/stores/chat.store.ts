@@ -13,8 +13,8 @@ interface ChatState {
   conversations: Conversation[];
   activeConversationId: string | null;
   messages: Record<string, Message[]>;
-  streamingContent: string;
-  isStreaming: boolean;
+  streamingContent: Record<string, string>;
+  isStreaming: Record<string, boolean>;
   // Developer mode: context window state
   contextTokens: Record<string, number>; // per-conversation token count (from context_debug SSE event)
   contextBudget: number;                 // total token budget (8192) — same for all conversations
@@ -26,9 +26,9 @@ interface ChatState {
   setActiveConversation: (id: string | null) => void;
   setMessages: (conversationId: string, msgs: Message[]) => void;
   addMessage: (conversationId: string, msg: Message) => void;
-  appendStreamToken: (token: string) => void;
-  setIsStreaming: (val: boolean) => void;
-  clearStream: () => void;
+  appendStreamToken: (convId: string, token: string) => void;
+  setIsStreaming: (convId: string, val: boolean) => void;
+  clearStream: (convId: string) => void;
   updateConversationTitle: (id: string, title: string) => void;
   setContextTokens: (conversationId: string, tokens: number) => void;
   bulkSetContextTokens: (map: Record<string, number>) => void;
@@ -74,14 +74,19 @@ interface ChatState {
 
   selectedSourceIndex: number | null;
   setSelectedSourceIndex: (index: number | null) => void;
+
+  /** Suggestions for the active conversation */
+  conversationSuggestions: Record<string, { suggestions: string[]; loading: boolean }>;
+  setConversationSuggestions: (conversationId: string, suggestions: string[]) => void;
+  setConversationSuggestionsLoading: (conversationId: string, loading: boolean) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
   conversations: [],
   activeConversationId: null,
   messages: {},
-  streamingContent: '',
-  isStreaming: false,
+  streamingContent: {},
+  isStreaming: {},
   contextTokens: {},
   contextBudget: 0,
   messageTokens: 0,
@@ -157,12 +162,14 @@ export const useChatStore = create<ChatState>((set) => ({
       },
     })),
 
-  appendStreamToken: (token) =>
-    set((s) => ({ streamingContent: s.streamingContent + token })),
+  appendStreamToken: (convId, token) =>
+    set((s) => ({ streamingContent: { ...s.streamingContent, [convId]: (s.streamingContent[convId] ?? '') + token } })),
 
-  setIsStreaming: (val) => set({ isStreaming: val }),
+  setIsStreaming: (convId, val) =>
+    set((s) => ({ isStreaming: { ...s.isStreaming, [convId]: val } })),
 
-  clearStream: () => set({ streamingContent: '', statusMessage: null }),
+  clearStream: (convId) =>
+    set((s) => ({ streamingContent: { ...s.streamingContent, [convId]: '' }, statusMessage: null })),
 
   updateConversationTitle: (id, title) =>
     set((s) => ({
@@ -183,4 +190,20 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setStatusMessage: (msg) => set({ statusMessage: msg }),
   setActiveModel: (model) => set({ activeModel: model }),
+
+  conversationSuggestions: {},
+  setConversationSuggestions: (conversationId, suggestions) =>
+    set((s) => ({
+      conversationSuggestions: {
+        ...s.conversationSuggestions,
+        [conversationId]: { suggestions, loading: false },
+      },
+    })),
+  setConversationSuggestionsLoading: (conversationId, loading) =>
+    set((s) => ({
+      conversationSuggestions: {
+        ...s.conversationSuggestions,
+        [conversationId]: { suggestions: s.conversationSuggestions[conversationId]?.suggestions ?? [], loading },
+      },
+    })),
 }));

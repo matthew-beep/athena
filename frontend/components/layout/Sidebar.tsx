@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -16,13 +16,14 @@ import {
   ChevronLeft,
   X,
   PanelLeft,
-  Home
+  Home,
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chat.store';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
 import { apiClient } from '@/api/client';
 import { cn } from '@/utils/cn';
+import { SidebarConversationRow } from '@/components/layout/SidebarConversationRow';
 import type { Conversation, Message } from '@/types';
 
 const NAV_ITEMS = [
@@ -41,10 +42,13 @@ interface SidebarContentProps {
   onClose?: () => void;
 }
 
+
+
 function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentProps) {
   const pathname = usePathname();
   const { logout, user } = useAuthStore();
   const { toggleSidebarCollapsed } = useUIStore();
+
   const {
     conversations,
     setConversations,
@@ -184,21 +188,12 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
               </p>
             )}
             {conversations.map((conv) => (
-              <button
+              <SidebarConversationRow
                 key={conv.conversation_id}
-                onClick={() => handleSelectConversation(conv)}
-                className={cn(
-                  'w-full text-left px-3 py-2 rounded-lg text-xs transition-all flex items-start gap-2',
-                  activeConversationId === conv.conversation_id
-                    ? 'text-foreground bg-[var(--raised-h)]'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <MessageSquare size={11} className="mt-0.5 shrink-0 opacity-50" />
-                <span className="truncate leading-tight">
-                  {conv.title ?? 'Untitled'}
-                </span>
-              </button>
+                conversation={conv}
+                active={activeConversationId === conv.conversation_id}
+                onSelect={handleSelectConversation}
+              />
             ))}
           </div>
         </div>

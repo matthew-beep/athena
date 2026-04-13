@@ -1,23 +1,38 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { Message } from './Message';
 import { useChatStore } from '@/stores/chat.store';
 import { useShallow } from 'zustand/react/shallow';
 import type { Message as MessageType } from '@/types';
+import { StreamingMarkdown } from './AthenaMarkdown';
+import { SuggestionsBar } from './SuggestionsBar';
+
+// Isolated component — only re-renders when streamingContent changes,
+// keeping MessageList itself out of the per-token render cycle
+function StreamingBubble({ conversationId }: { conversationId: string }) {
+  const streamingContent = useChatStore((s) => s.streamingContent[conversationId] ?? '');
+  if (!streamingContent) return null;
+  return (
+    <div className="animate-fade-up flex gap-3">
+      <div className="msg-ai min-w-0">
+        <div className="message-content">
+          <StreamingMarkdown content={streamingContent} />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface MessageListProps {
   conversationId: string | null;
 }
 
 export function MessageList({ conversationId }: MessageListProps) {
-  const { messages, streamingContent, isStreaming } = useChatStore(
+  const { messages, isStreaming } = useChatStore(
     useShallow((s) => ({
       messages: s.messages,
-      streamingContent: s.streamingContent,
-      isStreaming: s.isStreaming,
+      isStreaming: conversationId ? (s.isStreaming[conversationId] ?? false) : false,
     }))
   );
 
@@ -29,7 +44,7 @@ export function MessageList({ conversationId }: MessageListProps) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [msgs.length, streamingContent]);
+  }, [msgs.length, isStreaming]);
 
   if (msgs.length === 0 && !isStreaming) {
     return (
@@ -48,34 +63,21 @@ export function MessageList({ conversationId }: MessageListProps) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4 min-h-0 ">
+    <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4 min-h-0">
       {msgs.map((msg) => (
         <div key={msg.message_id} className="animate-fade-up">
           <Message message={msg} />
         </div>
       ))}
 
+      {conversationId && <SuggestionsBar />}
+
       {/* Streaming assistant message */}
-      {isStreaming && streamingContent && (
-        <div className="animate-fade-up flex gap-3">
-          <div className="w-6 h-6 rounded-lg flex-shrink-0 flex items-center justify-center text-xs font-bold font-display bg-foreground/5 border border-foreground/10 text-muted-foreground">
-            A
-          </div>
-          <div className="msg-ai">
-            <div className="message-content">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingContent}</ReactMarkdown>
-            </div>
-            <span className="inline-block w-0.5 h-3.5 bg-muted-foreground ml-0.5 animate-pulse align-middle" aria-hidden />
-          </div>
-        </div>
-      )}
+      {isStreaming && conversationId && <StreamingBubble conversationId={conversationId} />}
 
       {/* Typing indicator — waiting for first token */}
-      {isStreaming && !streamingContent && (
+      {isStreaming && !useChatStore.getState().streamingContent[conversationId ?? ''] && (
         <div className="animate-fade-up flex gap-3">
-          <div className="w-6 h-6 rounded-lg flex-shrink-0 flex items-center justify-center text-xs font-bold font-display bg-foreground/5 border border-foreground/10 text-muted-foreground">
-            A
-          </div>
           <div className="msg-ai flex items-center gap-1.5">
             <div className="typing-dot" />
             <div className="typing-dot" />

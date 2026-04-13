@@ -19,11 +19,7 @@ const MenuRoot = forwardRef<HTMLDivElement, MenuProps>(function Menu(
       ref={ref}
       id={id}
       role="menu"
-      className={cn(
-        'min-w-36 overflow-hidden rounded-md border border-[var(--border)]',
-        'bg-[color:var(--panel,#0b0f14)] shadow-lg backdrop-blur',
-        className
-      )}
+      className={cn('menu', className)}
       style={style}
     >
       {children}
@@ -43,11 +39,8 @@ function MenuItem({ children, variant = 'default', className, ...rest }: MenuIte
       type="button"
       role="menuitem"
       className={cn(
-        'w-full px-3 py-2 text-left text-sm transition-colors',
-        variant === 'default' &&
-          'text-[var(--t2)] hover:bg-[color:var(--border)]/30 hover:text-[var(--t1)]',
-        variant === 'danger' &&
-          'text-red-400 hover:bg-[color:var(--border)]/30 hover:text-red-300',
+        'menu-item',
+        variant === 'danger' && 'danger',
         className
       )}
       {...rest}

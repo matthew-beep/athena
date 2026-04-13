@@ -157,3 +157,14 @@ export interface CollectionDocumentsMutateResponse {
   detail: string;
   updated: number;
 }
+
+export interface SuggestionsRequest {
+  conversation_id: string;
+  last_user_message: string;
+  last_assistant_message: string;
+  history?: { role: string; content: string }[];
+}
+
+export interface SuggestionsResponse {
+  suggestions: string[];
+}
