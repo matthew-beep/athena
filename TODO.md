@@ -127,6 +127,7 @@ What makes Virgil genuinely different from every other RAG chat app. Background 
 
 ## Bugs / Active Issues
 
+- [ ] **Suggestions bar inconsistent** — sometimes shows, sometimes doesn't. Backend strips code fences and has `think: False` but issue persists. Likely the model still returns non-JSON output in some cases. Investigate actual raw `content` from Ollama by logging it before `json.loads()`.
 - [ ] **Muting docs is UI-only** — `mutedIds` in `DocumentBar` never sent to backend.
 - [ ] **Summarization in hot path** — `_generate_and_cache_summary()` can block next request (`core/context.py`). Move to background or add per-conversation lock.
 - [ ] **Storage stats return 0** — NVMe/HDD percentages hardcoded to 0 in `GET /api/system/resources`. Needs Redis cache wired.

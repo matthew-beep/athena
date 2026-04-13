@@ -212,11 +212,12 @@ export function useSSEChat() {
                 } satisfies SuggestionsRequest)
                   .then((res) => {
                     useChatStore.getState().setConversationSuggestions(realId, res.suggestions ?? []);
+                    console.log('suggestions', JSON.stringify(res, null, 2));
                   })
                   .catch(() => {
                     useChatStore.getState().setConversationSuggestionsLoading(realId, false);
                   });
-                  
+
               } else if (event.type === 'error') {
                 console.error('Stream error:', event.content);
                 setStatusMessage(null);

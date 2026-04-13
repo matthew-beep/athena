@@ -448,11 +448,16 @@ Assistant said: {body.last_assistant_message}"""
                     "model": settings.ollama_model,
                     "messages": [{"role": "user", "content": prompt}],
                     "stream": False,
+                    "think": False,
                 },
             )
             resp.raise_for_status()
             data = resp.json()
-            content = data["message"]["content"]
+            content = data["message"]["content"].strip()
+            # Strip markdown code fences the model sometimes wraps output in
+            if content.startswith("```"):
+                content = content.split("\n", 1)[-1]
+                content = content.rsplit("```", 1)[0].strip()
             suggestions = json.loads(content)
             if not isinstance(suggestions, list):
                 suggestions = []

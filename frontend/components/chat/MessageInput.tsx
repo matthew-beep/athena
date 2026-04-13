@@ -98,7 +98,7 @@ export function MessageInput() {
           isOverWarn ? 'border-yellow-500/40' : 'border-border/50'
         )}
       >
-        <div className='w-full flex'>
+        <div className='w-full flex py-1'>
           <textarea
             ref={textareaRef}
             value={text}
