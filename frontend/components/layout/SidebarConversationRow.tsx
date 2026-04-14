@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useRef, useId, useEffect } from 'react';
-import { MessageSquare, EllipsisIcon, Trash } from 'lucide-react';
+import { MessageSquare, EllipsisIcon, Trash, Loader2 } from 'lucide-react';
 import { Menu } from '@/components/ui/Menu';
 import { cn } from '@/utils/cn';
 import type { Conversation } from '@/types';
+import { apiClient } from '@/api/client';
+import { useChatStore } from '@/stores/chat.store';
 
 export function SidebarConversationRow({
   conversation,
@@ -16,7 +18,9 @@ export function SidebarConversationRow({
   onSelect: (conv: Conversation) => void;
 }) {
   const title = conversation.title ?? 'Untitled';
+  const { conversations, setConversations, activeConversationId, setActiveConversation } = useChatStore();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const ellipsisButtonRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
@@ -42,6 +46,24 @@ export function SidebarConversationRow({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [menuOpen]);
 
+
+  const handleDeleteConversation = async () => {
+    setDeleting(true);
+    console.log("deleting conversation", conversation.conversation_id);
+    try {
+      await apiClient.delete(`/chat/conversations/${conversation.conversation_id}`);
+      setConversations(conversations.filter(c => c.conversation_id !== conversation.conversation_id));
+      if (activeConversationId === conversation.conversation_id) {
+        setActiveConversation(null);
+      }
+      setMenuOpen(false);
+    } catch (error) {
+      console.error(error);
+    } 
+    finally {
+      setDeleting(false);
+    }
+  }
   return (
     <div
       className={cn(
@@ -80,9 +102,12 @@ export function SidebarConversationRow({
 
         {menuOpen && (
           <Menu ref={menuRef} id={menuId} className="absolute right-0 top-8 z-50">
-            <Menu.Item onClick={() => setMenuOpen(false)} className='flex items-center justify-between' variant='danger'>
-              Delete
-              <Trash size={12} />
+            <Menu.Item onClick={() => {
+              handleDeleteConversation();
+            }} className='flex items-center justify-between' variant='danger'>
+              <span>Delete</span>
+              {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash size={12} />}
+              
               
             </Menu.Item>
           </Menu>

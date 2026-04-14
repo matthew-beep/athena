@@ -20,7 +20,8 @@ What it isn't yet: proactive. It waits to be asked. The jump from "good RAG chat
 
 #### 1. Delete Conversation
 - [x] **Backend `DELETE /api/chat/conversations/{id}`** — implemented, returns 200 with message
-- [ ] **Frontend wiring** — `SidebarConversationRow` menu has "Delete" item but onClick only closes menu. Wire to API call, remove from store, redirect if active conversation deleted.
+- [x] **Frontend wiring** — implemented, removes from store, clears active if deleted
+- [ ] **Remove and recreate DBs** — cascade constraint exists in schema but DB was created from old schema, needs wipe and recreate
 
 #### 2. Rename Conversation
 - [ ] **Backend `PATCH /api/chat/conversations/{id}`** — update `title` field. Body: `{ "title": str }`.
@@ -127,7 +128,7 @@ What makes Virgil genuinely different from every other RAG chat app. Background 
 
 ## Bugs / Active Issues
 
-- [ ] **Suggestions bar inconsistent** — sometimes shows, sometimes doesn't. Backend strips code fences and has `think: False` but issue persists. Likely the model still returns non-JSON output in some cases. Investigate actual raw `content` from Ollama by logging it before `json.loads()`.
+- ~~**Suggestions bar inconsistent**~~ — root cause: CPU-only Ollama on Mac dev environment. Resolves on Linux build with GPU.
 - [ ] **Muting docs is UI-only** — `mutedIds` in `DocumentBar` never sent to backend.
 - [ ] **Summarization in hot path** — `_generate_and_cache_summary()` can block next request (`core/context.py`). Move to background or add per-conversation lock.
 - [ ] **Storage stats return 0** — NVMe/HDD percentages hardcoded to 0 in `GET /api/system/resources`. Needs Redis cache wired.

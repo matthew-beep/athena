@@ -434,14 +434,29 @@ async def detach_document(
 async def suggest_prompt(body: SuggestionsRequest, current_user: dict = Depends(get_current_user)):
     """Generate follow-up suggestions for a conversation."""
     settings = get_settings()
-    prompt = f"""Given this conversation, generate 3 short follow-up questions or actions the user might want next.
-Return ONLY a JSON array of strings. No explanation, no preamble. Max 8 words each.
+    prompt = f"""You are generating follow-up suggestions for a chat interface.
 
-User said: {body.last_user_message}
-Assistant said: {body.last_assistant_message}"""
+Output EXACTLY this format — a single JSON array with 3 strings, nothing else:
+["suggestion one", "suggestion two", "suggestion three"]
+
+Rules:
+- One array, on one line
+- 3 strings only
+- Max 8 words per string
+- No explanation, no preamble, no markdown, no code fences
+
+Conversation:
+User: {body.last_user_message}
+Assistant: {body.last_assistant_message}
+
+Output:"""
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+
+            logger.debug("user message: {!r}", body.last_user_message)
+            logger.debug("assistant message: {!r}", body.last_assistant_message)
+
             resp = await client.post(
                 f"{settings.ollama_base_url}/api/chat",
                 json={
@@ -452,7 +467,16 @@ Assistant said: {body.last_assistant_message}"""
                 },
             )
             resp.raise_for_status()
+
             data = resp.json()
+            logger.debug("ollama response: {!r}", data)
+
+            
+            logger.info("[suggestions] raw ollama response keys: {}", list(data.keys()))
+            logger.debug("[suggestions] raw message content preview: {!r}", (data.get("message") or {}).get("content", "")[:500])
+
+
+            # i think bug is somewhere here in the content stripping
             content = data["message"]["content"].strip()
             # Strip markdown code fences the model sometimes wraps output in
             if content.startswith("```"):
@@ -464,8 +488,8 @@ Assistant said: {body.last_assistant_message}"""
             return SuggestionsResponse(suggestions=suggestions[:3])
     except (json.JSONDecodeError, KeyError):
         return SuggestionsResponse(suggestions=[])
-    except httpx.TimeoutException:
-        logger.warning("[suggestions] timed out")
+    except httpx.TimeoutException as e:
+        logger.warning("[suggestions] timed out after 30s — {}", type(e).__name__)
         return SuggestionsResponse(suggestions=[])
     except Exception as e:
         logger.error(f"[suggestions] failed: {e}")
