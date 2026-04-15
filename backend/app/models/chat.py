@@ -49,6 +49,10 @@ class MessageOut(BaseModel):
 
 
 
+class RenameConversationRequest(BaseModel):
+    title: str
+
+
 class SuggestionsRequest(BaseModel):
     conversation_id: str
     last_user_message: str

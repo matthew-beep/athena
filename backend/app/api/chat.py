@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-from app.models.chat import BatchAttachRequest, ChatRequest, ConversationOut, MessageOut, SuggestionsRequest, SuggestionsResponse
+from app.models.chat import BatchAttachRequest, ChatRequest, ConversationOut, MessageOut, RenameConversationRequest, SuggestionsRequest, SuggestionsResponse
 from app.core.security import get_current_user
 from app.core.context import build_messages, count_tokens_text, MAX_MESSAGE_TOKENS, save_message, TOTAL_BUDGET
 from app.core import rag as rag_module
@@ -321,6 +321,28 @@ async def list_conversations(
         current_user["id"],
     )
     return [ConversationOut(**dict(r)) for r in rows]
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationOut)
+async def rename_conversation(
+    conversation_id: str,
+    body: RenameConversationRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+    conv = await get_conversation(conversation_id, current_user["id"])
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    await postgres.execute(
+        "UPDATE conversations SET title = $1 WHERE conversation_id = $2 AND user_id = $3",
+        title,
+        conversation_id,
+        current_user["id"],
+    )
+    updated = await get_conversation(conversation_id, current_user["id"])
+    return ConversationOut(**dict(updated))
 
 
 @router.delete("/conversations/{conversation_id}")

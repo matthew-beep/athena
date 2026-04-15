@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useId, useEffect } from 'react';
-import { MessageSquare, EllipsisIcon, Trash, Loader2 } from 'lucide-react';
+import { MessageSquare, EllipsisIcon, Trash, Loader2, Pencil } from 'lucide-react';
 import { Menu } from '@/components/ui/Menu';
 import { cn } from '@/utils/cn';
 import type { Conversation } from '@/types';
@@ -18,9 +18,12 @@ export function SidebarConversationRow({
   onSelect: (conv: Conversation) => void;
 }) {
   const title = conversation.title ?? 'Untitled';
-  const { conversations, setConversations, activeConversationId, setActiveConversation } = useChatStore();
+  const { conversations, setConversations, activeConversationId, setActiveConversation, updateConversationTitle } = useChatStore();
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(title);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const ellipsisButtonRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
@@ -46,6 +49,32 @@ export function SidebarConversationRow({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [menuOpen]);
 
+
+  const handleRenameStart = () => {
+    setRenameValue(title);
+    setMenuOpen(false);
+    setIsRenaming(true);
+    setTimeout(() => {
+      renameInputRef.current?.select();
+    }, 0);
+  };
+
+  const handleRenameCommit = async () => {
+    const trimmed = renameValue.trim();
+    setIsRenaming(false);
+    if (!trimmed || trimmed === title) return;
+    try {
+      await apiClient.patch(`/chat/conversations/${conversation.conversation_id}`, { title: trimmed });
+      updateConversationTitle(conversation.conversation_id, trimmed);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleRenameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') handleRenameCommit();
+    if (e.key === 'Escape') setIsRenaming(false);
+  };
 
   const handleDeleteConversation = async () => {
     setDeleting(true);
@@ -73,14 +102,26 @@ export function SidebarConversationRow({
           : 'text-muted-foreground hover:text-foreground'
       )}
     >
-      <button
-        type="button"
-        onClick={() => onSelect(conversation)}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-left"
-      >
-        <MessageSquare size={11} className="mt-0.5 shrink-0 opacity-50" />
-        <span className="min-w-0 flex-1 truncate leading-tight">{title}</span>
-      </button>
+      {isRenaming ? (
+        <input
+          ref={renameInputRef}
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          onBlur={handleRenameCommit}
+          onKeyDown={handleRenameKeyDown}
+          className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none border-b border-border/50 leading-tight"
+          autoFocus
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => onSelect(conversation)}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-left"
+        >
+          <MessageSquare size={11} className="mt-0.5 shrink-0 opacity-50" />
+          <span className="min-w-0 flex-1 truncate leading-tight">{title}</span>
+        </button>
+      )}
 
       <div className="relative shrink-0">
         <button
@@ -102,13 +143,13 @@ export function SidebarConversationRow({
 
         {menuOpen && (
           <Menu ref={menuRef} id={menuId} className="absolute right-0 top-8 z-50">
-            <Menu.Item onClick={() => {
-              handleDeleteConversation();
-            }} className='flex items-center justify-between' variant='danger'>
+            <Menu.Item onClick={handleRenameStart} className='flex items-center justify-between'>
+              <span>Rename</span>
+              <Pencil size={12} />
+            </Menu.Item>
+            <Menu.Item onClick={handleDeleteConversation} className='flex items-center justify-between' variant='danger'>
               <span>Delete</span>
               {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash size={12} />}
-              
-              
             </Menu.Item>
           </Menu>
         )}
