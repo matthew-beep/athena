@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type KeyboardEvent, useRef } from 'react';
-import { Send, Square, Globe } from 'lucide-react';
+import { Send, Square, Globe, Mic } from 'lucide-react';
 import { useSSEChat } from '@/hooks/useSSEChat';
 import { useChatStore } from '@/stores/chat.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -80,6 +80,10 @@ export function MessageInput() {
     }
   };
 
+  const handleMic = () => {
+    console.log('Mic button clicked');
+  };
+
   const tokenEst = estimateTokens(text);
   const isOverWarn = devMode && tokenEst > WARN_TOKENS;
   const isOverMax = tokenEst > MAX_TOKENS;
@@ -126,27 +130,37 @@ export function MessageInput() {
             <Globe size={14} />
           </button>
 
-          {isStreaming ? (
+          <div className="flex items-center gap-1.5">
             <button
-              onClick={stopStreaming}
-              className="px-3 py-3 rounded-lg text-xs font-semibold transition-all flex-grow-0 flex items-center gap-1.5 bg-foreground text-background hover:bg-foreground/90"
+              onClick={handleMic}
+              title="Use microphone"
+              className="p-1.5 rounded-lg transition-all flex-shrink-0 text-muted-foreground hover:text-foreground hover:bg-[var(--raised-h)]"
             >
-              <Square size={12} />
+              <Mic size={14} />
             </button>
-          ) : (
-            <button
-              onClick={handleSend}
-              disabled={!text.trim() || isOverMax}
-              className={cn(
-                'px-3 py-3 rounded-lg text-xs font-semibold transition-all flex-grow-0 flex items-center gap-1.5',
-                text.trim() && !isOverMax
-                  ? 'bg-foreground text-background hover:bg-foreground/90'
-                  : 'text-muted-foreground cursor-not-allowed bg-foreground'
-              )}
-            >
-              <Send size={12} />
-            </button>
-          )}
+
+            {isStreaming ? (
+              <button
+                onClick={stopStreaming}
+                className="px-3 py-3 rounded-lg text-xs font-semibold transition-all flex-grow-0 flex items-center gap-1.5 bg-foreground text-background hover:bg-foreground/90"
+              >
+                <Square size={12} />
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!text.trim() || isOverMax}
+                className={cn(
+                  'px-3 py-3 rounded-lg text-xs font-semibold transition-all flex-grow-0 flex items-center gap-1.5',
+                  text.trim() && !isOverMax
+                    ? 'bg-foreground text-background hover:bg-foreground/90'
+                    : 'text-muted-foreground cursor-not-allowed bg-foreground'
+                )}
+              >
+                <Send size={12} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

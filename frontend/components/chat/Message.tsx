@@ -9,6 +9,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { Message as MessageType, RagSource } from '@/types';
 import { CitationChip } from './CitationChip';
 import { AthenaMarkdown } from './AthenaMarkdown';
+import { MessageUtilityBar } from './MessageUtilityBar';
 
 interface MessageProps {
   message: MessageType;
@@ -112,7 +113,7 @@ export function Message({ message }: MessageProps) {
         {/* Footer: tier badge + sources toggle */}
         {!isUser && (
           <div className="flex flex-col gap-1 w-full">
-            <p>Message Utility Bar</p>
+            <MessageUtilityBar content={message.content} />
             {hasSources && (
               <SourcesPanel sources={message.rag_sources!} />
             )}
