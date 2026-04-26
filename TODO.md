@@ -24,11 +24,11 @@ What it isn't yet: proactive. It waits to be asked. The jump from "good RAG chat
 - [ ] **Remove and recreate DBs** — cascade constraint exists in schema but DB was created from old schema, needs wipe and recreate
 
 #### 2. Rename Conversation
-- [ ] **Backend `PATCH /api/chat/conversations/{id}`** — update `title` field. Body: `{ "title": str }`.
-- [ ] **Frontend** — inline edit or pencil icon in `SidebarConversationRow`. PATCH on blur/enter, update store.
+- [x] **Backend `PATCH /api/chat/conversations/{id}`** — implemented
+- [x] **Frontend** — inline edit in `SidebarConversationRow`, PATCH on blur/enter, updates store
 
 #### 3. Message Utility Bar
-- [ ] **Per-message action bar** — `Message.tsx` has a placeholder `<p>Message Utility Bar</p>`. Implement: copy raw text to clipboard on hover. Clean icon row, no labels.
+- [x] **Copy button** — copy raw text to clipboard on hover, implemented in `Message.tsx`
 
 #### 4. DocumentBar Rework
 - [ ] **Reconsider DocumentBar purpose** — currently shows attached docs + mute toggles. Decide: show active sources for selected message, act as scoping tool, or both. Decide before building further.
@@ -160,3 +160,6 @@ What makes Virgil genuinely different from every other RAG chat app. Background 
 ~~Chat suggestions — backend endpoint + SuggestionsBar pills~~ ✓
 ~~`isStreaming` keyed per-conversation~~ ✓
 ~~Sidebar conversation list polish (SidebarConversationRow)~~ ✓
+~~Delete conversation — backend + frontend~~ ✓
+~~Rename conversation — backend + frontend inline edit~~ ✓
+~~Message utility bar — copy to clipboard~~ ✓
