@@ -83,7 +83,7 @@ function makeComponents(sources: RagSource[]): React.ComponentProps<typeof React
       if (text.startsWith('__cite:')) {
         const n = parseInt(text.slice(7), 10);
         const source = sources[n - 1];
-        return <CitationChip index={n} text={source?.text ?? ''} />;
+        return <CitationChip index={n} filename={source?.filename} text={source?.text ?? ''} />;
       }
       if (className) return <code>{children}</code>;
       return <code className="md-code">{children}</code>;
@@ -133,7 +133,7 @@ function parseInline(text: string, sources: RagSource[], keyPrefix: string): Inl
     // Citation [N]
     if (v[0] === '[') {
       const n = parseInt(v.slice(1, -1), 10);
-      return <CitationChip key={key} index={n} text={sources[n - 1].text} />;
+      return <CitationChip key={key} index={n} filename={sources[n - 1]?.filename} text={sources[n - 1]?.text ?? ''} />;
     }
 
     // Bold **...**

@@ -637,6 +637,15 @@ button.pill-collection--selected:hover:not(:disabled) {
   50%       { opacity: 1; }
 }
 
+@keyframes tooltipIn {
+  from { opacity: 0; transform: translateY(-92%) scale(0.94); }
+  to   { opacity: 1; transform: translateY(-100%) scale(1); }
+}
+
+.tooltip-enter {
+  animation: tooltipIn 0.15s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
 @keyframes shimmerPulse {
   0%, 100% { opacity: 0.5; }
   50%       { opacity: 1; }

@@ -12,7 +12,7 @@ import { SuggestionsBar } from './SuggestionsBar';
 // keeping MessageList itself out of the per-token render cycle
 function StreamingBubble({ conversationId }: { conversationId: string }) {
   const streamingContent = useChatStore((s) => s.streamingContent[conversationId] ?? '');
-  const streamingSources = useChatStore((s) => s.streamingSources[conversationId] ?? []);
+  const streamingSources = useChatStore(useShallow((s) => s.streamingSources[conversationId] ?? []));
   if (!streamingContent) return null;
   return (
     <div className="animate-fade-up flex gap-3">
@@ -64,7 +64,7 @@ export function MessageList({ conversationId }: MessageListProps) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4 min-h-0 w-full">
+    <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0 w-full">
       {msgs.map((msg) => (
         <div key={msg.message_id} className="animate-fade-up">
           <Message message={msg} />

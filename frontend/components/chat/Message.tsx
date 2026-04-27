@@ -57,7 +57,7 @@ function SourcesPanel({ sources }: { sources: RagSource[] }) {
 
       {sources && (<div className="flex gap-1">
         {sources.map((src, index) => (
-          <CitationChip key={src.filename + (src.chunk_id ?? src.chunk_index)} index={index} text={src.text} />
+          <CitationChip key={src.filename + (src.chunk_id ?? src.chunk_index)} index={index} filename={src.filename} text={src.text} />
         ))}
       </div>)}
 

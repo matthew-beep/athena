@@ -62,7 +62,7 @@ export function ScopeBar() {
   };
 
   return (
-    <div className="px-4 pt-2.5 pb-0 flex items-center gap-1.5 flex-wrap border-t border-border/20">
+    <div className="px-4 pt-2.5 pb-0 flex items-center gap-1.5 flex-wrap w-full">
       {hasDocs && !isSearchAll ? (
         docs.map((doc) => (
           <span
