@@ -12,12 +12,13 @@ import { SuggestionsBar } from './SuggestionsBar';
 // keeping MessageList itself out of the per-token render cycle
 function StreamingBubble({ conversationId }: { conversationId: string }) {
   const streamingContent = useChatStore((s) => s.streamingContent[conversationId] ?? '');
+  const streamingSources = useChatStore((s) => s.streamingSources[conversationId] ?? []);
   if (!streamingContent) return null;
   return (
     <div className="animate-fade-up flex gap-3">
       <div className="msg-ai min-w-0">
         <div className="message-content">
-          <StreamingMarkdown content={streamingContent} />
+          <StreamingMarkdown content={streamingContent} sources={streamingSources} />
         </div>
       </div>
     </div>

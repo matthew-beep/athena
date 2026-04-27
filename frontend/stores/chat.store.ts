@@ -79,6 +79,10 @@ interface ChatState {
   conversationSuggestions: Record<string, { suggestions: string[]; loading: boolean }>;
   setConversationSuggestions: (conversationId: string, suggestions: string[]) => void;
   setConversationSuggestionsLoading: (conversationId: string, loading: boolean) => void;
+
+  /** RAG sources received before first token — available during streaming */
+  streamingSources: Record<string, RagSource[]>;
+  setStreamingSources: (convId: string, sources: RagSource[]) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -206,4 +210,8 @@ export const useChatStore = create<ChatState>((set) => ({
         [conversationId]: { suggestions: s.conversationSuggestions[conversationId]?.suggestions ?? [], loading },
       },
     })),
+
+  streamingSources: {},
+  setStreamingSources: (convId, sources) =>
+    set((s) => ({ streamingSources: { ...s.streamingSources, [convId]: sources } })),
 }));

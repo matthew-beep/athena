@@ -31,10 +31,11 @@ What it isn't yet: proactive. It waits to be asked. The jump from "good RAG chat
 - [x] **Copy button** — copy raw text to clipboard on hover, implemented in `Message.tsx`
 
 #### 4. DocumentBar Rework
-- [ ] **Reconsider DocumentBar purpose** — currently shows attached docs + mute toggles. Decide: show active sources for selected message, act as scoping tool, or both. Decide before building further.
+- [ ] **Reconsider DocumentBar purpose** — hidden for now (button + panel commented out in `ChatWindow.tsx`). Decide: show active sources for selected message, act as scoping tool, or both. Decide before building further.
 
 #### 5. Emit `rag_sources` Before First Token
-- [ ] **Backend** — currently `rag_sources` sent in the `done` event. Emit a `sources` SSE event before first token instead. Update `useSSEChat` to handle `sources` event type.
+- [x] **Backend** — emits `sources` SSE event before first token, `done` reuses serialized data
+- [x] **Frontend** — `useSSEChat` handles `sources` event, stores in `streamingSources`. Citation chips render during streaming via remark plugin.
 
 #### 6. Model + System Stats — Move to Conversation Header
 - [ ] **Remove stats from footer** — move model info and key system stats to top of conversation view.

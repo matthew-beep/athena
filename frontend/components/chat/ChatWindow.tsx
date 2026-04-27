@@ -46,21 +46,7 @@ export function ChatWindow() {
     <div className='w-full h-full flex flex-col min-h-0 p-3 gap-3 relative'>
       <div className="flex-shrink-0 flex justify-between items-center">
         <h1>{title}</h1>
-        <button 
-        onClick={() => {
-
-          if (contextPanelOpen) {
-            setContextPanelOpen(false); 
-            setSidebarCollapsed(false);
-          } else {
-            setContextPanelOpen(true); 
-            setSidebarCollapsed(true);
-          }
-        }} 
-        className="flex items-center justify-center w-8 h-8 rounded-lg border-border/50"
-        >
-          {contextPanelOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
-        </button>
+        {/* DocumentBar toggle hidden — pending rework */}
       </div>
       <div className="flex-1 min-h-0 w-full flex gap-5 justify-center">
         <div className="flex-1 min-h-0 min-w-0 flex flex-col items-center animate-scale-in rounded-lg max-w-3xl">
@@ -68,9 +54,7 @@ export function ChatWindow() {
           <ScopeBar />
           <MessageInput />
         </div>
-        {contextPanelOpen && (
-          <DocumentBar />
-        )}
+        {/* DocumentBar hidden — pending rework */}
       </div>
       <CommandPalette
         open={commandPaletteOpen}

@@ -3,17 +3,102 @@
 import React, { useMemo, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { visit } from 'unist-util-visit';
+import type { Root, Text, Parent } from 'mdast';
 import type { Element as HastElement } from 'hast';
 import type { RagSource } from '@/types';
+import { CitationChip } from './CitationChip';
 
 /** hast nodes often have `parent` at runtime; unist types omit it. */
 type HastElementWithParent = HastElement & { parent?: HastElement };
-import { CitationChip } from './CitationChip';
-// ─── Citation Chip ────────────────────────────────────────────────────────────
+// ─── Remark Citation Plugin ──────────────────────────────────────────────────
+// Transforms [N] text nodes into inlineCode nodes with a __cite: prefix
+// so the code component renderer can intercept and render CitationChip.
 
+function remarkCitations() {
+  return (tree: Root) => {
+    visit(tree, 'text', (node: Text, index: number | undefined, parent: Parent | undefined) => {
+      if (!parent || index === undefined) return;
+      if (!/\[\d+\]/.test(node.value)) return;
 
+      const pattern = /\[(\d+)\]/g;
+      const newNodes: any[] = [];
+      let last = 0;
+      let match: RegExpExecArray | null;
 
-// ─── Inline Parser ────────────────────────────────────────────────────────────
+      while ((match = pattern.exec(node.value)) !== null) {
+        if (match.index > last) {
+          newNodes.push({ type: 'text', value: node.value.slice(last, match.index) });
+        }
+        newNodes.push({ type: 'inlineCode', value: `__cite:${match[1]}` });
+        last = match.index + match[0].length;
+      }
+
+      if (last < node.value.length) {
+        newNodes.push({ type: 'text', value: node.value.slice(last) });
+      }
+
+      (parent.children as any[]).splice(index, 1, ...newNodes);
+    });
+  };
+}
+
+// ─── Shared ReactMarkdown Components ─────────────────────────────────────────
+
+function makeComponents(sources: RagSource[]): React.ComponentProps<typeof ReactMarkdown>['components'] {
+  return {
+    p:          ({ children }) => <p className="md-p">{children}</p>,
+    h1:         ({ children }) => <h1 className="md-h1">{children}</h1>,
+    h2:         ({ children }) => <h2 className="md-h2">{children}</h2>,
+    h3:         ({ children }) => <h3 className="md-h3">{children}</h3>,
+    ul:         ({ children }) => <ul className="md-ul">{children}</ul>,
+    ol:         ({ children }) => <ol className="md-ol">{children}</ol>,
+    li: ({ children, node }) => {
+      const liNode = node as HastElementWithParent | undefined;
+      const parent = liNode?.parent;
+      const isOrdered = parent?.tagName === 'ol';
+      if (isOrdered && parent && liNode) {
+        const siblings = parent.children.filter((n): n is HastElement => n.type === 'element');
+        const index = siblings.indexOf(liNode) + 1;
+        return (
+          <li className="md-li-ordered">
+            <span className="md-li-num">{index}.</span>
+            <span>{children}</span>
+          </li>
+        );
+      }
+      return (
+        <li className="md-li-bullet">
+          <span className="md-li-dot">●</span>
+          <span>{children}</span>
+        </li>
+      );
+    },
+    blockquote: ({ children }) => <blockquote className="md-blockquote">{children}</blockquote>,
+    hr:         () => <hr className="md-hr" />,
+    strong:     ({ children }) => <strong className="md-strong">{children}</strong>,
+    em:         ({ children }) => <em className="md-em">{children}</em>,
+    code: ({ children, className }) => {
+      const text = String(children);
+      if (text.startsWith('__cite:')) {
+        const n = parseInt(text.slice(7), 10);
+        const source = sources[n - 1];
+        return <CitationChip index={n} text={source?.text ?? ''} />;
+      }
+      if (className) return <code>{children}</code>;
+      return <code className="md-code">{children}</code>;
+    },
+    pre: ({ children }) => (
+      <div className="md-pre-wrap">
+        <pre className="md-pre">{children}</pre>
+      </div>
+    ),
+  };
+}
+
+// ─── Citation Chip (legacy reference kept) ───────────────────────────────────
+
+// ─── Inline Parser (kept for fallback) ───────────────────────────────────────
 
 type InlineNode = React.ReactNode;
 
@@ -228,10 +313,13 @@ interface AthenaMarkdownProps {
 }
 
 export function AthenaMarkdown({ content, sources = [] }: AthenaMarkdownProps) {
+  const components = useMemo(() => makeComponents(sources), [sources]);
   if (!content) return null;
   return (
     <div className="md-root">
-      {parseBlocks(content, sources)}
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkCitations]} components={components}>
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -282,68 +370,26 @@ function splitIntoBlocks(markdown: string): string[] {
 
 // ─── Memoized Block ───────────────────────────────────────────────────────────
 
-const streamingComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
-  p:          ({ children }) => <p className="md-p">{children}</p>,
-  h1:         ({ children }) => <h1 className="md-h1">{children}</h1>,
-  h2:         ({ children }) => <h2 className="md-h2">{children}</h2>,
-  h3:         ({ children }) => <h3 className="md-h3">{children}</h3>,
-  ul:         ({ children }) => <ul className="md-ul">{children}</ul>,
-  ol:         ({ children }) => <ol className="md-ol">{children}</ol>,
-  li: ({ children, node }) => {
-    const liNode = node as HastElementWithParent | undefined;
-    const parent = liNode?.parent;
-    const isOrdered = parent?.tagName === 'ol';
-    if (isOrdered && parent && liNode) {
-      const siblings = parent.children.filter((n): n is HastElement => n.type === 'element');
-      const index = siblings.indexOf(liNode) + 1;
-      return (
-        <li className="md-li-ordered">
-          <span className="md-li-num">{index}.</span>
-          <span>{children}</span>
-        </li>
-      );
-    }
-    return (
-      <li className="md-li-bullet">
-        <span className="md-li-dot">●</span>
-        <span>{children}</span>
-      </li>
-    );
-  },
-  blockquote: ({ children }) => <blockquote className="md-blockquote">{children}</blockquote>,
-  hr:         () => <hr className="md-hr" />,
-  strong:     ({ children }) => <strong className="md-strong">{children}</strong>,
-  em:         ({ children }) => <em className="md-em">{children}</em>,
-  code: ({ children, className }) => {
-    if (className) return <code>{children}</code>;
-    return <code className="md-code">{children}</code>;
-  },
-  pre: ({ children }) => (
-    <div className="md-pre-wrap">
-      <pre className="md-pre">{children}</pre>
-    </div>
-  ),
-};
-
 const MemoBlock = memo(
-  ({ content }: { content: string }) => (
+  ({ content, components }: { content: string; components: React.ComponentProps<typeof ReactMarkdown>['components'] }) => (
     <div className="md-root">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={streamingComponents}>{content}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkCitations]} components={components}>{content}</ReactMarkdown>
     </div>
   ),
-  (prev, next) => prev.content === next.content,
+  (prev, next) => prev.content === next.content && prev.components === next.components,
 );
 
 // ─── Streaming Markdown ───────────────────────────────────────────────────────
 
-export function StreamingMarkdown({ content }: { content: string }) {
+export function StreamingMarkdown({ content, sources = [] }: { content: string; sources?: RagSource[] }) {
   const repaired = useMemo(() => repairMarkdown(content), [content]);
   const blocks = useMemo(() => splitIntoBlocks(repaired), [repaired]);
+  const components = useMemo(() => makeComponents(sources), [sources]);
 
   return (
     <div className="space-y-1">
       {blocks.map((block, i) => (
-        <MemoBlock key={`block-${i}`} content={block} />
+        <MemoBlock key={`block-${i}`} content={block} components={components} />
       ))}
     </div>
   );

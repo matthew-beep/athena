@@ -189,6 +189,22 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
         t1 = time.monotonic()
         logger.debug("[timing] rag={}ms", int((t1 - t0) * 1000))
 
+        serialized_sources = [
+            {
+                "chunk_id": s.get("chunk_id"),
+                "filename": s["filename"],
+                "score": s["score"],
+                "score_type": s.get("score_type", "vector"),
+                "vector_score": s.get("vector_score", 0.0),
+                "bm25_score": s.get("bm25_score", 0.0),
+                "chunk_index": s["chunk_index"],
+                "document_id": s["document_id"],
+                "text": s["text"],
+            }
+            for s in rag_sources
+        ]
+        yield f"data: {json.dumps({'type': 'sources', 'rag_sources': serialized_sources})}\n\n"
+
         try:
             chat_messages, will_summarize, total_tokens = await build_messages(
                 conversation_id=conversation_id,
@@ -279,20 +295,7 @@ async def chat(body: ChatRequest, current_user: dict = Depends(get_current_user)
             "model_tier": 1,
             "model": model,
             "latency_ms": latency_ms,
-            "rag_sources": [
-                {
-                    "chunk_id": s.get("chunk_id"),
-                    "filename": s["filename"],
-                    "score": s["score"],
-                    "score_type": s.get("score_type", "vector"),
-                    "vector_score": s.get("vector_score", 0.0),
-                    "bm25_score": s.get("bm25_score", 0.0),
-                    "chunk_index": s["chunk_index"],
-                    "document_id": s["document_id"],
-                    "text": s["text"],
-                }
-                for s in rag_sources
-            ],
+            "rag_sources": serialized_sources,
         }
         yield f"data: {json.dumps(done_event)}\n\n"
 

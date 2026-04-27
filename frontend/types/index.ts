@@ -88,12 +88,18 @@ export interface StreamContextDebug {
   budget: number;
 }
 
+export interface StreamSources {
+  type: 'sources';
+  rag_sources: RagSource[];
+}
+
 export type StreamEvent =
   | StreamToken
   | StreamDone
   | StreamError
   | StreamStatus
-  | StreamContextDebug;
+  | StreamContextDebug
+  | StreamSources;
 
 export interface ResourceStats {
   cpu_pct: number;

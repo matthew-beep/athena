@@ -4,7 +4,7 @@ import { useCallback, useRef } from 'react';
 import { useChatStore } from '@/stores/chat.store';
 import { useSystemStore } from '@/stores/system.store';
 import { apiClient } from '@/api/client';
-import type { StreamEvent, Message, Conversation, SuggestionsRequest, SuggestionsResponse } from '@/types';
+import type { StreamEvent, Message, Conversation, SuggestionsRequest, SuggestionsResponse, RagSource } from '@/types';
 
 export function useSSEChat() {
   const requestStartTime = useRef(0);
@@ -99,6 +99,7 @@ export function useSSEChat() {
 
         const decoder = new TextDecoder();
         let buffer = '';
+        let pendingSources: RagSource[] = [];
 
         while (true) {
           const { done, value } = await reader.read();
@@ -179,7 +180,7 @@ export function useSSEChat() {
                   content: useChatStore.getState().streamingContent[tempConvId] ?? '',
                   model_used: event.model,
                   timestamp: new Date().toISOString(),
-                  rag_sources: event.rag_sources,
+                  rag_sources: pendingSources,
                 };
 
                 if (isNewConversation) {
@@ -217,6 +218,10 @@ export function useSSEChat() {
                   .catch(() => {
                     useChatStore.getState().setConversationSuggestionsLoading(realId, false);
                   });
+
+              } else if (event.type === 'sources') {
+                pendingSources = event.rag_sources ?? [];
+                useChatStore.getState().setStreamingSources(tempConvId, pendingSources);
 
               } else if (event.type === 'error') {
                 console.error('Stream error:', event.content);
