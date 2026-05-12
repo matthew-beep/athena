@@ -4,7 +4,7 @@ from app.config import get_settings
 settings = get_settings()
 
 celery_app = Celery(
-    "athena",
+    "virgil",
     broker=settings.redis_url,
     backend=settings.redis_url,
 )

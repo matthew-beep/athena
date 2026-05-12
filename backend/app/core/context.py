@@ -229,7 +229,7 @@ def _build_rag_system_prompt(rag_context: str) -> str:
     answers only from the provided excerpts and cites as [1], [2], etc.
     """
     instructions = (
-        "You are Athena, a personal AI assistant helping the user learn and build.\n\n"
+        "You are Virgil, a personal AI assistant helping the user learn and build.\n\n"
         "The following excerpts are from the user's documents. Use them as the **only** "
         "source for your answer. Do not use your internal or training knowledge to answer.\n\n"
         "Rules:\n"
@@ -244,7 +244,7 @@ def _build_rag_system_prompt(rag_context: str) -> str:
 
 def build_system_prompt(rag_context: str | None = None) -> str:
     base = (
-        "You are Athena, a personal AI assistant. "
+        "You are Virgil, a personal AI assistant. "
         "You help the user learn, research, and build. "
         "Be concise, precise, and adapt your explanation depth to the conversation."
         "If all scores are less than 60%, say you don't have enough information to answer the question."

@@ -86,7 +86,7 @@ export function SystemFooter({ className }: { className?: string }) {
 
         <div className="flex items-center gap-2">
           <div className="status-online" />
-          <span className="font-mono text-[10px] text-muted-foreground">Athena v0.2.0</span>
+          <span className="font-mono text-[10px] text-muted-foreground">Virgil v0.2.0</span>
         </div>
       </div>
     </div>

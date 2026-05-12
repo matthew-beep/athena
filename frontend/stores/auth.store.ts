@@ -24,7 +24,7 @@ export const useAuthStore = create<AuthState>()(
         set({ token: null, user: null, isAuthenticated: false }),
     }),
     {
-      name: 'athena-auth',
+      name: 'virgil-auth',
       partialize: (state) => ({ token: state.token, user: state.user }),
       onRehydrateStorage: () => (state) => {
         if (state?.token) {

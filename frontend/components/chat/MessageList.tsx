@@ -5,7 +5,7 @@ import { Message } from './Message';
 import { useChatStore } from '@/stores/chat.store';
 import { useShallow } from 'zustand/react/shallow';
 import type { Message as MessageType } from '@/types';
-import { StreamingMarkdown } from './AthenaMarkdown';
+import { StreamingMarkdown } from './VirgilMarkdown';
 import { SuggestionsBar } from './SuggestionsBar';
 
 // Isolated component — only re-renders when streamingContent changes,
@@ -55,7 +55,7 @@ export function MessageList({ conversationId }: MessageListProps) {
             <span className="text-2xl font-bold font-display text-foreground/30">A</span>
           </div>
           <h2 className="text-base font-display font-semibold mb-1 tracking-tight">
-            Ask Athena anything
+            Ask Virgil anything
           </h2>
           <p className="text-sm text-muted-foreground">Start a conversation below</p>
         </div>

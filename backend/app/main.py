@@ -11,7 +11,7 @@ from app.config import get_settings
 from app.db import postgres
 from app.db import qdrant
 from app.core.security import hash_password
-from app.api import auth, chat, documents, research, quizzes, graph, system, collections
+from app.api import auth, chat, documents, research, quizzes, graph, system, collections, projects
 
 
 async def seed_admin_user() -> None:
@@ -33,7 +33,7 @@ async def seed_admin_user() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting Athena backend...")
+    logger.info("Starting Virgil backend...")
     settings = get_settings()
     logger.info(
         f"Connecting to PostgreSQL at {settings.postgres_host}:{settings.postgres_port}"
@@ -80,17 +80,17 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Model warmup failed (will load on first request): {e}")
         
 
-    logger.info("Athena backend ready")
+    logger.info("Virgil backend ready")
     yield
 
     await postgres.close_pool()
-    logger.info("Athena backend shut down")
+    logger.info("Virgil backend shut down")
 
 
 app = FastAPI(
-    title="Athena API",
+    title="Virgil API",
     version="0.1.0",
-    description="Athena personal AI infrastructure — Phase 1 prototype",
+    description="Virgil personal AI infrastructure",
     lifespan=lifespan,
 )
 
@@ -119,8 +119,9 @@ app.include_router(quizzes.router)
 app.include_router(graph.router)
 app.include_router(system.router)
 app.include_router(collections.router)
+app.include_router(projects.router)
 
 
 @app.get("/")
 async def root():
-    return {"message": "Athena API", "version": "0.1.0", "docs": "/docs"}
+    return {"message": "Virgil API", "version": "0.1.0", "docs": "/docs"}

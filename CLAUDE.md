@@ -1,4 +1,4 @@
-# Athena — Claude Code Context Document
+# Virgil — Claude Code Context Document
 ## For AI Agent Reference
 *Read this document in full before touching any code.*
 
@@ -6,20 +6,20 @@
 
 ## What This Project Is
 
-**Athena is a proactive personal operating system.** It is not a chatbot. The organizing primitive is not a conversation — it is a **Project**.
+**Virgil is a proactive personal operating system.** It is not a chatbot. The organizing primitive is not a conversation — it is a **Project**.
 
-You define goals. Athena works on them in the background, keeps its context current with real fetched data, and surfaces findings when your input is actually needed. Chat exists but is demoted — it is a tool for refining goals or asking follow-ups, not the primary mode of work.
+You define goals. Virgil works on them in the background, keeps its context current with real fetched data, and surfaces findings when your input is actually needed. Chat exists but is demoted — it is a tool for refining goals or asking follow-ups, not the primary mode of work.
 
-The core shift: most AI tools are reactive and stateless. They wait to be asked. Athena is push-based and persistent. It works while you're doing other things.
+The core shift: most AI tools are reactive and stateless. They wait to be asked. Virgil is push-based and persistent. It works while you're doing other things.
 
-**What "backed by real data" means here:** every meaningful claim traces to a source fetched at research time, not recalled from training. When data is uncertain, Athena says so. You can see exactly where any piece of information came from.
+**What "backed by real data" means here:** every meaningful claim traces to a source fetched at research time, not recalled from training. When data is uncertain, Virgil says so. You can see exactly where any piece of information came from.
 
 ---
 
 ## Repository Structure
 
 ```
-athena/
+virgil/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                  # FastAPI app entry point
@@ -95,7 +95,7 @@ athena/
 
 ### Three-Tier LLM Architecture
 
-Athena uses three model tiers via Ollama. Never deviate from this without explicit instruction:
+Virgil uses three model tiers via Ollama. Never deviate from this without explicit instruction:
 
 | Tier | Model | Quantization | VRAM | RAM | Speed | When to Use |
 |------|-------|-------------|------|-----|-------|-------------|
@@ -128,15 +128,15 @@ Storage:
 ## Core Concepts
 
 ### Projects
-A project is a goal with context, constraints, and active tasks attached. The user defines what they're trying to accomplish. Athena figures out what to track, research, and monitor.
+A project is a goal with context, constraints, and active tasks attached. The user defines what they're trying to accomplish. Virgil figures out what to track, research, and monitor.
 
 Projects are the organizing primitive. **All research sessions, documents, and background tasks are scoped to a project.** Nothing meaningful exists globally — it belongs to a project.
 
 ### Background Tasks
-Tasks are things Athena runs without being asked — web research, source aggregation, monitoring. Defined per-project, scheduled via Celery beat. Task types: `research`, `monitor`, `aggregate`.
+Tasks are things Virgil runs without being asked — web research, source aggregation, monitoring. Defined per-project, scheduled via Celery beat. Task types: `research`, `monitor`, `aggregate`.
 
 ### Surfaces
-A surface is a moment where Athena brings something to the user's attention because a decision or review is needed. Not a notification feed — a specific, actionable item. High signal, low noise. Surface types: `finding`, `decision`, `update`.
+A surface is a moment where Virgil brings something to the user's attention because a decision or review is needed. Not a notification feed — a specific, actionable item. High signal, low noise. Surface types: `finding`, `decision`, `update`.
 
 ### Profile
 A behavioral model that compounds over time from project activity. Domains, preferences, constraints, working style. Reduces the steering required from the user over time.
@@ -309,7 +309,7 @@ CREATE TABLE research_sessions (
 
 ### Qdrant
 
-One collection: `athena_knowledge`
+One collection: `virgil_knowledge`
 
 ```python
 VectorParams(size=768, distance=Distance.COSINE)
@@ -525,17 +525,17 @@ Stage 5: Knowledge Ingestion
 All paths are environment-variable driven. Never hardcode paths.
 
 ```bash
-ATHENA_HOT_BASE=/mnt/data/athena
-QDRANT_STORAGE_PATH=${ATHENA_HOT_BASE}/qdrant_storage
-POSTGRES_DATA_PATH=${ATHENA_HOT_BASE}/postgres_data
-OLLAMA_MODELS_PATH=${ATHENA_HOT_BASE}/models
-REDIS_DATA_PATH=${ATHENA_HOT_BASE}/redis_data
+VIRGIL_HOT_BASE=/mnt/data/virgil
+QDRANT_STORAGE_PATH=${VIRGIL_HOT_BASE}/qdrant_storage
+POSTGRES_DATA_PATH=${VIRGIL_HOT_BASE}/postgres_data
+OLLAMA_MODELS_PATH=${VIRGIL_HOT_BASE}/models
+REDIS_DATA_PATH=${VIRGIL_HOT_BASE}/redis_data
 
-ATHENA_BULK_BASE=/mnt/storage/athena
-UPLOADS_PATH=${ATHENA_BULK_BASE}/uploads
-PROCESSED_PATH=${ATHENA_BULK_BASE}/processed
-RESEARCH_ARCHIVE_PATH=${ATHENA_BULK_BASE}/research_archives
-BACKUP_PATH=${ATHENA_BULK_BASE}/backups
+VIRGIL_BULK_BASE=/mnt/storage/virgil
+UPLOADS_PATH=${VIRGIL_BULK_BASE}/uploads
+PROCESSED_PATH=${VIRGIL_BULK_BASE}/processed
+RESEARCH_ARCHIVE_PATH=${VIRGIL_BULK_BASE}/research_archives
+BACKUP_PATH=${VIRGIL_BULK_BASE}/backups
 ```
 
 Storage stats are always cached — never computed on request. Celery beat refreshes every 5 minutes, result stored in Redis.
@@ -571,7 +571,7 @@ CELERYBEAT_SCHEDULE = {
 
 ## MCP Integration
 
-MCP servers are optional. Core Athena must work without any MCP connections.
+MCP servers are optional. Core Virgil must work without any MCP connections.
 
 ```python
 class MCPServer:
@@ -628,8 +628,8 @@ NVMe [████░░] 7%    HDD [███░░░░] 16%    CPU 12%    GP
 ```bash
 # Database
 DB_PASSWORD=changeme
-POSTGRES_DB=athena
-POSTGRES_USER=athena
+POSTGRES_DB=virgil
+POSTGRES_USER=virgil
 
 # Service hosts (internal Docker network names)
 OLLAMA_HOST=ollama
@@ -638,8 +638,8 @@ REDIS_HOST=redis
 POSTGRES_HOST=postgres
 
 # Storage paths
-ATHENA_HOT_BASE=/mnt/data/athena
-ATHENA_BULK_BASE=/mnt/storage/athena
+VIRGIL_HOT_BASE=/mnt/data/virgil
+VIRGIL_BULK_BASE=/mnt/storage/virgil
 
 # Optional external services
 SERP_API_KEY=                    # leave empty to disable web search
@@ -749,7 +749,7 @@ Do not implement any of the following until explicitly instructed:
 - **Model fine-tuning**
 - **Collaborative features**
 - **Email or push notifications**
-- **Athena as an MCP server**
+- **Virgil as an MCP server**
 
 ---
 

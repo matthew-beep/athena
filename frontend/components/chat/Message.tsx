@@ -8,7 +8,7 @@ import { apiClient } from '@/api/client';
 import { useShallow } from 'zustand/react/shallow';
 import type { Message as MessageType, RagSource } from '@/types';
 import { CitationChip } from './CitationChip';
-import { AthenaMarkdown } from './AthenaMarkdown';
+import { VirgilMarkdown } from './VirgilMarkdown';
 import { MessageUtilityBar } from './MessageUtilityBar';
 
 interface MessageProps {
@@ -104,7 +104,7 @@ export function Message({ message }: MessageProps) {
           ) : (
             <div className={`message-content`}>
               <div>
-                <AthenaMarkdown content={message.content} sources={message.rag_sources ?? []} />
+                <VirgilMarkdown content={message.content} sources={message.rag_sources ?? []} />
               </div>
             </div>
           )}

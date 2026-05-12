@@ -22,6 +22,6 @@ export const useThemeStore = create<ThemeState>()(
       toggleColorMode: () =>
         set({ colorMode: get().colorMode === 'dark' ? 'light' : 'dark' }),
     }),
-    { name: 'athena-theme' }
+    { name: 'virgil-theme' }
   )
 );

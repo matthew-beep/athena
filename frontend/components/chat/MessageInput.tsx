@@ -109,7 +109,7 @@ export function MessageInput() {
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             onInput={handleInput}
-            placeholder="Message Athena… (Enter to send, Shift+Enter for new line)"
+            placeholder="Message Virgil… (Enter to send, Shift+Enter for new line)"
             className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground min-h-[24px] max-h-[200px]"
             rows={1}
             disabled={isStreaming}

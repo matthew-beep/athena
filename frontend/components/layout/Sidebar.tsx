@@ -7,16 +7,12 @@ import {
   PlusCircle,
   Plus,
   MessageSquare,
-  Search,
-  Network,
-  BookOpen,
   FileText,
   Settings,
   LogOut,
-  ChevronLeft,
   X,
   PanelLeft,
-  Home,
+  LayoutGrid,
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chat.store';
 import { useAuthStore } from '@/stores/auth.store';
@@ -27,12 +23,9 @@ import { SidebarConversationRow } from '@/components/layout/SidebarConversationR
 import type { Conversation, Message } from '@/types';
 
 const NAV_ITEMS = [
-  { href: '/', label: 'Home', icon: Home },
+  { href: '/', label: 'Projects', icon: LayoutGrid },
   { href: '/chat', label: 'Chat', icon: MessageSquare },
-  { href: '/research', label: 'Research', icon: Search },
-  { href: '/graph', label: 'Knowledge', icon: Network },
-  { href: '/quizzes', label: 'Quizzes', icon: BookOpen },
-  { href: '/documents', label: 'Documents', icon: FileText },
+  { href: '/documents', label: 'Library', icon: FileText },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -104,9 +97,9 @@ function SidebarContent({ collapsed, isMobileDrawer, onClose }: SidebarContentPr
         {!collapsed && (
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-lg bg-foreground/10 border border-foreground/20 flex items-center justify-center flex-shrink-0">
-              <span className="text-foreground text-xs font-bold font-display">A</span>
+              <span className="text-foreground text-xs font-bold font-display">V</span>
             </div>
-            <span className="font-display font-semibold text-sm tracking-tight">Athena</span>
+            <span className="font-display font-semibold text-sm tracking-tight">Virgil</span>
           </div>
 
           )}

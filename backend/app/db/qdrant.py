@@ -6,13 +6,13 @@ import httpx
 from loguru import logger
 from app.config import get_settings
 
-COLLECTION = "athena_knowledge"
+COLLECTION = "virgil_knowledge"
 # nomic-embed-text produces 768-dimensional vectors (spec says 384, actual is 768)
 VECTOR_SIZE = 768
 
 
 async def ensure_collection() -> None:
-    """Create the athena_knowledge collection if it doesn't already exist."""
+    """Create the virgil_knowledge collection if it doesn't already exist."""
     settings = get_settings()
     base = settings.qdrant_base_url
 

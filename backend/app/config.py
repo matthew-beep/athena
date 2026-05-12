@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     # Database
     postgres_host: str = "localhost"
     postgres_port: int = 5432
-    postgres_db: str = "athena"
-    postgres_user: str = "athena"
+    postgres_db: str = "virgil"
+    postgres_user: str = "virgil"
     db_password: str = "changeme"
 
     # Ollama
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
 
     # App
     log_level: str = "INFO"
-    seed_admin_password: str = "athena"
+    seed_admin_password: str = "virgil"
 
     # RAG
     rag_top_k: int = 6

@@ -68,9 +68,9 @@ export function LoginPage() {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="w-12 h-12 mx-auto mb-4 rounded-2xl bg-foreground/10 border border-foreground/20 flex items-center justify-center">
-            <span className="text-2xl font-bold font-display text-foreground">A</span>
+            <span className="text-2xl font-bold font-display text-foreground">V</span>
           </div>
-          <h1 className="text-xl font-display font-bold tracking-tight">Athena</h1>
+          <h1 className="text-xl font-display font-bold tracking-tight">Virgil</h1>
           <p className="text-xs text-muted-foreground mt-1 font-mono">
             Personal AI Infrastructure
           </p>
@@ -115,7 +115,7 @@ export function LoginPage() {
         </GlassCard>
 
         <p className="text-center text-xs text-muted-foreground/50 font-mono mt-4">
-          admin / athena
+          admin / virgil
         </p>
       </div>
     </div>

@@ -3,7 +3,7 @@ import './globals.css';
 import { ThemeProvider } from '@/components/layout/ThemeProvider';
 
 export const metadata: Metadata = {
-  title: 'Athena',
+  title: 'Virgil',
   description: 'Personal AI Infrastructure',
 };
 

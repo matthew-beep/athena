@@ -307,12 +307,12 @@ function parseBlocks(markdown: string, sources: RagSource[]): React.ReactNode[] 
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-interface AthenaMarkdownProps {
+interface VirgilMarkdownProps {
   content: string;
   sources?: RagSource[];
 }
 
-export function AthenaMarkdown({ content, sources = [] }: AthenaMarkdownProps) {
+export function VirgilMarkdown({ content, sources = [] }: VirgilMarkdownProps) {
   const components = useMemo(() => makeComponents(sources), [sources]);
   if (!content) return null;
   return (

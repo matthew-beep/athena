@@ -28,7 +28,7 @@ export const useUIStore = create<UIState>()(
       toggleDevMode: () => set((s) => ({ devMode: !s.devMode })),
     }),
     {
-      name: 'athena-ui',
+      name: 'virgil-ui',
       partialize: (s) => ({ devMode: s.devMode, sidebarCollapsed: s.sidebarCollapsed }),
     }
   )
